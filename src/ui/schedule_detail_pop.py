@@ -179,6 +179,18 @@ class ScheduleDetailPop(QWidget):
         # === 顶部控制栏 (标题 + 输入框切换) ===
         top_row = QHBoxLayout()
         top_row.setContentsMargins(0, 0, 60, 0)
+        top_row.setSpacing(3) 
+
+        # 如果是从“待办看板”打开的弹窗，加一个便签图标以示区分
+        if self.source_view == "todo_board":
+            self.lbl_source_icon = QLabel()
+            self.lbl_source_icon.setFixedSize(24, 24)
+            pix = self._get_icon("stick_view.svg", "#FFFFFF", 20)
+            if not pix.isNull():
+                self.lbl_source_icon.setPixmap(pix)
+            self.lbl_source_icon.setStyleSheet("margin-top: 5px; background: transparent;")
+            self.lbl_source_icon.setToolTip("待办看板 - 便签模式")
+            top_row.addWidget(self.lbl_source_icon, 0, Qt.AlignmentFlag.AlignTop)
 
         # 标题显示标签
         self.lbl_title = QLabel(self.data.title)

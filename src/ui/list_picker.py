@@ -142,9 +142,9 @@ class ListPickerView(QWidget):
         layout.setSpacing(0)
 
         # 1. 标题栏
-        header_container = QWidget()
-        header_container.setFixedHeight(60)
-        header_layout = QHBoxLayout(header_container)
+        self.header_container = QWidget() 
+        self.header_container.setFixedHeight(60)
+        header_layout = QHBoxLayout(self.header_container)
         header_layout.setContentsMargins(30, 10, 30, 0)
         self.lbl_title = QLabel("选择清单")
         self.lbl_title.setStyleSheet("""
@@ -155,13 +155,14 @@ class ListPickerView(QWidget):
         """)
         header_layout.addWidget(self.lbl_title)
         header_layout.addStretch()
-        layout.addWidget(header_container)
+        layout.addWidget(self.header_container)
 
         # 2. 内容区
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setStyleSheet("background: transparent; border: none;")
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         
         self.content_widget = QWidget()
         self.content_layout = QVBoxLayout(self.content_widget)
@@ -221,8 +222,8 @@ class ListPickerView(QWidget):
         layout.addWidget(self.scroll_area)
 
         # 3. 底部按钮组
-        footer = QWidget()
-        f_layout = QHBoxLayout(footer)
+        self.footer_container = QWidget()
+        f_layout = QHBoxLayout(self.footer_container)
         f_layout.setContentsMargins(25, 10, 25, 20)
         f_layout.setSpacing(15) 
         
@@ -277,7 +278,7 @@ class ListPickerView(QWidget):
         f_layout.addWidget(self.btn_cancel)
         f_layout.addWidget(self.btn_ok)
         
-        layout.addWidget(footer)
+        layout.addWidget(self.footer_container)
         self._setup_window_controls()
 
     def set_title(self, text="选择清单"):

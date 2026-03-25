@@ -1,16 +1,16 @@
 # src/ui/todo_board.py
 import os
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, 
-                             QLabel, QFrame, QPushButton, QScrollArea, QGridLayout, QStackedWidget)
-from PyQt6.QtCore import Qt, QRectF, QTimer, pyqtSignal, QPoint
-from PyQt6.QtGui import QIcon, QPainter, QPainterPath, QBrush, QLinearGradient, QColor, QPixmap, QImage
+                             QLabel, QFrame, QPushButton, QScrollArea, QGridLayout, QStackedWidget,QLineEdit, QTextEdit, QMenu)
+from PyQt6.QtCore import Qt, QRectF, QTimer, pyqtSignal, QPoint, QMimeData
+from PyQt6.QtGui import QAction, QIcon, QPainter, QPainterPath, QBrush, QLinearGradient, QColor, QPixmap, QImage, QDrag
 from PyQt6.QtSvg import QSvgRenderer
 
 from ..config import AppConfig
-from ..data.database import db_manager # 引入真实数据库
-
+from ..data.database import db_manager 
+from .list_picker import ListPickerView
 # ==========================================
-# 通用工具：SVG 高清渲染与染色 
+# SVG 高清渲染与染色 
 # ==========================================
 def get_colored_icon(icon_name, color, target_size=12):
 
@@ -416,7 +416,8 @@ class StickViewContainer(QScrollArea):
         if isinstance(parent_window, TodoBoardWindow):
             # 更新签名，并仅触发全局刷新（不要自身再刷新一次）
             todos = [c.data for c in self.cards]
-            parent_window._last_signature = "-".join([f"{t.id}_{getattr(t, 'sort_order', 0.0)}" for t in todos])
+            todo_categories = db_manager.get_active_categories()
+            parent_window._last_signature = parent_window._generate_signature(todos, todo_categories)
             parent_window.notify_main_window_refresh()
             
 # ==========================================
@@ -424,6 +425,8 @@ class StickViewContainer(QScrollArea):
 # ==========================================
 class FolderCard(QFrame):
     clicked = pyqtSignal(object) # 传出分类 ID（未分类传 None）
+    doubleClicked = pyqtSignal(object, str)
+    delete_requested = pyqtSignal(int, str) 
 
     def __init__(self, category_id, category_name, is_empty, parent=None):
         super().__init__(parent)
@@ -472,15 +475,146 @@ class FolderCard(QFrame):
         layout.addWidget(self.icon_label, 0, Qt.AlignmentFlag.AlignHCenter)
         layout.addWidget(self.name_label, 0, Qt.AlignmentFlag.AlignHCenter)
 
-    def mouseReleaseEvent(self, event):
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._show_context_menu)
+
+    def _show_context_menu(self, pos):
+        # 拦截：系统默认的“未分类待办”不允许删除
+        if self.category_id is None:
+            return 
+            
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu { background-color: rgba(255, 255, 255, 0.95); border: 1px solid rgba(0, 0, 0, 0.1); border-radius: 5px; padding: 6px; color: #333333; }
+            QMenu::item { background-color: transparent; padding: 6px 20px; border-radius: 4px; font-family: "Microsoft YaHei UI"; font-size: 12px; }
+            /* 悬停时稍微泛红，提示是危险操作 */
+            QMenu::item:selected { background-color: rgba(255, 77, 79, 0.1); color: #ff4d4f; }
+        """)
+        
+        # 创建删除动作
+        del_action = QAction("🗑️ 删除文件夹", self)
+        del_action.triggered.connect(lambda: self.delete_requested.emit(self.category_id, self.category_name))
+        menu.addAction(del_action)
+        
+        menu.exec(self.mapToGlobal(pos))
+
+    def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit(self.category_id)
+            self.doubleClicked.emit(self.category_id, self.category_name)
             event.accept()
 
+    # 对鼠标按下的拦截
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            # 限制：“未分类待办”这种特殊的固定占位文件夹不允许拖动
+            if self.category_id is None:
+                super().mousePressEvent(event)
+                return
+            self._click_pos = event.pos()
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    # 触发 QDrag 的能力与隐身效果
+    def mouseMoveEvent(self, event):
+        if not hasattr(self, '_click_pos'): return
+        if (event.pos() - self._click_pos).manhattanLength() > 10:
+            from PyQt6.QtGui import QDrag
+            from PyQt6.QtCore import QMimeData
+            
+            drag = QDrag(self)
+            mime_data = QMimeData()
+            mime_data.setText(f"folder_{self.category_id}")
+            drag.setMimeData(mime_data)
+            
+            drag.setPixmap(self.grab())
+            drag.setHotSpot(event.pos())
+            
+            container = self.parentWidget()
+            if hasattr(container, 'current_drag_widget'):
+                container.current_drag_widget = self
+            
+            # 隐身特效：变虚线并隐藏里面文字
+            original_style = self.styleSheet()
+            self.setStyleSheet("QFrame { background: transparent; border: 2px dashed rgba(255, 255, 255, 0.4); border-radius: 12px; }")
+            self.icon_label.hide()
+            self.name_label.hide()
+            
+            drag.exec(Qt.DropAction.MoveAction)
+            
+            # 还原状态
+            self.icon_label.show()
+            self.name_label.show()
+            self.setStyleSheet(original_style)
+            
+            if hasattr(container, 'current_drag_widget'):
+                container.current_drag_widget = None
+            if hasattr(self, '_click_pos'):
+                del self._click_pos
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+
+    # 将点击事件转移至弹起时校验，以避免与拖拽冲突
+    def mouseReleaseEvent(self, event):
+        if hasattr(self, '_click_pos') and event.button() == Qt.MouseButton.LeftButton:
+            if (event.pos() - self._click_pos).manhattanLength() < 5:
+                self.clicked.emit(self.category_id)
+            del self._click_pos
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
+
+class AddFolderCard(QFrame):
+    clicked = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        
+        self.setStyleSheet("""
+            QFrame {
+                background-color: transparent;
+                border: none;
+            }
+            QFrame:hover {
+                background-color: rgba(255, 255, 255, 0.08);
+                border-radius: 12px;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.setSpacing(8)
+
+        self.icon_label = QLabel()
+        self.icon_label.setFixedSize(45, 45)
+        
+        pixmap = get_colored_icon("folder_add.svg", "#FFFFFF", 45)
+        if not pixmap.isNull():
+            self.icon_label.setPixmap(pixmap)
+        else:
+            self.icon_label.setText("➕")
+            self.icon_label.setStyleSheet("font-size: 40px; color: white; background: transparent; border: none;")
+
+        self.name_label = QLabel("新建清单")
+        self.name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.name_label.setStyleSheet("color: white; font-weight: bold; font-size: 12px; font-family: 'Microsoft YaHei'; border: none; background: transparent;")
+
+        layout.addWidget(self.icon_label, 0, Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(self.name_label, 0, Qt.AlignmentFlag.AlignHCenter)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+            event.accept()
 # ==========================================
 # 文件夹视图 3x3 网格容器
 # ==========================================
 class FolderViewContainer(QScrollArea):
+    folder_opened = pyqtSignal(object, str)
+    add_folder_requested = pyqtSignal()
+    delete_folder_requested = pyqtSignal(int, str) 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWidgetResizable(True)
@@ -495,7 +629,7 @@ class FolderViewContainer(QScrollArea):
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
         """)
 
-        self.scroll_content = QWidget()
+        self.scroll_content = DropWidget(self)
         self.scroll_content.setStyleSheet("background: transparent;")
         self.setViewportMargins(0, 0, 0, 0)
         
@@ -523,9 +657,10 @@ class FolderViewContainer(QScrollArea):
 
         current_index = 0
         
-        # 3. 如果有未分类待办，首先生成“未分类待办”文件夹
+        # 3. 如果有未分类待办
         if uncategorized_count > 0:
             card = FolderCard(category_id=None, category_name="未分类待办", is_empty=False)
+            card.doubleClicked.connect(self.folder_opened.emit) # 连接双击信号
             self.grid_layout.addWidget(card, current_index // cols, current_index % cols)
             self.cards.append(card)
             current_index += 1
@@ -533,9 +668,16 @@ class FolderViewContainer(QScrollArea):
         # 4. 生成数据库里所有的清单文件夹
         for data in folder_data_list:
             card = FolderCard(category_id=data['id'], category_name=data['name'], is_empty=data['is_empty'])
+            card.doubleClicked.connect(self.folder_opened.emit) # 连接双击信号
+            card.delete_requested.connect(self.delete_folder_requested.emit)
             self.grid_layout.addWidget(card, current_index // cols, current_index % cols)
             self.cards.append(card)
             current_index += 1
+        
+        add_card = AddFolderCard()
+        add_card.clicked.connect(self.add_folder_requested.emit)
+        self.grid_layout.addWidget(add_card, current_index // cols, current_index % cols)
+        self.cards.append(add_card)
 
         self.update_card_heights()
 
@@ -552,6 +694,514 @@ class FolderViewContainer(QScrollArea):
         super().resizeEvent(event)
         self.update_card_heights()
 
+    def _handle_drag_move(self, event):
+        target = self.scroll_content.current_drag_widget
+        if not target or not isinstance(target, FolderCard): return
+
+        pos = event.position()
+        if target not in self.cards: return
+        old_idx = self.cards.index(target)
+
+        # 同样使用“中心点距离推挤算法”
+        closest_idx = old_idx
+        min_dist = float('inf')
+
+        for i, card in enumerate(self.cards):
+            center = card.geometry().center()
+            dist = (pos.x() - center.x())**2 + (pos.y() - center.y())**2
+            if dist < min_dist:
+                min_dist = dist
+                closest_idx = i
+
+        # 核心拦截逻辑：绝对禁止取代头尾的特殊占位符
+        min_idx = 0
+        # 如果存在"未分类"（判断特征为 category_id=None），最低插入下限退至 1
+        if self.cards and isinstance(self.cards[0], FolderCard) and self.cards[0].category_id is None:
+            min_idx = 1
+            
+        # 最后一个永远是 AddFolderCard 按钮
+        max_idx = len(self.cards) - 2 
+        
+        if min_idx > max_idx: return
+        
+        # 将被选中的 index 限定在合法边界内
+        closest_idx = max(min_idx, min(closest_idx, max_idx))
+
+        new_idx = closest_idx
+
+        if new_idx != old_idx:
+            # 把这个卡片在列表中平移
+            self.cards.insert(new_idx, self.cards.pop(old_idx))
+            # 呼叫立即重绘
+            self._reorder_layout()
+            
+        event.accept()
+
+    def _reorder_layout(self):
+        """实时响应矩阵排列"""
+        self.scroll_content.setUpdatesEnabled(False)
+        cols = 3
+        for i, card in enumerate(self.cards):
+            target_row, target_col = i // cols, i % cols
+            idx = self.grid_layout.indexOf(card)
+            if idx != -1:
+                r, c, _, _ = self.grid_layout.getItemPosition(idx)
+                if r == target_row and c == target_col:
+                    continue
+            self.grid_layout.addWidget(card, target_row, target_col)
+        self.scroll_content.setUpdatesEnabled(True)
+        self.scroll_content.update()
+
+    def _save_new_order(self):
+        """手松开时，将重排结果更新至数据库"""
+        # 从当前网格中过滤掉不可拖拽的卡片（去除添加按钮、去除未分类），提取干净的清单序列
+        draggable_folders =[c for c in self.cards if isinstance(c, FolderCard) and c.category_id is not None]
+        
+        for i, card in enumerate(draggable_folders):
+            # 将视觉排序结果转换为 倒序权重浮点数
+            new_order = float((len(draggable_folders) - i) * 100.0)
+            db_manager.update_category_fields(card.category_id, sort_order=new_order)
+            
+        parent_window = self.window()
+        if hasattr(parent_window, '_last_signature'):
+            parent_window._last_signature = None
+        if hasattr(parent_window, 'notify_main_window_refresh'):
+            parent_window.notify_main_window_refresh()
+        if hasattr(parent_window, 'refresh_data'):
+            parent_window.refresh_data()
+
+
+# ==========================================
+# 专属清单管理视图 (纯管理，不包含选择功能)
+# ==========================================
+class ManageCategoryCard(QFrame):
+    delete_requested = pyqtSignal(int, str)
+    
+    def __init__(self, category_id, category_name, parent=None):
+        super().__init__(parent)
+        self.cat_id = category_id
+        self.cat_name = category_name
+        self.setFixedHeight(45) # 卡片高度
+        self.setStyleSheet("""
+            QFrame { background-color: rgba(255, 255, 255, 0.1); border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); }
+            QFrame:hover { background-color: rgba(255, 255, 255, 0.2); }
+        """)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(15, 0, 15, 0)
+        
+        dot = QLabel()
+        dot.setFixedSize(8, 8)
+        dot.setStyleSheet("background-color: #0cc0df; border-radius: 4px;")
+        
+        lbl_name = QLabel(f"#{self.cat_id:03d}  {self.cat_name}")
+        lbl_name.setStyleSheet("color: white; font-size: 13px; font-weight: bold; font-family: 'Microsoft YaHei'; background: transparent; border: none;")
+        
+        layout.addWidget(dot)
+        layout.addSpacing(10)
+        layout.addWidget(lbl_name)
+        layout.addStretch()
+        
+        # 绑定右键菜单
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._show_menu)
+        
+    def _show_menu(self, pos):
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu { background-color: rgba(255, 255, 255, 0.95); border: 1px solid rgba(0, 0, 0, 0.1); border-radius: 5px; padding: 6px; color: #333333; }
+            QMenu::item { background-color: transparent; padding: 6px 20px; border-radius: 4px; font-family: "Microsoft YaHei UI"; font-size: 12px; }
+            QMenu::item:selected { background-color: rgba(12, 192, 223, 0.1); color: #0cc0df; }
+        """)
+        del_action = QAction("删除清单", self)
+        del_action.triggered.connect(lambda: self.delete_requested.emit(self.cat_id, self.cat_name))
+        menu.addAction(del_action)
+        menu.exec(self.mapToGlobal(pos))
+
+class ManageListView(QWidget):
+    back_requested = pyqtSignal()
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._setup_ui()
+        
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        # 滚动区域
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setStyleSheet("""
+            QScrollArea { background: transparent; border: none; }
+            QScrollBar:vertical { width: 4px; background: transparent; margin: 0px; }
+            QScrollBar::handle:vertical { background: rgba(255, 255, 255, 0.3); border-radius: 2px; }
+        """)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        
+        self.content_widget = QWidget()
+        self.content_widget.setStyleSheet("background: transparent;")
+        self.content_layout = QVBoxLayout(self.content_widget)
+        self.content_layout.setContentsMargins(20, 10, 20, 10) 
+        self.content_layout.setSpacing(10)
+        
+        # 输入框容器 
+        self.input_container = QWidget()
+        self.input_container.setFixedHeight(50) # 调高容器以适应更大的控件
+        self.input_container.hide()
+        i_layout = QHBoxLayout(self.input_container)
+        i_layout.setContentsMargins(0, 0, 0, 0)
+        i_layout.setSpacing(12) # 增加输入框和确认按钮之间的间距
+        
+        self.input_new = QLineEdit()
+        self.input_new.setPlaceholderText("输入清单名称，回车确认...")
+        self.input_new.setFixedHeight(36) 
+        self.input_new.setStyleSheet("""
+            QLineEdit {
+                background-color: #7092BE; 
+                border: 2px solid #FFFFFF; 
+                border-radius: 10px; 
+                color: white;
+                padding-left: 15px;
+                font-family: 'Microsoft YaHei';
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QLineEdit::placeholder {
+                color: rgba(255, 255, 255, 0.7);
+                font-weight: normal;
+            }
+        """)
+        
+        self.btn_confirm_add = QPushButton("✔")
+        self.btn_confirm_add.setFixedSize(36, 36) 
+        self.btn_confirm_add.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_confirm_add.setStyleSheet("""
+            QPushButton {
+                background-color: #FFFFFF; /* 纯白实心背景 */
+                border: none;
+                border-radius: 18px; /* 完美正圆 (44的一半) */
+                color: #0cc0df; /* 图2中的青色对勾 */
+                font-size: 18px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #f0f0f0;
+            }
+            QPushButton:pressed {
+                background-color: #e0e0e0;
+            }
+        """)
+        
+        self.btn_confirm_add.clicked.connect(self._add_category)
+        self.input_new.returnPressed.connect(self._add_category)
+        
+        i_layout.addWidget(self.input_new)
+        i_layout.addWidget(self.btn_confirm_add)
+        self.content_layout.addWidget(self.input_container)
+        
+        # 卡片列表容器
+        self.cards_container = QWidget()
+        self.cards_layout = QVBoxLayout(self.cards_container)
+        self.cards_layout.setContentsMargins(0, 0, 0, 0)
+        self.cards_layout.setSpacing(8)
+        self.content_layout.addWidget(self.cards_container)
+        self.content_layout.addStretch()
+        
+        self.scroll_area.setWidget(self.content_widget)
+        layout.addWidget(self.scroll_area, stretch=1)
+        
+        # 底部只有两个按钮：新建 和 退出
+        self.footer = QWidget()
+        self.footer.setStyleSheet("background: transparent;")
+        f_layout = QHBoxLayout(self.footer)
+        f_layout.setContentsMargins(25, 5, 25, 5)
+        
+        self.btn_add_new = QPushButton("+ 新建")
+        self.btn_cancel = QPushButton("退出")
+        
+        btn_style = "QPushButton { background: transparent; border: 1px solid rgba(255,255,255,0.6); border-radius: 15px; color: white; font-weight: bold; font-family: 'Microsoft YaHei'; font-size: 13px; } QPushButton:hover { background: rgba(255,255,255,0.15); border-color: white; }"
+        self.btn_add_new.setStyleSheet(btn_style)
+        self.btn_cancel.setStyleSheet(btn_style)
+        self.btn_add_new.setFixedSize(85, 30)
+        self.btn_cancel.setFixedSize(85, 30)
+        self.btn_add_new.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
+        
+        self.btn_add_new.clicked.connect(self._toggle_input)
+        self.btn_cancel.clicked.connect(self.back_requested.emit)
+        
+        f_layout.addWidget(self.btn_add_new)
+        f_layout.addStretch()
+        f_layout.addWidget(self.btn_cancel)
+        layout.addWidget(self.footer, stretch=0)
+
+    def _toggle_input(self):
+        self.input_container.setVisible(not self.input_container.isVisible())
+        if self.input_container.isVisible():
+            self.input_new.setFocus()
+            
+    def load_data(self):
+        self.input_new.clear()
+        self.input_container.hide()
+        while self.cards_layout.count():
+            item = self.cards_layout.takeAt(0)
+            if item.widget(): item.widget().deleteLater()
+            
+        categories = db_manager.get_active_categories(list_type='todo')
+        for cat in categories:
+            card = ManageCategoryCard(cat.id, cat.name)
+            card.delete_requested.connect(self._delete_category)
+            self.cards_layout.addWidget(card)
+            
+    def _add_category(self):
+        name = self.input_new.text().strip()
+        if not name: return
+        new_id = db_manager.add_category(name, list_type='todo')
+        if new_id:
+            self.load_data()
+            if hasattr(self.window(), 'refresh_data'):
+                self.window()._last_signature = None
+                self.window().refresh_data()
+                if hasattr(self.window(), 'notify_main_window_refresh'):
+                    self.window().notify_main_window_refresh()
+                
+    def _delete_category(self, cat_id, cat_name):
+        from PyQt6.QtWidgets import QMessageBox
+        status = db_manager.check_category_status(cat_id)
+        if status == 'active':
+            if hasattr(self.window(), 'show_toast'): self.window().show_toast("🚫 该清单存在有效待办，无法删除！")
+        elif status == 'historical':
+            reply = QMessageBox.question(self, '确认删除', f"清单【{cat_name}】包含历史待办。\n是否继续？", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if reply == QMessageBox.StandardButton.Yes:
+                db_manager.soft_delete_category(cat_id)
+                self.load_data()
+                if hasattr(self.window(), 'refresh_data'):
+                    self.window()._last_signature = None
+                    self.window().refresh_data()
+                    if hasattr(self.window(), 'notify_main_window_refresh'):
+                        self.window().notify_main_window_refresh()
+        else:
+            db_manager.hard_delete_category(cat_id)
+            self.load_data()
+            if hasattr(self.window(), 'refresh_data'):
+                self.window()._last_signature = None
+                self.window().refresh_data()
+                if hasattr(self.window(), 'notify_main_window_refresh'):
+                    self.window().notify_main_window_refresh()
+
+
+# ==========================================
+# 轻量级内联添加待办视图
+# ==========================================
+class InlineAddTodoView(QWidget):
+    saved = pyqtSignal()
+    canceled = pyqtSignal()
+    req_open_list_picker = pyqtSignal(object, str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.selected_priority = 0
+        self.selected_category_id = None
+        self._setup_ui()
+
+    def _setup_ui(self):
+        # 主布局：取消边距，让底部按钮能贴底，中间滚动
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # --- 滚动区域 ---
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        # 定制极简滚动条
+        self.scroll_area.setStyleSheet("""
+            QScrollArea { background: transparent; border: none; }
+            QScrollBar:vertical { width: 4px; background: transparent; margin: 0px; }
+            QScrollBar::handle:vertical { background: rgba(255, 255, 255, 0.3); border-radius: 2px; }
+            QScrollBar::handle:vertical:hover { background: rgba(255, 255, 255, 0.5); }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+        """)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
+        # 滚动内容容器
+        self.content_widget = QWidget()
+        self.content_widget.setStyleSheet("background: transparent;")
+        layout = QVBoxLayout(self.content_widget)
+        layout.setContentsMargins(20, 10, 20, 10)
+        layout.setSpacing(15)
+
+        # 1. 标题输入框
+        self.input_title = QLineEdit()
+        self.input_title.setPlaceholderText("请输入待办标题...")
+        self.input_title.setFixedHeight(40)
+        self.input_title.setStyleSheet("""
+            QLineEdit {
+                background: transparent; border: none; border-bottom: 1px solid rgba(255, 255, 255, 0.5); 
+                color: white; font-size: 18px; padding: 0 5px; font-family: 'Microsoft YaHei'; font-weight: bold;
+            }
+            QLineEdit::placeholder { color: rgba(255, 255, 255, 0.6); font-weight: normal; }
+            QLineEdit:focus { border-bottom: 2px solid white; }
+        """)
+        layout.addWidget(self.input_title)
+
+        # 2. 详情折叠按钮
+        self.icon_plus = QIcon(get_colored_icon("todo_plus.svg", QColor(255, 255, 255, 178), 14))
+        self.icon_minus = QIcon(get_colored_icon("todo_minus.svg", QColor(255, 255, 255, 178), 14))
+
+        self.btn_detail_toggle = QPushButton("添加描述详情")
+        self.btn_detail_toggle.setIcon(self.icon_plus)
+        self.btn_detail_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_detail_toggle.setStyleSheet("""
+            QPushButton { background: transparent; color: rgba(255,255,255,0.7); text-align: left; border: none; font-family: 'Microsoft YaHei'; font-size: 13px; padding-left: 5px; }
+            QPushButton:hover { color: white; }
+        """)
+        self.btn_detail_toggle.clicked.connect(self._toggle_details)
+        layout.addWidget(self.btn_detail_toggle)
+
+        # 3. 详情输入框 (默认隐藏)
+        self.txt_details = QTextEdit()
+        self.txt_details.setPlaceholderText("添加描述 (150字以内)...")
+        self.txt_details.setFixedHeight(70)
+        self.txt_details.setStyleSheet("""
+            QTextEdit { 
+                background-color: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.3); 
+                border-radius: 8px; color: white; font-size: 13px; font-family: 'Microsoft YaHei'; padding: 8px; 
+            }
+            QTextEdit:focus { border: 1px solid rgba(255, 255, 255, 0.6); background-color: rgba(255, 255, 255, 0.15); }
+        """)
+        self.txt_details.hide()
+        layout.addWidget(self.txt_details)
+
+        # 4. 属性卡片 (紧急性 & 清单)
+        self.info_card = QFrame()
+        self.info_card.setStyleSheet("QFrame { background-color: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 8px; }")
+        info_layout = QVBoxLayout(self.info_card)
+        info_layout.setSpacing(12)
+        info_layout.setContentsMargins(15, 12, 15, 12)
+
+        self.lbl_info_priority = self._create_info_row("importance.svg", "低重要性")
+        self.lbl_info_priority.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.lbl_info_priority.mousePressEvent = self._on_priority_click
+        info_layout.addWidget(self.lbl_info_priority.row_container)
+
+        self.lbl_info_list = self._create_info_row("list.svg", "未选择清单")
+        self.lbl_info_list.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.lbl_info_list.mousePressEvent = self._on_list_click
+        info_layout.addWidget(self.lbl_info_list.row_container)
+
+        layout.addWidget(self.info_card)
+        layout.addStretch()
+
+        self.scroll_area.setWidget(self.content_widget)
+        main_layout.addWidget(self.scroll_area)
+
+        # --- 5. 底部按钮容器 (独立于滚动条，永远贴底) ---
+        bottom_container = QWidget()
+        bottom_layout = QHBoxLayout(bottom_container)
+        bottom_layout.setContentsMargins(20, 5, 20, 5)
+        
+        self.btn_cancel = QPushButton("取消")
+        self.btn_confirm = QPushButton("保存")
+        for btn in [self.btn_cancel, self.btn_confirm]:
+            btn.setFixedSize(70, 30)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_cancel.setStyleSheet("QPushButton { background: transparent; border: 1px solid rgba(255,255,255,0.6); border-radius: 15px; color: white; font-family: 'Microsoft YaHei'; font-weight: bold;} QPushButton:hover { background: rgba(255,255,255,0.1); border: 1px solid white; }")
+        self.btn_confirm.setStyleSheet("QPushButton { background: white; border: none; border-radius: 15px; color: #0cc0df; font-family: 'Microsoft YaHei'; font-weight: bold;} QPushButton:hover { background: #f0f0f0; }")
+        self.btn_cancel.clicked.connect(self.canceled.emit)
+        self.btn_confirm.clicked.connect(self._on_save)
+        
+        bottom_layout.addStretch()
+        bottom_layout.addWidget(self.btn_cancel)
+        bottom_layout.addSpacing(15)
+        bottom_layout.addWidget(self.btn_confirm)
+        
+        main_layout.addWidget(bottom_container)
+
+    def _create_info_row(self, icon_name, text):
+        row_widget = QWidget()
+        row_widget.setStyleSheet("background: transparent; border: none;")
+        layout = QHBoxLayout(row_widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        
+        icon_lbl = QLabel()
+        icon_lbl.setFixedSize(18, 18)
+        icon_lbl.setPixmap(get_colored_icon(icon_name, "#FFFFFF", 18))
+        
+        text_lbl = QLabel(text)
+        text_lbl.setStyleSheet("color: rgba(255,255,255,0.9); font-size: 13px; font-family: 'Microsoft YaHei';")
+        
+        layout.addWidget(icon_lbl)
+        layout.addWidget(text_lbl)
+        layout.addStretch()
+        
+        text_lbl.row_container = row_widget 
+        return text_lbl
+
+    def _toggle_details(self):
+        if self.txt_details.isVisible():
+            self.txt_details.hide()
+            self.btn_detail_toggle.setText("添加描述详情")
+            self.btn_detail_toggle.setIcon(self.icon_plus)
+        else:
+            self.txt_details.show()
+            self.btn_detail_toggle.setText("收起描述详情")
+            self.btn_detail_toggle.setIcon(self.icon_minus)
+
+    def _on_priority_click(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.selected_priority = (self.selected_priority + 1) % 3
+            p_map = {0: "低重要性", 1: "中重要性", 2: "高重要性"}
+            self.lbl_info_priority.setText(p_map[self.selected_priority])
+
+    def _on_list_click(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.req_open_list_picker.emit(self.selected_category_id, 'todo')
+
+    def _set_category(self, cat_id, cat_name):
+        self.selected_category_id = cat_id
+        if cat_id is None:
+            self.lbl_info_list.setText("未选择清单")
+            self.lbl_info_list.setStyleSheet("color: rgba(255,255,255,0.9); font-size: 13px; font-family: 'Microsoft YaHei';")
+        else:
+            self.lbl_info_list.setText(f"#{cat_id:03d} {cat_name}")
+            self.lbl_info_list.setStyleSheet("color: #FFFFFF; font-size: 13px; font-family: 'Microsoft YaHei'; font-weight: bold;")
+
+    def reset(self):
+        self.input_title.clear()
+        self.txt_details.clear()
+        self.txt_details.hide()
+        self.btn_detail_toggle.setText("添加描述详情")
+        self.btn_detail_toggle.setIcon(self.icon_plus)
+        self.selected_priority = 0
+        self.lbl_info_priority.setText("低重要性")
+        self._set_category(None, "未选择清单")
+
+    def _on_save(self):
+        title = self.input_title.text().strip()
+        if not title:
+            # 复用看板已经写好的 show_toast 方法来提醒
+            if hasattr(self.window(), 'show_toast'):
+                self.window().show_toast("⚠️ 标题不能为空")
+            return
+
+        description = self.txt_details.toPlainText().strip()
+        schedule_data = {
+            'title': title,
+            'item_type': 'todo',
+            'priority': self.selected_priority,
+            'repeat_rule': 'none',
+            'description': description, 
+            'category_id': self.selected_category_id
+        }
+
+        if db_manager.add_schedule(schedule_data):
+            self.saved.emit()
+
 # ==========================================
 # 主看板窗口
 # ==========================================
@@ -562,6 +1212,8 @@ class TodoBoardWindow(QWidget):
         self.view_mode = 'stick' 
         self._drag_pos = None
         self._last_signature = None # 用于记录数据是否改变，防止无意义闪烁
+        self.current_folder_id = "NOT_IN_FOLDER" 
+        self.current_folder_name = ""
         self._setup_ui()
         
         self.stick_view.req_status.connect(self._handle_status_change)
@@ -570,7 +1222,7 @@ class TodoBoardWindow(QWidget):
         self.stick_view.req_show_detail.connect(self._show_detail_popup)
 
         # ==========================================
-        # 零延迟信号驱动机制
+        # 信号驱动
         # ==========================================
         if parent:
             # 1. 监听添加界面的保存动作 
@@ -592,11 +1244,22 @@ class TodoBoardWindow(QWidget):
         
         self.refresh_data() # 立即加载一次
 
+    def _generate_signature(self, todos, categories):
+        """统一生成防闪烁签名，将所有影响卡片外观的字段纳入监控"""
+        current_signature = "-".join([
+            f"{t.id}_{getattr(t, 'sort_order', 0)}_{getattr(t, 'category_id', '')}_{getattr(t, 'priority', 0)}_{getattr(t, 'title', '')}_{getattr(t, 'is_pinned', False)}_{getattr(t, 'status', 0)}" 
+            for t in todos
+        ])
+        cat_signature = "-".join([f"{c.id}_{getattr(c, 'sort_order', 0.0)}" for c in categories])
+        return f"{current_signature}|{cat_signature}|{self.view_mode}"
+
     def refresh_data(self):
         if hasattr(self.stick_view, 'scroll_content'):
             if self.stick_view.scroll_content.current_drag_widget is not None:
                 return
-
+        if hasattr(self, 'folder_view') and hasattr(self.folder_view, 'scroll_content'):
+            if self.folder_view.scroll_content.current_drag_widget is not None:
+                return
         all_schedules = db_manager.get_all_schedules()
         # ==========================================
         # 同步更新弹窗数据的代码
@@ -608,20 +1271,23 @@ class TodoBoardWindow(QWidget):
                 for s in all_schedules:
                     if s.id == pop.data.id:
                         pop.data = s  
-                        if hasattr(pop, 'refresh_list_display'): pop.refresh_list_display()
+                        
+                        # 增加兼容所有可能的方法名，彻底解决静默失效不更新的问题
+                        for method_name in ['refresh_list_display', 'refresh_category_display', 'update_category_display']:
+                            if hasattr(pop, method_name): getattr(pop, method_name)()
+                            
                         if hasattr(pop, 'refresh_time_display'): pop.refresh_time_display()
                         if hasattr(pop, 'refresh_alarm_display'): pop.refresh_alarm_display()
                         if hasattr(pop, 'refresh_priority_display'): pop.refresh_priority_display()
                         if hasattr(pop, 'refresh_repeat_display'): pop.refresh_repeat_display()
                         break
 
-        # 处理所有“活跃”的待办数据
-        todos =[]
+        all_active_todos = []  
         active_cat_ids = set()
         uncategorized_count = 0
 
+        # 第一步：先统计全局状态（保证底层文件夹空状态判定准确）
         for s in all_schedules:
-            # 确保加上刚才的过滤隐藏逻辑
             if getattr(s, 'status', 0) == 2:
                 continue
                 
@@ -629,12 +1295,19 @@ class TodoBoardWindow(QWidget):
             is_active = (getattr(s, 'status', 0) == 0) 
             
             if is_todo and is_active:
-                todos.append(s)
-                # 记录所有含有待办的清单ID，并统计未分类的数量
+                all_active_todos.append(s) # 存入全局列表
                 if getattr(s, 'category_id', None):
                     active_cat_ids.add(s.category_id)
                 else:
                     uncategorized_count += 1
+
+        # 第二步：提取出要在界面上渲染的卡片（如果是文件夹内，则实施过滤）
+        todos = [] # 重新定义 todos 给后续的渲染使用
+        for s in all_active_todos:
+            if getattr(self, 'current_folder_id', "NOT_IN_FOLDER") != "NOT_IN_FOLDER":
+                if getattr(s, 'category_id', None) != self.current_folder_id:
+                    continue # 过滤掉非当前文件夹的待办
+            todos.append(s)
                 
         def sort_key(item):
             rank_pin = 0 if getattr(item, 'is_pinned', False) else 1
@@ -645,8 +1318,7 @@ class TodoBoardWindow(QWidget):
         self.current_todos = todos
 
         # 处理所有“清单(文件夹)”数据
-        # 移除 list_type='todo' 的限制，获取所有清单，防止因为历史遗留导致读取不到
-        todo_categories = db_manager.get_active_categories()
+        todo_categories = db_manager.get_active_categories(list_type='todo')
         folder_data =[]
         for cat in todo_categories:
             folder_data.append({
@@ -655,11 +1327,8 @@ class TodoBoardWindow(QWidget):
                 'is_empty': cat.id not in active_cat_ids 
             })
 
-        # 防闪烁：生成签名
-        # 把 self.view_mode 加进签名里，这样切视图就一定会触发渲染
-        current_signature = "-".join([f"{t.id}_{getattr(t, 'sort_order', 0)}" for t in todos])
-        cat_signature = "-".join([str(c.id) for c in todo_categories])
-        full_signature = f"{current_signature}|{cat_signature}|{self.view_mode}"
+
+        full_signature = self._generate_signature(todos, todo_categories)
 
         if self._last_signature == full_signature:
             return
@@ -669,17 +1338,31 @@ class TodoBoardWindow(QWidget):
         self.stick_view.load_data(todos)
         self.folder_view.load_data(folder_data, uncategorized_count)
         
-        # 智能显示堆栈判断
-        if not todos and not folder_data:
-            self.view_stack.setCurrentWidget(self.empty_placeholder)
+        current_widget = self.view_stack.currentWidget()
+        if current_widget in [self.inline_add_view, self.page_list, self.manage_list_view]:
+            # 如果用户正处于“添加待办”或“选择清单”界面，只在后台静默刷新数据，绝对不跳转界面
+            pass
         else:
-            if self.view_mode == 'stick':
+            if getattr(self, 'current_folder_id', "NOT_IN_FOLDER") != "NOT_IN_FOLDER":
+                self.empty_placeholder.setText(f"【{self.current_folder_name}】\n\n当前分类没有任何未完成的待办！")
+                # 在文件夹内部
                 if not todos:
                     self.view_stack.setCurrentWidget(self.empty_placeholder)
                 else:
                     self.view_stack.setCurrentWidget(self.stick_view)
-            elif self.view_mode == 'folder':
-                self.view_stack.setCurrentWidget(self.folder_view)
+            else:
+                self.empty_placeholder.setText("当前视图：待办看板\n\n当前没有任何未完成的待办事项！")
+                # 在外部主看板
+                if not todos and not folder_data:
+                    self.view_stack.setCurrentWidget(self.empty_placeholder)
+                else:
+                    if self.view_mode == 'stick':
+                        if not todos:
+                            self.view_stack.setCurrentWidget(self.empty_placeholder)
+                        else:
+                            self.view_stack.setCurrentWidget(self.stick_view)
+                    elif self.view_mode == 'folder':
+                        self.view_stack.setCurrentWidget(self.folder_view)
 
     def _get_icon(self, icon_name, color, target_size=16):
         path = f"assets/icons/{icon_name}"
@@ -738,9 +1421,9 @@ class TodoBoardWindow(QWidget):
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(0, 0, 70, 10) 
 
-        title_label = QLabel("待办看板")
-        title_label.setStyleSheet("font-size: 16px; font-weight: bold; color: white; border: none; background: transparent; font-family: 'Microsoft YaHei';")
-        header_layout.addWidget(title_label)
+        self.title_label = QLabel("待办看板")
+        self.title_label.setStyleSheet("font-size: 16px; font-weight: bold; color: white; border: none; background: transparent; font-family: 'Microsoft YaHei';")
+        header_layout.addWidget(self.title_label)
 
         self.views_frame = QFrame(self)
         self.views_frame.setStyleSheet("background: transparent; border: none;")
@@ -770,6 +1453,19 @@ class TodoBoardWindow(QWidget):
         self.views_layout.addWidget(self.btn_folder)
 
         header_layout.addWidget(self.views_frame)
+        self.btn_folder_back = QPushButton()
+        self.btn_folder_back.setFixedSize(26, 26)
+        self.btn_folder_back.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._apply_custom_tooltip(self.btn_folder_back, "返回文件夹视图")
+        self.btn_folder_back.setStyleSheet(common_style)
+        pm_back = self._get_icon("folder_back.svg", QColor(255, 255, 255, 255), 16)
+        if not pm_back.isNull(): 
+            self.btn_folder_back.setIcon(QIcon(pm_back))
+        else: 
+            self.btn_folder_back.setText("←")
+        self.btn_folder_back.clicked.connect(self._back_to_folder_view)
+        self.btn_folder_back.hide()
+        header_layout.addWidget(self.btn_folder_back)
         header_layout.addStretch()
         bg_layout.addLayout(header_layout)
 
@@ -807,11 +1503,18 @@ class TodoBoardWindow(QWidget):
         # 堆栈管理器：负责在空状态、便签、文件夹之间切换
         # ==========================================
         self.view_stack = QStackedWidget()
+
+        self.manage_list_view = ManageListView(self)
+        self.manage_list_view.back_requested.connect(self.back_from_manage_list)
+        self.view_stack.addWidget(self.manage_list_view)
         
         self.stick_view = StickViewContainer(self)
         self.view_stack.addWidget(self.stick_view)
         
         self.folder_view = FolderViewContainer(self)
+        self.folder_view.folder_opened.connect(self._open_folder_view)
+        self.folder_view.add_folder_requested.connect(self._on_add_folder_card_clicked)
+        self.folder_view.delete_folder_requested.connect(self._handle_folder_delete)
         self.view_stack.addWidget(self.folder_view)
     
         # 空状态占位
@@ -820,7 +1523,195 @@ class TodoBoardWindow(QWidget):
         self.empty_placeholder.setStyleSheet("color: rgba(255, 255, 255, 0.8); font-size: 13px; border: 2px dashed rgba(255, 255, 255, 0.2); border-radius: 8px; background: rgba(255, 255, 255, 0.05); font-family: 'Microsoft YaHei';")
         self.view_stack.addWidget(self.empty_placeholder)
 
+        self.inline_add_view = InlineAddTodoView(self)
+        self.view_stack.addWidget(self.inline_add_view)
+        self.inline_add_view.saved.connect(self._on_inline_add_saved)
+        self.inline_add_view.canceled.connect(self._on_inline_add_canceled)
+
+        self.page_list = ListPickerView()
+        if hasattr(self.page_list, 'btn_close'): self.page_list.btn_close.hide()
+        if hasattr(self.page_list, 'btn_suspend'): self.page_list.btn_suspend.hide()
+
+        if hasattr(self.page_list, 'header_container'): self.page_list.header_container.hide()
+        if hasattr(self.page_list, 'footer_container'): self.page_list.footer_container.layout().setContentsMargins(25, 0, 25, 5)
+        if hasattr(self.page_list, 'scroll_area'): self.page_list.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        self.view_stack.addWidget(self.page_list)
+        
+        self.inline_add_view.req_open_list_picker.connect(self.go_to_list_picker)
+        self.page_list.back_requested.connect(self.back_from_list_picker)
+        self.page_list.confirm_requested.connect(self.on_list_confirmed)
+        self.view_stack.setCurrentWidget(self.stick_view)
         bg_layout.addWidget(self.view_stack, 1)
+
+    def go_to_list_picker(self, current_category_id, current_type):
+        """进入添加模式的清单选择"""
+        self.list_picker_mode = 'add'
+        self.title_label.setText("选择清单")
+        self.page_list.load_data(current_category_id, list_type=current_type)
+        self.view_stack.setCurrentWidget(self.page_list)
+        
+        # 隐藏顶部可能引起歧义的工具栏按钮
+        self.views_frame.hide()
+        if hasattr(self, 'btn_folder_back'): self.btn_folder_back.hide()
+        self.btn_add.hide()
+        if hasattr(self, 'btn_sort'): self.btn_sort.hide()
+        self._update_button_positions()
+
+    def go_to_list_picker_for_edit(self, schedule_data):
+        self.list_picker_mode = 'edit'
+        self.editing_schedule = schedule_data
+        
+        display_title = schedule_data.title if len(schedule_data.title) <= 8 else schedule_data.title[:7] + "..."
+        self.title_label.setText(f"修改【{display_title}】清单") 
+        
+        self.page_list.load_data(schedule_data.category_id, list_type=schedule_data.item_type)
+        
+        self.view_stack.setCurrentWidget(self.page_list)
+        self.views_frame.hide()
+        if hasattr(self, 'btn_folder_back'): self.btn_folder_back.hide()
+        self.btn_add.hide()
+        if hasattr(self, 'btn_sort'): self.btn_sort.hide()
+        self._update_button_positions()
+
+    def back_from_list_picker(self):
+        """通用返回逻辑"""
+        in_folder = getattr(self, 'current_folder_id', "NOT_IN_FOLDER") != "NOT_IN_FOLDER"
+        
+        # 1. 动态恢复标题
+        self.title_label.setText(self.current_folder_name if in_folder else "待办看板")
+        
+        picker_mode = getattr(self, 'list_picker_mode', 'add')
+        if picker_mode in ['edit', 'manage']:
+            # 2. 动态恢复顶部按钮状态
+            if in_folder:
+                if hasattr(self, 'btn_folder_back'): self.btn_folder_back.show()
+                self.views_frame.hide()
+            else:
+                if hasattr(self, 'btn_folder_back'): self.btn_folder_back.hide()
+                self.views_frame.show()
+                
+            self.btn_add.show()
+            if (self.view_mode == 'stick' or in_folder) and hasattr(self, 'btn_sort'):
+                self.btn_sort.show()
+
+            # 3. 动态恢复下方的堆栈视图
+            if in_folder or self.view_mode == 'stick':
+                if not self.current_todos:
+                    self.view_stack.setCurrentWidget(self.empty_placeholder)
+                else:
+                    self.view_stack.setCurrentWidget(self.stick_view)
+            elif self.view_mode == 'folder':
+                self.view_stack.setCurrentWidget(self.folder_view)
+            else:
+                self.view_stack.setCurrentWidget(self.empty_placeholder)
+                
+        else:
+            # 如果是添加模式，退回内联添加界面（此时不恢复顶部工具按钮）
+            self.view_stack.setCurrentWidget(self.inline_add_view)
+        
+        self._update_button_positions()
+
+    def on_list_confirmed(self, category_id):
+        # 提取当前模式
+        mode = getattr(self, 'list_picker_mode', 'add')
+        
+        # 1. 修改模式逻辑
+        if mode == 'edit' and hasattr(self, 'editing_schedule') and self.editing_schedule:
+            def _do_update(update_future):
+                from datetime import datetime
+                now = datetime.now()
+                new_data = {'category_id': category_id, 'created_at': now}
+                db_manager.update_schedule_with_repeat(self.editing_schedule.id, new_data, update_future)
+                
+                self.editing_schedule.category_id = category_id
+                self.editing_schedule.created_at = now
+                if not update_future: self.editing_schedule.group_id = None
+                
+                self._last_signature = None
+                self.refresh_data()
+                self.notify_main_window_refresh()
+                
+                parent_win = self.parent()  
+                if parent_win and hasattr(parent_win, 'page_dashboard'):
+                    for p in parent_win.page_dashboard.open_popups:
+                        if p.data.id == self.editing_schedule.id:
+                            p.data.category_id = category_id 
+                            p.data.created_at = now
+                            if not update_future: p.data.group_id = None
+                            
+                            if hasattr(p, 'refresh_list_display'): p.refresh_list_display()
+                            if hasattr(p, 'refresh_created_display'): p.refresh_created_display()
+                            
+                self.back_from_list_picker()
+                
+            self._check_repeat_and_execute(self.editing_schedule, _do_update)
+
+        # 2. 添加模式逻辑
+        else:
+            cat_name = "未选择清单"
+            if category_id is not None:
+                cat = db_manager.get_category(category_id)
+                cat_name = cat.name if cat else "未知"
+            self.inline_add_view._set_category(category_id, cat_name)
+            self.back_from_list_picker()
+
+
+    def _check_repeat_and_execute(self, schedule_data, update_callback):
+        """复用的系列修改拦截器"""
+        from PyQt6.QtWidgets import QMessageBox
+        rule = getattr(schedule_data, 'repeat_rule', '')
+        if rule and str(rule).strip() not in ["", "无", "none", "不重复"]:
+            msg = QMessageBox(self)
+            msg.setWindowTitle("修改重复日程")
+            msg.setText(f"当前日程包含【{rule}】的重复规则。\n您的修改将会应用到该系列的所有日程。")
+            msg.setStyleSheet("""
+                QMessageBox { background-color: white; }
+                QPushButton { padding: 6px 15px; border-radius: 4px; background-color: #f0f0f0; font-family: 'Microsoft YaHei'; }
+                QPushButton:hover { background-color: #e0e0e0; }
+            """)
+            btn_all = msg.addButton("修改所有", QMessageBox.ButtonRole.AcceptRole)
+            btn_single = msg.addButton("仅修改本次", QMessageBox.ButtonRole.ActionRole)
+            btn_cancel = msg.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+            msg.exec()
+            
+            if msg.clickedButton() == btn_all:
+                update_callback(True)
+            elif msg.clickedButton() == btn_single:
+                update_callback(False)
+            else:
+                pass 
+        else:
+            update_callback(False)
+
+    # 双击进入文件夹视图
+    def _open_folder_view(self, category_id, category_name):
+        self.current_folder_id = category_id
+        self.current_folder_name = category_name
+
+        self.title_label.setText(category_name)
+        self.views_frame.hide()
+        self.btn_folder_back.show()
+
+        self.btn_add.show()
+
+        self._update_nav_icons()
+        self._last_signature = None 
+        self.refresh_data()
+
+    # 返回上一级
+    def _back_to_folder_view(self):
+        self.current_folder_id = "NOT_IN_FOLDER"
+        self.current_folder_name = ""
+
+        self.title_label.setText("待办看板")
+        self.btn_folder_back.hide()
+        self.views_frame.show()
+
+        self.view_mode = 'folder'
+        self._update_nav_icons()
+        self._last_signature = None
+        self.refresh_data()
 
     def _update_nav_icons(self):
         c_white = QColor(255, 255, 255, 255)
@@ -839,7 +1730,8 @@ class TodoBoardWindow(QWidget):
 
         pm_sort = self._get_icon("sort.svg", c_white, 16)
         if not pm_sort.isNull(): self.btn_sort.setIcon(QIcon(pm_sort))
-        self.btn_sort.setVisible(self.view_mode == 'stick')
+        show_sort = (self.view_mode == 'stick') or (getattr(self, 'current_folder_id', "NOT_IN_FOLDER") != "NOT_IN_FOLDER")
+        self.btn_sort.setVisible(show_sort)
 
         pm_add = self._get_icon("add.svg", c_white, 16)
         if not pm_add.isNull(): self.btn_add.setIcon(QIcon(pm_add))
@@ -869,7 +1761,8 @@ class TodoBoardWindow(QWidget):
     def _sort_by_priority(self):
         """一键按重要性(高->低)及创建时间(早->晚)重新排序"""
         import datetime
-        if self.view_mode != 'stick' or not hasattr(self.stick_view, 'cards'):
+        in_folder = getattr(self, 'current_folder_id', "NOT_IN_FOLDER") != "NOT_IN_FOLDER"
+        if (self.view_mode != 'stick' and not in_folder) or not hasattr(self.stick_view, 'cards'):
             return
 
         # 1. 提取当前所有显示的便签数据
@@ -900,7 +1793,6 @@ class TodoBoardWindow(QWidget):
         self._last_signature = None
         self.refresh_data()
 
-        # 5. 🟢 替换原来的 parent 通知逻辑
         self.notify_main_window_refresh()
 
     def resizeEvent(self, event):
@@ -908,7 +1800,7 @@ class TodoBoardWindow(QWidget):
         self._update_button_positions()
 
     def _update_button_positions(self):
-        """🟢 动态计算右上角按钮位置，跳过隐藏的按钮防止留空隙"""
+        """动态计算右上角按钮位置，跳过隐藏的按钮防止留空隙"""
         offset = 40  # 初始右边距
         
         if hasattr(self, 'btn_close'):
@@ -922,7 +1814,7 @@ class TodoBoardWindow(QWidget):
             offset += 30
             
         # 只有排序键处于显示状态，才分配空间
-        if hasattr(self, 'btn_sort') and self.view_mode == 'stick':
+        if hasattr(self, 'btn_sort') and not self.btn_sort.isHidden():
             self.btn_sort.move(self.width() - offset, 10)
             self.btn_sort.raise_()
             offset += 30
@@ -1008,11 +1900,151 @@ class TodoBoardWindow(QWidget):
                 parent.page_dashboard.req_refresh_all.emit()
 
     def _on_add_clicked(self):
-        """待办看板的智能添加入口 (预留给后续内联添加)"""
-        if self.view_mode == 'stick':
-            print(">> 准备在看板内联添加：新建待办便签")
-            # TODO: 实现生成一个空白虚线便签框，直接输入文字
+        """待办看板的添加入口"""
+        self.inline_add_view.reset()
+        if getattr(self, 'current_folder_id', "NOT_IN_FOLDER") != "NOT_IN_FOLDER":
+            self.inline_add_view._set_category(self.current_folder_id, self.current_folder_name)
+        self.view_stack.setCurrentWidget(self.inline_add_view)
+        
+        # 进入添加模式时，隐藏顶栏容易引起误触的按钮
+        self.views_frame.hide()
+        if hasattr(self, 'btn_folder_back'): self.btn_folder_back.hide()
+        self.btn_add.hide()
+        if hasattr(self, 'btn_sort'):
+            self.btn_sort.hide()
+        self._update_button_positions()
+
+    def _on_inline_add_canceled(self):
+        # 恢复顶栏添加按钮显示
+        self.btn_add.show()
+        
+        # 动态恢复状态：判断当前是否在文件夹内
+        if getattr(self, 'current_folder_id', "NOT_IN_FOLDER") != "NOT_IN_FOLDER":
+            # 如果在文件夹内：显示返回键，隐藏视图切换键
+            if hasattr(self, 'btn_folder_back'): self.btn_folder_back.show()
+            self.views_frame.hide()
+            if hasattr(self, 'btn_sort'): self.btn_sort.show()
             
-        elif self.view_mode == 'folder':
-            print(">> 准备在看板内联添加：新建清单文件夹")
-            # TODO: 实现生成一个带输入框的空白文件夹图标
+            # 文件夹内固定使用便签视图来展示内容
+            if not self.current_todos:
+                self.view_stack.setCurrentWidget(self.empty_placeholder)
+            else:
+                self.view_stack.setCurrentWidget(self.stick_view)
+        else:
+            # 如果在外部主看板：显示视图切换键，隐藏返回键
+            self.views_frame.show()
+            if hasattr(self, 'btn_folder_back'): self.btn_folder_back.hide()
+            if self.view_mode == 'stick' and hasattr(self, 'btn_sort'):
+                self.btn_sort.show()
+            
+            # 原本的堆栈恢复逻辑
+            if self.view_mode == 'stick':
+                if not self.current_todos:
+                    self.view_stack.setCurrentWidget(self.empty_placeholder)
+                else:
+                    self.view_stack.setCurrentWidget(self.stick_view)
+            elif self.view_mode == 'folder':
+                self.view_stack.setCurrentWidget(self.folder_view)
+                
+        # 清除签名，触发一次数据对齐
+        self._last_signature = None
+        self.refresh_data()
+        self._update_button_positions()
+
+    def _on_inline_add_saved(self):
+        self.show_toast("✅ 添加待办成功")
+        self._on_inline_add_canceled() # 恢复 UI 显示并回到看板
+        self.notify_main_window_refresh() # 通知主窗口同步刷新
+
+    def show_toast(self, message):
+        from PyQt6.QtWidgets import QLabel
+        from PyQt6.QtCore import Qt, QTimer
+        
+        # 如果已经有提示在显示，先关掉
+        if hasattr(self, 'toast_label') and self.toast_label.isVisible():
+            self.toast_label.close()
+            
+        self.toast_label = QLabel(message, self)
+        self.toast_label.setStyleSheet("""
+            background-color: rgba(0, 0, 0, 0.75);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-family: 'Microsoft YaHei';
+            font-size: 14px;
+            font-weight: bold;
+        """)
+        self.toast_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.toast_label.adjustSize()
+        self.toast_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents) 
+        
+        # 让弹窗完美居中在看板窗口
+        x = (self.width() - self.toast_label.width()) // 2
+        y = (self.height() - self.toast_label.height()) // 2
+        self.toast_label.move(x, y)
+        self.toast_label.show()
+        
+        # 定时 1.5 秒后自动销毁关闭
+        QTimer.singleShot(1500, self.toast_label.close)
+
+    def _on_add_folder_card_clicked(self):
+        """进入纯粹的清单管理界面"""
+        self.title_label.setText("管理清单")
+        
+        # 使用全新的管理视图加载数据并切换
+        self.manage_list_view.load_data()
+        self.view_stack.setCurrentWidget(self.manage_list_view)
+        
+        # 隐藏顶部不需要的按钮
+        self.views_frame.hide()
+        if hasattr(self, 'btn_folder_back'): self.btn_folder_back.hide()
+        self.btn_add.hide()
+        if hasattr(self, 'btn_sort'): self.btn_sort.hide()
+        self._update_button_positions()
+        
+        # 自动展开输入框体验更好
+        if not self.manage_list_view.input_container.isVisible():
+            self.manage_list_view._toggle_input()
+
+    def back_from_manage_list(self):
+        """从管理界面退回文件夹视图"""
+        self.title_label.setText("待办看板")
+        self.view_stack.setCurrentWidget(self.folder_view)
+        
+        self.views_frame.show()
+        self.btn_add.show()
+        if hasattr(self, 'btn_folder_back'): self.btn_folder_back.hide()
+        
+        self._update_button_positions()
+
+    def _handle_folder_delete(self, cat_id, cat_name):
+        from PyQt6.QtWidgets import QMessageBox
+        
+        # 查询该文件夹的状态 (active=有未完成待办, historical=有已完成/过期待办, empty=完全空)
+        status = db_manager.check_category_status(cat_id)
+        
+        if status == 'active':
+            # 非灰色（有待办）拦截
+            self.show_toast("🚫 该文件夹存在有效待办，无法直接删除！")
+        elif status == 'historical':
+            # 包含历史记录
+            reply = QMessageBox.question(
+                self, '确认删除', 
+                f"文件夹【{cat_name}】包含历史待办记录。\n是否继续删除？", 
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                db_manager.soft_delete_category(cat_id)
+                self.show_toast(f"✅ 已删除文件夹【{cat_name}】")
+                self._last_signature = None
+                self.refresh_data()
+                self.notify_main_window_refresh()
+        else:
+            # 完全空的灰色文件夹，直接物理抹除
+            db_manager.hard_delete_category(cat_id)
+            self.show_toast(f"✅ 已删除空文件夹【{cat_name}】")
+            self._last_signature = None
+            self.refresh_data()
+            self.notify_main_window_refresh()
+
+    

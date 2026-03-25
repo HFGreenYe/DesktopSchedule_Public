@@ -19,6 +19,7 @@ class Category(BaseModel):
     list_type = CharField(default='schedule', verbose_name="清单类型")
     is_deleted = BooleanField(default=False, verbose_name="是否已删除")
     created_at = DateTimeField(default=datetime.datetime.now, verbose_name="创建时间")
+    sort_order = DoubleField(default=lambda: datetime.datetime.now().timestamp(), verbose_name="排序权重")
 
     class Meta:
         table_name = 'categories'
@@ -49,7 +50,7 @@ class DatabaseManager:
     def __init__(self):
         self._connect()
         self._create_tables()
-        self._migrate_db() # 🟢 检查并自动升级表结构
+        self._migrate_db() # 检查并自动升级表结构
 
     def _connect(self):
         db.connect()
@@ -95,6 +96,20 @@ class DatabaseManager:
                 print("✅ [DB] 成功迁移 categories，已添加 list_type 字段")
             except Exception as e:
                 print(f"❌ [DB] categories 迁移失败: {e}")
+        
+        if 'sort_order' not in columns_cat:
+            from playhouse.migrate import migrate, SqliteMigrator
+            migrator = SqliteMigrator(db)
+            cat_sort_order_field = DoubleField(default=0.0, verbose_name="排序权重")
+            try:
+                migrate(migrator.add_column('categories', 'sort_order', cat_sort_order_field))
+                # 平滑赋初值
+                for c in Category.select():
+                    c.sort_order = c.created_at.timestamp() if c.created_at else 0.0
+                    c.save()
+                print("✅ [DB] 成功迁移 categories，已添加 sort_order 字段")
+            except Exception as e:
+                print(f"❌ [DB] categories 迁移失败(sort_order): {e}")
 
     # 辅助计算月份函数
     def _add_months(self, sourcedate, months):
@@ -347,7 +362,15 @@ class DatabaseManager:
         query = Category.select().where(Category.is_deleted == False)
         if list_type:
             query = query.where(Category.list_type == list_type)
-        return list(query.order_by(Category.created_at.asc()))
+        return list(query.order_by(Category.sort_order.desc(), Category.created_at.asc()))
+    
+    def update_category_fields(self, cat_id, **kwargs):
+        try:
+            Category.update(**kwargs).where(Category.id == cat_id).execute()
+            return True
+        except Exception as e:
+            print(f"❌ [DB] 更新分类字段失败: {e}")
+            return False
 
     def get_category_map(self):
         categories = Category.select()

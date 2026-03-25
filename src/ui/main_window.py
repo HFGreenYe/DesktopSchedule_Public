@@ -390,6 +390,10 @@ class MainWindow(FramelessMainWindow):
         if source_view == "week":
             self.week_window.go_to_list_picker_for_edit(schedule_data)
             return
+        if source_view == "todo_board":
+            if hasattr(self, 'todo_board') and self.todo_board:
+                self.todo_board.go_to_list_picker_for_edit(schedule_data)
+            return
         self.list_picker_mode = 'edit'
         # 记住从哪个界面（日程/待办）点进来的
         self.list_picker_source = source_view 

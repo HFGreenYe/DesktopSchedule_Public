@@ -29,3 +29,7 @@ __pycache__/
 # 6. 操作系统生成的隐藏文件
 .DS_Store
 Thumbs.db
+
+# 7. 自定义忽略文件 (本地打包脚本与项目上下文)
+pack_code.py
+project_context.txt
