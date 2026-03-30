@@ -1,7 +1,7 @@
 # src/ui/calendar_pop.py
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QCalendarWidget, QToolButton, QSpinBox, QLabel, QLineEdit
 from PyQt6.QtCore import Qt, pyqtSignal, QDate, QRect, QSize, QEvent, QPoint
-from PyQt6.QtGui import QPainter, QColor, QBrush, QPen, QIcon
+from PyQt6.QtGui import QPainter, QColor, QBrush, QPen, QIcon, QTextCharFormat
 import datetime
 from ..data.database import db_manager
 
@@ -9,7 +9,7 @@ class HighlightCalendarWidget(QCalendarWidget):
     """自定义日历控件：负责在有日程的日期下方画三色小圆点"""
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.date_status = {} # 🟢 改为字典，记录具体状态颜色
+        self.date_status = {} # 字典，记录具体状态颜色
         self.update_schedule_dates()
 
     def update_schedule_dates(self):
@@ -84,7 +84,7 @@ class CalendarPop(QWidget):
         
         self.drag_pos = None 
         self.current_theme = "dark" 
-
+        self.last_today = QDate.currentDate()
         self._setup_ui()
 
     def _setup_ui(self):
@@ -94,6 +94,7 @@ class CalendarPop(QWidget):
         self.calendar = HighlightCalendarWidget(self)
         self.calendar.setFirstDayOfWeek(Qt.DayOfWeek.Monday)
         self.calendar.setGridVisible(False) 
+        self.calendar.setVerticalHeaderFormat(QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader)
         layout.addWidget(self.calendar)
         self.calendar.clicked.connect(self._on_date_clicked)
 
@@ -127,14 +128,14 @@ class CalendarPop(QWidget):
             nav_bar.installEventFilter(self)
             
         # --- 双击空白处切换主题 ---
-        self.theme_toggle_area = QLabel(self)
-        self.theme_toggle_area.setGeometry(0, 32, 45, 25) 
-        self.theme_toggle_area.setStyleSheet("background: transparent;")
-        self.theme_toggle_area.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.theme_toggle_area.setToolTip("双击切换深浅色")
-        self.theme_toggle_area.mouseDoubleClickEvent = self._toggle_theme 
+        #self.theme_toggle_area = QLabel(self)
+        #self.theme_toggle_area.setGeometry(0, 32, 45, 25) 
+        #self.theme_toggle_area.setStyleSheet("background: transparent;")
+        #self.theme_toggle_area.setCursor(Qt.CursorShape.PointingHandCursor)
+        #self.theme_toggle_area.setToolTip("双击切换深浅色")
+        #self.theme_toggle_area.mouseDoubleClickEvent = self._toggle_theme 
 
-    def _toggle_theme(self, event):
+    def _toggle_theme(self, event=None):
         self.current_theme = "light" if self.current_theme == "dark" else "dark"
         self._apply_theme()
         self.update() 
@@ -146,7 +147,7 @@ class CalendarPop(QWidget):
             bg_color, text_color, disable_color = "#ffffff", "#333333", "#cccccc"
 
         self.calendar.setStyleSheet(f"""
-            QCalendarWidget QWidget {{ alternate-background-color: {bg_color}; }}
+            QCalendarWidget QWidget {{ alternate-background-color: {bg_color};color: {text_color}; }}
             QCalendarWidget QWidget#qt_calendar_navigationbar {{ background-color: #11c1df; }}
             
             QCalendarWidget QToolButton {{
@@ -185,19 +186,38 @@ class CalendarPop(QWidget):
             }}
             
             QCalendarWidget QAbstractItemView:enabled {{
-                color: {text_color}; background-color: {bg_color}; 
+                background-color: {bg_color}; 
                 selection-background-color: #11c1df; selection-color: white; 
                 font-family: 'Microsoft YaHei'; font-size: 13px; outline: 0px;
             }}
             QCalendarWidget QAbstractItemView:disabled {{ color: {disable_color}; }}
         """)
+        self._update_today_highlight()
+
+    def _update_today_highlight(self):
+        """标黄今天的日期，并处理跨天刷新逻辑"""
+        today = QDate.currentDate()
+        today_color = "#FFD700" if self.current_theme == "dark" else "#FAAD14"
+        
+        if self.last_today != today:
+            # 如果跨天了，清除昨天的黄色格式
+            self.calendar.setDateTextFormat(self.last_today, QTextCharFormat())
+        self.last_today = today
+        
+        fmt = QTextCharFormat()
+        fmt.setForeground(QColor(today_color))
+        font = fmt.font()
+        font.setBold(True) 
+        fmt.setFont(font)
+        
+        self.calendar.setDateTextFormat(today, fmt)
 
     def eventFilter(self, obj, event):
         """仅保留顶栏拖拽事件，清除了之前的滚轮拦截逻辑"""
         nav_bar = self.calendar.findChild(QWidget, "qt_calendar_navigationbar")
         if obj == nav_bar:
-            if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
-                self.drag_pos = event.globalPosition().toPoint() - self.pos()
+            if event.type() == QEvent.Type.MouseButtonDblClick and event.button() == Qt.MouseButton.LeftButton:
+                self._toggle_theme()  # 触发主题切换
                 return True
             elif event.type() == QEvent.Type.MouseMove and self.drag_pos is not None:
                 self.move(event.globalPosition().toPoint() - self.drag_pos)
@@ -216,6 +236,7 @@ class CalendarPop(QWidget):
         painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 8, 8)
 
     def show_at(self, pos, current_date=None):
+        self._update_today_highlight()
         self.calendar.update_schedule_dates() 
         if current_date:
             self.calendar.setSelectedDate(QDate(current_date.year, current_date.month, current_date.day))

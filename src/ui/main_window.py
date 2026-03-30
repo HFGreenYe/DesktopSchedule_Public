@@ -1,9 +1,9 @@
 # src/ui/main_window.py
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QStackedWidget
-from PyQt6.QtCore import Qt, QRectF, QTimer
+from PyQt6.QtCore import Qt, QRectF, QTimer, QEvent
 from PyQt6.QtGui import QPainter, QPainterPath, QBrush, QLinearGradient, QColor
 from qframelesswindow import FramelessMainWindow
-from datetime import datetime
+from datetime import datetime, timedelta
 import winsound
 
 from .header import HeaderBar
@@ -18,10 +18,11 @@ from .list_picker import ListPickerView
 from .reminder_pop import ReminderPop 
 from ..data.database import db_manager 
 from ..utils.styles import StyleManager
-
+from .month_window import MonthWindow
 from .calendar_pop import CalendarPop
 from .week_window import WeekWindow
 from .suspend_window_week import SuspendWindowWeek
+from .suspend_window_month import SuspendWindowMonth
 from .todo import TodoView
 
 class MainWindow(FramelessMainWindow):
@@ -63,7 +64,7 @@ class MainWindow(FramelessMainWindow):
         self.page_alarm = AlarmPickerView()
         self.body_stack.addWidget(self.page_alarm)
 
-        # Page 4: 清单选择页 (新增)
+        # Page 4: 清单选择页 
         self.page_list = ListPickerView()
         self.body_stack.addWidget(self.page_list)
         
@@ -80,17 +81,25 @@ class MainWindow(FramelessMainWindow):
         self.page_dashboard.req_refresh_all.connect(self.page_todo.refresh_data)
         self.suspend_window = SuspendWindow()
         self.week_window = WeekWindow()
+        self.month_window = MonthWindow()
         self.week_window.schedule_updated.connect(self._on_week_schedule_updated)
         if hasattr(self.header, 'weather_updated'):
             self.header.weather_updated.connect(self.week_window.update_weather_ui)
+            self.header.weather_updated.connect(self.month_window.update_weather_ui)
         self.suspend_window_week = SuspendWindowWeek()
+        self.suspend_window_month = SuspendWindowMonth()
         self.week_window.restore_requested.connect(self.restore_from_week_view)
         self.week_window.view_selected.connect(self.switch_view)
         self.week_window.request_schedule_detail.connect(
             lambda data: self.page_dashboard._show_detail_popup(data, source_view="week")
         )
         self.week_window.suspend_requested.connect(self.switch_week_to_suspend)
+        self.month_window.restore_requested.connect(self.restore_from_month_view)
+        self.month_window.suspend_requested.connect(self.switch_month_to_suspend)
+        self.month_window.view_selected.connect(self.switch_view)
+        self.month_window.date_selected.connect(self.jump_to_date_from_month)
         self.suspend_window_week.restore_requested.connect(self.switch_suspend_to_week)
+        self.suspend_window_month.restore_requested.connect(self.switch_suspend_to_month)
         hwnd = int(self.winId())
         apply_24h2_border_fix(hwnd)
 
@@ -106,7 +115,8 @@ class MainWindow(FramelessMainWindow):
         self.header.req_open_calendar.connect(self.show_calendar_popup)
         # 监听 Header 发出的跨天信号
         self.header.midnight_rollover.connect(self.handle_midnight_rollover)
-        
+        # 为顶部日期文本安装事件过滤器
+        self.header.lbl_date_info.installEventFilter(self)
         # 软件刚打开时，强制执行一次“选中今天”的逻辑，确保所有UI同步到今天
         self.on_calendar_date_picked(datetime.now().date())
         
@@ -177,10 +187,34 @@ class MainWindow(FramelessMainWindow):
         # 2. 同步更新 Header 上的文字（如果是今天显示"今天"，否则显示日期）
         today = datetime.now().date()
         if selected_date == today:
-            self.header.lbl_date_info.setText(f"{selected_date.strftime('%m月%d日')} 今天") # 保持你原本的格式
+            self.header.lbl_date_info.setText(f"{selected_date.strftime('%m月%d日')} 今天") 
         else:
             week_str = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][selected_date.weekday()]
             self.header.lbl_date_info.setText(f"{selected_date.strftime('%m月%d日')} {week_str}")
+
+    def eventFilter(self, obj, event):
+        """事件过滤器：专门拦截顶部日期标签的滚轮事件"""
+        if obj == self.header.lbl_date_info and event.type() == QEvent.Type.Wheel:
+            # 获取滚轮滚动的角度差
+            delta = event.angleDelta().y()
+            if delta != 0:
+                current_date = self.page_dashboard.current_date
+                
+                # 滚轮向上滑 (delta > 0) -> 回到前一天
+                if delta > 0:
+                    new_date = current_date - timedelta(days=1)
+                # 滚轮向下滑 (delta < 0) -> 去往后一天
+                else:
+                    new_date = current_date + timedelta(days=1)
+                
+                # 直接调用现成的方法，它会完美处理看板刷新和文字变化
+                self.on_calendar_date_picked(new_date)
+                
+            # 返回 True 意味着“这个事件我处理完了，不需要再传给底层的滚动条”
+            return True 
+            
+        # 其他无关事件交还给父类正常处理
+        return super().eventFilter(obj, event)
 
     def handle_midnight_rollover(self):
         """接收到 00:00 跨天信号时，强制把看板重置为新的'今天'"""
@@ -218,6 +252,23 @@ class MainWindow(FramelessMainWindow):
             winsound.PlaySound("SystemHand", winsound.SND_ALIAS | winsound.SND_LOOP | winsound.SND_ASYNC)
 
     # --- 路由跳转逻辑 ---
+    def jump_to_date_from_month(self, qdate):
+        """从月视图点击具体日期，直接跳转到主面板的该日视图"""
+        py_date = qdate.toPyDate()
+        self.page_dashboard.current_date = py_date
+        self.page_dashboard.refresh_data()
+        
+        # 顺便更新一下主面板的顶部日期文字
+        from datetime import datetime
+        today = datetime.now().date()
+        if py_date == today:
+            self.header.lbl_date_info.setText(f"{py_date.strftime('%m月%d日')} 今天")
+        else:
+            week_str = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][py_date.weekday()]
+            self.header.lbl_date_info.setText(f"{py_date.strftime('%m月%d日')} {week_str}")
+
+        # 利用现成的 switch_view 方法切回日视图
+        self.switch_view("day")
 
     def go_to_time_picker(self, start, end):
         """模式1：从【添加界面】打开时间选择"""
@@ -526,8 +577,18 @@ class MainWindow(FramelessMainWindow):
         if hasattr(self, 'page_todo'):
             self.page_todo.view_selector.hide()
 
+        # 从周视图切走时，让主窗口在周视图当前位置居中出现
         if view_name != "week" and hasattr(self, 'week_window') and self.week_window.isVisible():
+            geom = self.week_window.geometry()
+            self.move(geom.x() + (geom.width() - self.width()) // 2, geom.y() + (geom.height() - self.height()) // 2)
             self.week_window.hide()  # 关掉周界面
+            self.show()
+
+        # 从月视图切走时，让主窗口在月视图当前位置居中出现
+        if view_name != "month" and hasattr(self, 'month_window') and self.month_window.isVisible():
+            geom = self.month_window.geometry()
+            self.move(geom.x() + (geom.width() - self.width()) // 2, geom.y() + (geom.height() - self.height()) // 2)
+            self.month_window.hide()  # 关掉月界面
             self.show()
         
         if view_name == "week":
@@ -537,11 +598,26 @@ class MainWindow(FramelessMainWindow):
             if hasattr(self, 'header') and hasattr(self.header, 'current_weather_data'):
                 if self.header.current_weather_data:
                     self.week_window.update_weather_ui(self.header.current_weather_data)
-            desktop_rect = self.screen().availableGeometry()
-            center_x = desktop_rect.center().x() - self.week_window.width() // 2
-            center_y = desktop_rect.center().y() - self.week_window.height() // 2
-            self.week_window.move(center_x, center_y)
+            
+            # 获取主窗口坐标，计算周视图的相对中心位置
+            main_geom = self.geometry()
+            new_x = main_geom.x() + (main_geom.width() - self.week_window.width()) // 2
+            new_y = main_geom.y() + (main_geom.height() - self.week_window.height()) // 2
+            self.week_window.move(new_x, new_y)
             self.week_window.show()
+
+        elif view_name == "month":
+            # 月视图切换逻辑
+            self.hide()
+            if hasattr(self, 'header') and hasattr(self.header, 'current_weather_data'):
+                if self.header.current_weather_data:
+                    self.month_window.update_weather_ui(self.header.current_weather_data)
+            # 获取主窗口坐标，计算月视图的相对中心位置
+            main_geom = self.geometry()
+            new_x = main_geom.x() + (main_geom.width() - self.month_window.width()) // 2
+            new_y = main_geom.y() + (main_geom.height() - self.month_window.height()) // 2
+            self.month_window.move(new_x, new_y)
+            self.month_window.show()
             
         elif view_name == "todo":
             # 切换到待办视图
@@ -559,9 +635,29 @@ class MainWindow(FramelessMainWindow):
         else:
             self.show_toast(f"准备切换至：{view_name}")
 
+    def restore_from_month_view(self):
+        """从大屏月视图恢复到主视图窄屏"""
+        # 计算相对位置，以月视图当前位置为中心，收缩回主窗口
+        month_geom = self.month_window.geometry()
+        new_x = month_geom.x() + (month_geom.width() - self.width()) // 2
+        new_y = month_geom.y() + (month_geom.height() - self.height()) // 2
+        self.move(new_x, new_y)
+
+        self.month_window.hide()
+        self.body_stack.setCurrentWidget(self.page_dashboard) # 确保路由回到看板
+        self.page_dashboard.refresh_data()
+        self.show()
+
     def restore_from_week_view(self):
         """从周视图宽屏恢复到主视图窄屏"""
+        # 计算相对位置，以周视图当前位置为中心，收缩回主窗口
+        week_geom = self.week_window.geometry()
+        new_x = week_geom.x() + (week_geom.width() - self.width()) // 2
+        new_y = week_geom.y() + (week_geom.height() - self.height()) // 2
+        self.move(new_x, new_y)
+
         self.week_window.hide()
+        self.body_stack.setCurrentWidget(self.page_dashboard) # 确保路由回到看板
         self.page_dashboard.refresh_data()
         self.show()
 
@@ -634,6 +730,20 @@ class MainWindow(FramelessMainWindow):
         pos = self.suspend_window_week.pos()
         self.week_window.move(pos.x(), pos.y())
         self.week_window.show()
+
+    def switch_month_to_suspend(self):
+        """月视图 -> 月视图专属挂起条"""
+        self.month_window.hide()
+        pos = self.month_window.pos()
+        self.suspend_window_month.move(pos.x(), pos.y())
+        self.suspend_window_month.show()
+
+    def switch_suspend_to_month(self):
+        """月视图专属挂起条 -> 月视图"""
+        self.suspend_window_month.hide()
+        pos = self.suspend_window_month.pos()
+        self.month_window.move(pos.x(), pos.y())
+        self.month_window.show()
 
     def _on_week_schedule_updated(self, updated_schedule):
         """当周视图完成修改时，顺便把弹窗里的文字刷新一下"""

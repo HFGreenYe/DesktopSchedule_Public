@@ -113,7 +113,6 @@ class WeekScheduleCard(QFrame):
         if is_pinned:
             self.icon_pin = QLabel(self)
             self.icon_pin.setFixedSize(16, 16)
-            # 使用项目渲染器强行将你的 week_top_color.svg 染为主题色青色 (#0cc0df)
             pixmap = get_colored_icon("week_top_color.svg", "#0cc0df", 16)
             self.icon_pin.setPixmap(pixmap)
             #self.icon_pin.setScaledContents(True)
@@ -390,71 +389,80 @@ class WeekWindow(FramelessMainWindow):
             btn.setIconSize(QSize(16, 16)) 
             btn.setFixedSize(20, 20) 
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setStyleSheet("QPushButton { background: transparent; border: none; } QPushButton:hover { background: rgba(255,255,255,0.2); border-radius: 3px; }")
             
-            # 使用主界面的 ToolTipFilter
+            btn_default_style = "QPushButton { background: transparent; border: none; } QPushButton:hover { background: rgba(255,255,255,0.2); border-radius: 3px; }"
+            btn.setStyleSheet(btn_default_style)
+            
             tip_map = {"skin.svg": "换肤", "view.svg": "视图选择", "add.svg": "添加日程", "sort.svg": "排序", "filter.svg": "筛选"}
             btn._tooltip_filter = ToolTipFilter(tip_map[icon_name], btn)
             btn.installEventFilter(btn._tooltip_filter)
             
-            if icon_name == "add.svg":
+            if icon_name == "view.svg":
+                self.btn_view_toggle = btn 
+                self.btn_view_toggle.clicked.connect(self.toggle_view_selector)
+            elif icon_name == "add.svg":
                 btn.clicked.connect(self.switch_to_add_page)
-            elif icon_name == "view.svg":
-                btn.clicked.connect(self.open_view_selector)
                 
             icons_row.addWidget(btn)
         icons_row.addStretch()
         tools_layout.addLayout(icons_row)
 
-        search_row = QHBoxLayout()
-        search_row.setContentsMargins(0, 0, 0, 0) 
-        search_row.setSpacing(0)
-
+        # 1. 搜索框 
         self.search_box = QLineEdit()
         self.search_box.setPlaceholderText("搜索日程...")
         self.search_box.setFixedSize(123, 18) 
         self.search_box.setStyleSheet(StyleManager.get_search_input_style() + " QLineEdit { font-size: 10px; padding: 0px 4px; }")
-        tools_layout.addWidget(self.search_box)
         
-        status_row.addWidget(self.time_container, alignment=Qt.AlignmentFlag.AlignVCenter)
-        status_row.addSpacing(0)
-        status_row.addWidget(self.weather_container, alignment=Qt.AlignmentFlag.AlignVCenter)
-        status_row.addSpacing(0)
-        status_row.addWidget(self.tools_container, alignment=Qt.AlignmentFlag.AlignVCenter)
-
+        # 2. 视图选择器 
         self.view_selector_container = QFrame()
-        self.view_selector_container.setFixedHeight(36)
+        self.view_selector_container.setFixedHeight(22) 
         self.view_selector_container.setStyleSheet("""
             QFrame {
-                background: transparent; 
-                border: none;
+                background-color: rgba(255, 255, 255, 0.2);
+                border-radius: 4px;
             }
             QPushButton {
                 background: transparent; color: white;
-                font-family: 'Microsoft YaHei'; font-size: 13px; font-weight: bold;
-                border-radius: 6px; border: none; padding: 6px 12px;
+                font-family: 'Microsoft YaHei'; font-size: 11px; font-weight: bold;
+                border-radius: 4px; border: none; padding: 2px 8px;
             }
             QPushButton:hover { background-color: rgba(255, 255, 255, 0.2); }
         """)
         vs_layout = QHBoxLayout(self.view_selector_container)
-        vs_layout.setContentsMargins(0, 0, 0, 0) 
-        vs_layout.setSpacing(5)
-        vs_layout.addStretch()
+        vs_layout.setContentsMargins(2, 2, 2, 2) 
+        vs_layout.setSpacing(2)
+        
         views = {"day": "日视图", "week": "周视图", "month": "月视图", "priority": "四象限", "todo": "待办"}
         for vid, vname in views.items():
             v_btn = QPushButton(vname)
             v_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             
-            # 当前处于周视图，默认的高亮底色
             if vid == "week":
-                v_btn.setStyleSheet("background-color: rgba(255, 255, 255, 0.3); color: white;")
+                v_btn.setStyleSheet("background-color: rgba(0, 0, 0, 0.15); color: white;")
                 
             v_btn.clicked.connect(lambda _, v=vid: self._on_view_selected(v))
             vs_layout.addWidget(v_btn)
-        vs_layout.addStretch()
+            
         self.view_selector_container.hide()
-        status_row.addWidget(self.view_selector_container, alignment=Qt.AlignmentFlag.AlignVCenter)
-        status_row.addStretch()
+        bottom_action_row = QHBoxLayout()
+        bottom_action_row.setContentsMargins(0, 0, 0, 0)
+        bottom_action_row.setSpacing(0)
+        
+        bottom_action_row.addWidget(self.search_box)
+        bottom_action_row.addWidget(self.view_selector_container)
+        bottom_action_row.addStretch() 
+        
+        tools_layout.addLayout(bottom_action_row)
+
+        # ==========================================
+        # 组装顶层 status_row 
+        # ==========================================
+        status_row.addWidget(self.time_container, alignment=Qt.AlignmentFlag.AlignVCenter)
+        status_row.addSpacing(0)
+        status_row.addWidget(self.weather_container, alignment=Qt.AlignmentFlag.AlignVCenter)
+        status_row.addSpacing(0)
+        status_row.addWidget(self.tools_container, alignment=Qt.AlignmentFlag.AlignVCenter)
+        status_row.addStretch() # 顶满左侧区域
 
         self.btn_suspend = QPushButton(self.top_container)
         self.btn_suspend.setIcon(QIcon("assets/icons/hang_up.png"))
@@ -472,21 +480,18 @@ class WeekWindow(FramelessMainWindow):
         win_ctrl_layout.setSpacing(2)
         win_ctrl_layout.setContentsMargins(0, 8, 0, 0)
         
-        # 生成“更多”按钮，并挂载通用菜单组件
         self.btn_more = QToolButton()
         self.btn_more.setIcon(QIcon("assets/icons/more.png"))
         self.btn_more.setIconSize(QSize(12, 12))
         self.btn_more.setFixedSize(20, 20)
         self.btn_more.setStyleSheet(StyleManager.get_window_control_style(is_close=False))
         
-        # 引入并实例化 SharedMoreMenu 
         from .components import SharedMoreMenu
         self.shared_more_menu = SharedMoreMenu(self, self.btn_more)
         self.btn_more.clicked.connect(self.shared_more_menu.show_menu)
         
         win_ctrl_layout.addWidget(self.btn_more)
 
-        # 生成“同步”按钮
         self.btn_sync = QToolButton()
         self.btn_sync.setIcon(QIcon("assets/icons/sync.png"))
         self.btn_sync.setIconSize(QSize(12, 12))
@@ -494,7 +499,6 @@ class WeekWindow(FramelessMainWindow):
         self.btn_sync.setStyleSheet(StyleManager.get_window_control_style(is_close=False))
         win_ctrl_layout.addWidget(self.btn_sync)
 
-        # 生成“关闭”按钮
         self.btn_close = QToolButton()
         self.btn_close.setIcon(QIcon("assets/icons/close.png"))
         self.btn_close.setIconSize(QSize(12, 12))
@@ -556,7 +560,7 @@ class WeekWindow(FramelessMainWindow):
         self.btn_suspend.raise_()
 
         # ==========================================
-        # 2. 底部区域 (改造为多重堆栈视图)
+        # 2. 底部区域 
         # ==========================================
         self.content_area = QWidget()
         # 初始为纯白背景
@@ -673,10 +677,8 @@ class WeekWindow(FramelessMainWindow):
         """动态切换下半部分盒子的颜色，并命令窗口重绘自己"""
         self.is_edit_mode = is_edit
         if is_edit:
-            # 去掉白色遮挡，让底层的全屏渐变透出来
             self.content_area.setStyleSheet("background-color: transparent;")
         else:
-            # 重新盖上白布
             self.content_area.setStyleSheet("background-color: #FFFFFF; border-bottom-left-radius: 8px; border-bottom-right-radius: 8px;")
         
         self.update() # 实现 paintEvent 重绘
@@ -686,7 +688,6 @@ class WeekWindow(FramelessMainWindow):
         from PyQt6.QtCore import Qt, QTimer
         from .components import get_colored_icon 
         
-        # 如果已经有提示在显示，先关掉
         if hasattr(self, 'toast_widget') and self.toast_widget.isVisible():
             self.toast_widget.close()
             
@@ -1155,30 +1156,59 @@ class WeekWindow(FramelessMainWindow):
     def mouseReleaseEvent(self, event):
         self.drag_pos = None
 
+    def wheelEvent(self, event):
+        """
+        拦截鼠标滚轮事件：
+        只在非编辑模式、且鼠标位于顶部导航区域时，允许使用滚轮切换上下周。
+        """
+        # 1. 如果当前正在添加/修改日程（处于其他堆栈页），不响应滚轮翻页
+        if self.is_edit_mode or self.body_stack.currentWidget() != self.page_week_board:
+            super().wheelEvent(event)
+            return
+
+        # 2. 获取鼠标在窗口内的实时 Y 坐标
+        mouse_y = event.position().y()
+
+        # 3. 分区判定：鼠标是否在顶部区域 (top_container 内)
+        if mouse_y < self.top_container.height():
+            angle = event.angleDelta().y()
+            if angle > 0:
+                self._go_prev_week()  # 向上滚动，切换到上一周
+            elif angle < 0:
+                self._go_next_week()  # 向下滚动，切换到下一周
+            event.accept() # 事件已处理，不再向下传递
+        else:
+            # 如果鼠标在下方列表区，把事件还给父类，让 QScrollArea 正常处理上下滑动
+            super().wheelEvent(event)
+
+    def toggle_view_selector(self):
+        """点击视图图标时，自动判断是展开还是收起"""
+        if self.view_selector_container.isVisible():
+            self.close_view_selector()
+        else:
+            self.open_view_selector()
+
     def open_view_selector(self):
-        """隐藏三个容器，显示视图选择器"""
-        self.time_container.hide()
-        self.weather_container.hide()
-        self.tools_container.hide()
+        """隐藏搜索框，显示视图选择器，并高亮顶部视图图标"""
+        self.search_box.hide()
         self.view_selector_container.show()
+        if hasattr(self, 'btn_view_toggle'):
+            self.btn_view_toggle.setStyleSheet("QPushButton { background: rgba(255,255,255,0.3); border-radius: 3px; }")
 
     def close_view_selector(self):
-        """隐藏视图选择器，恢复三个容器"""
+        """隐藏视图选择器，恢复搜索框，并取消图标高亮"""
         self.view_selector_container.hide()
-        self.time_container.show()
-        self.weather_container.show()
-        self.tools_container.show()
+        self.search_box.show()
+        if hasattr(self, 'btn_view_toggle'):
+            self.btn_view_toggle.setStyleSheet("QPushButton { background: transparent; border: none; } QPushButton:hover { background: rgba(255,255,255,0.2); border-radius: 3px; }")
 
     def _on_view_selected(self, vid):
         """处理视图点击事件"""
         self.close_view_selector()
         if vid == "week":
             pass # 当前已经在周视图，无操作
-        elif vid == "day":
-            # 切回日视图，直接复用已有的恢复主界面逻辑
-            self.restore_requested.emit()
         else:
-            # 月视图、四象限，发给主路由去处理
+            # 无论是日视图、月视图还是待办，统交由主路由处理
             self.view_selected.emit(vid)
 
     def _check_repeat_and_execute(self, schedule_data, update_callback):

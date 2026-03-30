@@ -635,7 +635,11 @@ class FolderViewContainer(QScrollArea):
         
         self.grid_layout = QGridLayout(self.scroll_content)
         self.grid_layout.setContentsMargins(0, 0, 5, 0)
-        self.grid_layout.setSpacing(12) 
+        #self.grid_layout.setSpacing(12) 
+
+        self.grid_layout.setHorizontalSpacing(12) 
+        self.grid_layout.setVerticalSpacing(20)
+
         self.grid_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         self.setWidget(self.scroll_content)
