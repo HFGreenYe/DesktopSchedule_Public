@@ -343,11 +343,7 @@ class DatabaseManager:
         return self.category_repository.get_category(cat_id)
 
     def add_category(self, name, color="#0cc0df", list_type='schedule'):
-        try:
-            cat = Category.create(name=name, color=color, list_type=list_type)
-            return cat.id  
-        except Exception:
-            return None
+        return self.category_repository.add_category(name, color, list_type)
         
     def check_category_status(self, cat_id):
         return self.category_repository.check_category_status(cat_id)

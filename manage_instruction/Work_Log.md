@@ -353,3 +353,32 @@
 - 风险或疑点：
   - 本轮为低风险写入路径委托，外部接口与返回语义保持不变；其余写入/状态方法待后续轮次推进。
 
+## 2026-05-13 第一轮 B-8（add_category 委托）
+
+- 本轮任务名称：第一轮 B-8（add_category 委托）。
+- 实际修改文件：
+  - `src/data/database.py`
+  - `manage_instruction/Work_Log.md`
+- 改动说明：
+  - `DatabaseManager.add_category(name, color="#0cc0df", list_type='schedule')` 内部逻辑替换为委托调用：
+    - `return self.category_repository.add_category(name, color, list_type)`
+  - 保持默认参数与返回语义不变（成功返回分类 id，失败返回 `None`）。
+- 验证命令和结果：
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; import time; print('db import ok'); name='__tmp_b8_category_'+str(int(time.time())); cat_id=db_manager.add_category(name, color='#0cc0df', list_type='schedule'); print('created id:', cat_id); assert cat_id is not None; cat=db_manager.get_category(cat_id); print('created name:', cat.name if cat else None); assert cat and cat.name == name; cleanup=db_manager.hard_delete_category(cat_id); print('cleanup:', cleanup); assert cleanup; print('after cleanup:', db_manager.get_category(cat_id))"`
+  - 结果：通过。
+    - `db import ok`
+    - `created id: 7`
+    - `created name: __tmp_b8_category_1778685487`
+    - `cleanup: True`
+    - `after cleanup: None`
+  - `git diff --name-only -- src/ui` -> 无输出（UI 未改动）。
+  - `git diff --name-only -- schedule.db` -> 无输出（验证创建/清理后未留下数据库文件 diff）。
+  - `git diff --name-only` -> 显示：
+    - `src/data/database.py`
+    - `manage_instruction/Work_Task_Prompts.md`（既有改动，非本轮新增）
+    - 写日志后另含 `manage_instruction/Work_Log.md`。
+- 未完成事项：
+  - 第一轮 B 仍未完整执行；本轮仅完成 `add_category` 单方法委托。
+- 风险或疑点：
+  - 工作区存在 `manage_instruction/Work_Task_Prompts.md` 的既有改动，影响“仅两文件改动”校验观感；本轮未触碰该文件内容。
+
