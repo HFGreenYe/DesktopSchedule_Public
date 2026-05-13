@@ -302,11 +302,7 @@ class DatabaseManager:
             return False
 
     def update_schedule_status(self, schedule_id, new_status):
-        try:
-            Schedule.update(status=new_status).where(Schedule.id == schedule_id).execute()
-            return True
-        except Exception as e:
-            return False
+        return self.schedule_repository.update_schedule_status(schedule_id, new_status)
 
     def update_schedule_fields(self, schedule_id, **kwargs):
         try:
