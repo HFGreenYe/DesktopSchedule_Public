@@ -637,3 +637,26 @@
   - `manage_instruction/Work_Formulation.md`（补充阶段完成说明）
 - 当前状态：
   - 第一轮 B 已完成，可进入下一轮规划与拆单。
+
+## 2026-05-14 第一轮 B-17（第一轮 B 归档与管理文件职责清理）
+
+- 本轮任务名称：第一轮 B-17（归档第一轮 B 指令，并清理管理文件职责边界）。
+- 本轮性质：仅文档归档与职责清理，不修改项目代码。
+- 实际修改文件：
+  - `manage_instruction/Work_Instruction.md`
+  - `manage_instruction/History_Instruction.md`
+  - `manage_instruction/Work_Log.md`
+  - `manage_instruction/Workflow_Guide.md`
+  - `manage_instruction/Work_Task_Prompts.md`
+- 处理结果：
+  - 已将第一轮 B 指令完成状态归档到 `History_Instruction.md`。
+  - `Work_Instruction.md` 已清理为“等待下一阶段指令”状态，并保留执行日志硬性要求。
+  - `Workflow_Guide.md` 已移除阶段进度残留，保留分工、职责、流程与注意事项。
+  - `Work_Task_Prompts.md` 已清理为“等待下一小工单”的简洁状态。
+- 验证命令与结果：
+  - 未运行 Python（按本轮要求）。
+  - 通过 `git diff --name-only` / `git status --short --branch` 进行范围检查（见本轮末尾）。
+- 未完成事项：
+  - 无。
+- 风险或疑点：
+  - 无代码层风险；本轮仅涉及管理文档文本整理。

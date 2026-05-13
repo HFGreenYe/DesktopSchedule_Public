@@ -126,3 +126,22 @@ category_changed = pyqtSignal()
 
 - 第一轮 A 不接入旧 UI，不改变默认视觉效果。
 - 后续任务切换 `Work_Instruction.md` 前，应先把已完成指令归档到本文件。
+
+## 2026-05-14 第一轮 B - Repository + DatabaseManager 兼容委托（已完成归档）
+
+状态：已完成。
+
+完成范围摘要：
+- Repository 薄封装完成（`ScheduleRepository`、`CategoryRepository`）。
+- DatabaseManager 低风险公开方法兼容委托完成（读路径与低风险写路径逐步委托，UI 仍通过 `db_manager` 调用）。
+- `_migrate_db` 中 `migrator` 作用域风险修复完成。
+- B-15 整体技术验收通过（import、读写路径、GUI smoke、范围检查通过）。
+
+关键提交摘要（简述）：
+- 一组 `refactor` 提交完成 B-1 ~ B-14 的逐步委托落地。
+- `fix: add missing zhdate dependency`（`2803436`）补齐环境依赖。
+- 代表性删除委托提交：`1079352 refactor: delegate schedule deletion`。
+
+备注：
+- 第一轮 B 的执行明细与验证命令见 `Work_Log.md`。
+- 下一阶段应在 `Work_Instruction.md` 发布新任务，不再复用本轮指令文本。

@@ -1,57 +1,13 @@
-# Work Task Prompts
+﻿# Work Task Prompts
 
-This file records the current small task prompt and later review result. The user-facing Chinese prompt is sent in chat for copy/paste; this file is kept as a compact review anchor.
+用途：记录“当前待执行小工单”的提示词锚点与简要复核状态。
 
-Previous completed task:
-- B-14 `delete_schedule` delegation: completed in commit `1079352 refactor: delegate schedule deletion`.
+## 当前状态
 
----
+等待下一小工单。
 
-## 2026-05-14 B-15 round-B technical validation
+## 维护规则
 
-Status: reviewed / pending commit
-Commit: pending
-
-### Task Scope
-
-- Validate round B as a whole.
-- No architecture/code changes.
-- Allowed execution-window files:
-  - `manage_instruction/Work_Log.md`
-- `Work_Task_Prompts.md` is maintained by the advisor window, not the execution window.
-
-### Required Validation
-
-- Repository imports.
-- `db_manager` import.
-- Delegated read paths.
-- Delegated category write paths with temporary category data.
-- Delegated schedule write paths with write-back/or temporary schedule data.
-- GUI smoke test, or `main` import fallback if GUI cannot run.
-- Confirm `src/ui` has no diff.
-- Confirm `schedule.db` has no tracked diff.
-- Confirm final diff only contains allowed management/log files.
-
-### Review Result
-
-- `Work_Log.md` includes the B-15 validation summary, modified files, command/result summaries, GUI smoke result, diff checks, unfinished items, and risk notes.
-- Advisor reran Repository/db_manager/read-path validation successfully.
-- Advisor reran category temporary write-path validation successfully.
-- Advisor reran schedule write-back and temporary delete validation successfully.
-- Advisor reran GUI smoke test successfully:
-  - `gui smoke ok`
-  - `libpng warning: tRNS: invalid with alpha channel` appeared, but it did not block startup.
-- `git diff --name-only -- src/ui` has no output.
-- `git diff --name-only -- schedule.db` has no output.
-- Final diff contains only:
-  - `manage_instruction/Work_Log.md`
-  - `manage_instruction/Work_Task_Prompts.md`
-
-## 2026-05-14 B-16 closeout note
-
-Review result for B-15:
-- Overall technical validation passed.
-- Repository import, db_manager import, delegated read/write paths, and GUI smoke test all passed.
-- `src/ui` diff: clean.
-- `schedule.db` tracked diff: clean.
-- Round-B status: completed (B-1 ~ B-15).
+1. 仅保留当前或最近一条有效小工单信息。
+2. 已完成阶段的详细复核过程不长期保留在本文件。
+3. 阶段性历史请转入 `History_Instruction.md` 或 `Work_Log.md`。
