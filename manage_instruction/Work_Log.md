@@ -252,3 +252,32 @@
 - 风险或疑点：
   - 本轮仅做最小读委托，外部接口保持不变；其余委托与迁移相关事项仍待后续轮次处理。
 
+## 2026-05-13 第一轮 B-4（_migrate_db migrator 作用域修复）
+
+- 本轮任务名称：第一轮 B-4（`_migrate_db` migrator 作用域修复）。
+- 实际修改文件：
+  - `src/data/database.py`
+  - `manage_instruction/Work_Log.md`
+- 修复内容：
+  - 在 `_migrate_db` 的 `if 'list_type' not in columns_cat:` 分支内补充：
+    - `from playhouse.migrate import migrate, SqliteMigrator`
+    - `migrator = SqliteMigrator(db)`
+  - 目的：消除 `migrator` 在该分支中可能未定义的作用域风险。
+  - 未改变迁移判断顺序（`group_id` -> `schedules.sort_order` -> `categories.list_type` -> `categories.sort_order`）。
+  - 未改变迁移目标与旧数据 `sort_order` 补值策略。
+- 验证命令和结果：
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; print('database import ok')"`
+  - 结果：通过，输出 `database import ok`。
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from datetime import date; from src.data.database import db_manager; print(len(db_manager.get_all_schedules())); print(len(db_manager.get_active_categories())); print(len(db_manager.get_schedules_for_date(date.today()))); print(len(db_manager.get_category_map()))"`
+  - 结果：通过，输出：
+    - `9`
+    - `6`
+    - `8`
+    - `6`
+  - `git diff --name-only -- src/ui` -> 无输出（UI 未改动）。
+  - `git diff --name-only` -> 写日志前仅 `src/data/database.py`。
+- 是否有未完成事项：
+  - 第一轮 B 仍未完整执行；本轮仅完成 `_migrate_db` 的作用域风险修复。
+- 风险或疑点：
+  - 本轮未触碰迁移策略与业务逻辑，风险较低；后续仍需在完整 B 轮中继续执行剩余任务并联调验证。
+

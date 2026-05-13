@@ -94,6 +94,8 @@ class DatabaseManager:
         
         columns_cat = [col.name for col in db.get_columns('categories')]
         if 'list_type' not in columns_cat:
+            from playhouse.migrate import migrate, SqliteMigrator
+            migrator = SqliteMigrator(db)
             list_type_field = CharField(default='schedule', verbose_name="清单类型")
             try:
                 migrate(migrator.add_column('categories', 'list_type', list_type_field))
