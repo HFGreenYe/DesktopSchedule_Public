@@ -355,17 +355,7 @@ class DatabaseManager:
             return None
         
     def check_category_status(self, cat_id):
-        schedules = list(Schedule.select().where(Schedule.category_id == cat_id))
-        if not schedules:
-            return 'empty'
-            
-        now = datetime.datetime.now()
-        for s in schedules:
-            is_completed = (s.status == 1)
-            is_expired = (s.end_time and s.end_time < now and not is_completed)
-            if not is_completed and not is_expired:
-                return 'active'
-        return 'historical'
+        return self.category_repository.check_category_status(cat_id)
 
     def soft_delete_category(self, cat_id):
         try:

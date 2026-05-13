@@ -307,3 +307,26 @@
 - 风险或疑点：
   - 本轮为低风险读路径委托，外部接口与返回语义保持不变；其余委托与迁移相关任务待后续轮次执行。
 
+## 2026-05-13 第一轮 B-6（check_category_status 只读状态判断委托）
+
+- 本轮任务名称：第一轮 B-6（check_category_status 只读状态判断委托）。
+- 实际修改文件：
+  - `src/data/database.py`
+  - `manage_instruction/Work_Log.md`
+- 改动说明：
+  - `DatabaseManager.check_category_status(cat_id)` 内部逻辑替换为委托调用：
+    - `return self.category_repository.check_category_status(cat_id)`
+  - 未修改 Repository 逻辑、迁移逻辑、UI、写入方法。
+- 验证命令和结果：
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; allowed={'empty','active','historical'}; print('db import ok'); missing=db_manager.check_category_status(-999999); print('missing status:', missing); cats=db_manager.get_active_categories(); sample=[(c.id, db_manager.check_category_status(c.id)) for c in cats[:3]]; print('sample:', sample); assert missing in allowed; assert all(status in allowed for _, status in sample)"`
+  - 结果：通过。
+    - `db import ok`
+    - `missing status: empty`
+    - `sample: [(2, 'active'), (1, 'active'), (6, 'active')]`
+  - `git diff --name-only -- src/ui` -> 无输出（UI 无改动）。
+  - `git diff --name-only` -> 写日志前仅 `src/data/database.py`。
+- 是否有未完成事项：
+  - 第一轮 B 仍未完整执行；本轮仅完成 `check_category_status` 单方法委托。
+- 风险或疑点：
+  - 本轮为只读状态判断委托，返回值集合语义保持为 `empty / active / historical`。
+
