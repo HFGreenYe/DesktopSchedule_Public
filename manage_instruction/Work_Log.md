@@ -572,3 +572,54 @@
 - 风险或疑点：
   - 缺失 ID 路径当前返回 `True`（保持现有语义，不在本轮调整）。
   - 工作区存在 `manage_instruction/Work_Task_Prompts.md` 既有改动，影响“仅两文件改动”校验观感；本轮未触碰该文件。
+
+## 2026-05-14 第一轮 B-15（B 轮整体技术验收）
+
+- 本轮任务名称：第一轮 B-15（B 轮整体技术验收）。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+- 验收命令与结果摘要：
+  - 读路径 / import 验证：
+    - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from datetime import date; from src.repositories.schedule_repository import ScheduleRepository; from src.repositories.category_repository import CategoryRepository; from src.data.database import db_manager; ..."`
+    - 结果：通过。
+      - `repositories import ok`
+      - `db import ok`
+      - `all schedules: 9`
+      - `today schedules: 8`
+      - `active categories: 6`
+      - `category map: 6`
+      - `sample category id: 2`
+      - `get_category sample: True`
+      - `category status: active`
+  - 分类写路径临时数据验证：
+    - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; import time; ..."`
+    - 结果：通过。
+      - `created category: 7`
+      - `category update: True`
+      - `soft delete: True`
+      - `still active: False`
+      - `hard delete: True`
+      - `after hard delete: None`
+  - 日程写路径原值写回 + 临时删除验证：
+    - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; import time; ..."`
+    - 结果：通过。
+      - `schedules: 9`
+      - `status writeback: True True`
+      - `pin toggle restore: True True True True`
+      - `field writeback: True True`
+      - `created temp schedule: True`
+      - `temp matches: 1`
+      - `deleted temp schedule: True`
+      - `temp remaining: 0`
+  - GUI smoke test：
+    - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from PyQt6.QtWidgets import QApplication; from src.ui.main_window import MainWindow; app=QApplication([]); w=MainWindow(); print('gui smoke ok'); w.close(); app.quit()"`
+    - 结果：通过，输出 `gui smoke ok`（伴随 `libpng warning: tRNS: invalid with alpha channel`，不影响本轮验收结论）。
+- 范围检查：
+  - `git diff --name-only -- src/ui` -> 无输出。
+  - `git diff --name-only -- schedule.db` -> 无输出。
+  - `git diff --name-only` -> `manage_instruction/Work_Task_Prompts.md`（既有改动，非本轮新增）。
+  - `git status --short --branch` -> `main...origin/main [ahead 20]`，并显示 `M manage_instruction/Work_Task_Prompts.md`。
+- 未完成事项：
+  - 本轮仅做 B-15 验收，不执行新架构改动。
+- 风险或疑点：
+  - 工作区存在既有非本轮文件改动：`manage_instruction/Work_Task_Prompts.md`，导致“git diff 只包含日志文件”的理想状态不成立；本轮未触碰该文件。

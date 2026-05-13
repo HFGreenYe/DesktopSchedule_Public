@@ -3,69 +3,46 @@
 This file records the current small task prompt and later review result. The user-facing Chinese prompt is sent in chat for copy/paste; this file is kept as a compact review anchor.
 
 Previous completed task:
-- B-13 `update_schedule_fields` delegation: completed in commit `b2894b4 refactor: delegate schedule field updates`.
+- B-14 `delete_schedule` delegation: completed in commit `1079352 refactor: delegate schedule deletion`.
 
 ---
 
-## 2026-05-14 B-14 delete_schedule delegation
+## 2026-05-14 B-15 round-B technical validation
 
 Status: reviewed / pending commit
 Commit: pending
 
 ### Task Scope
 
-- Delegate only `DatabaseManager.delete_schedule(schedule_id)`.
+- Validate round B as a whole.
+- No architecture/code changes.
 - Allowed execution-window files:
-  - `src/data/database.py`
   - `manage_instruction/Work_Log.md`
 - `Work_Task_Prompts.md` is maintained by the advisor window, not the execution window.
 
-### Forbidden Changes
-
-- Do not modify `src/repositories/` unless `ScheduleRepository.delete_schedule` is missing; stop and explain first if so.
-- Do not modify `src/ui/`.
-- Do not modify `main.py`.
-- Do not modify `src/theme/`.
-- Do not modify `src/utils/signals.py`.
-- Do not modify `requirements.txt`.
-- Do not modify `Work_Snapshot.md`.
-- Do not modify `Work_Task_Prompts.md` from the execution window.
-- Do not leave any tracked `schedule.db` diff.
-- Do not modify migration logic.
-- Do not modify other Schedule write methods: `update_schedule_status`, `update_schedule_fields`, `toggle_pin_status`.
-- Do not modify category methods.
-- Do not modify repeat schedule logic: `add_schedule`, `update_schedule_with_repeat`, `_add_months`.
-- Do not delete or modify existing real schedule samples.
-
-### Expected Code Change
-
-```python
-return self.schedule_repository.delete_schedule(schedule_id)
-```
-
 ### Required Validation
 
-- Database import must pass.
-- Missing id path should be printed but not hard-asserted.
-- Create a temporary schedule through existing `db_manager.add_schedule(data)`.
-- Temporary schedule title must start with `__tmp_b14_delete_`.
-- Temporary schedule must use `repeat_rule='none'`.
-- Find the temporary schedule by title.
-- Delete only the temporary schedule.
-- Confirm the temporary schedule id is no longer returned by `db_manager.get_all_schedules()`.
+- Repository imports.
+- `db_manager` import.
+- Delegated read paths.
+- Delegated category write paths with temporary category data.
+- Delegated schedule write paths with write-back/or temporary schedule data.
+- GUI smoke test, or `main` import fallback if GUI cannot run.
 - Confirm `src/ui` has no diff.
 - Confirm `schedule.db` has no tracked diff.
+- Confirm final diff only contains allowed management/log files.
 
 ### Review Result
 
-- `Work_Log.md` includes the B-14 task name, changed files, validation command/result, unfinished items, and risk notes.
-- `git diff -- src/data/database.py` shows only the expected `delete_schedule` delegation.
+- `Work_Log.md` includes the B-15 validation summary, modified files, command/result summaries, GUI smoke result, diff checks, unfinished items, and risk notes.
+- Advisor reran Repository/db_manager/read-path validation successfully.
+- Advisor reran category temporary write-path validation successfully.
+- Advisor reran schedule write-back and temporary delete validation successfully.
+- Advisor reran GUI smoke test successfully:
+  - `gui smoke ok`
+  - `libpng warning: tRNS: invalid with alpha channel` appeared, but it did not block startup.
 - `git diff --name-only -- src/ui` has no output.
 - `git diff --name-only -- schedule.db` has no output.
-- Advisor reran validation successfully:
-  - `db import ok`
-  - missing id path was printed and not hard-asserted
-  - temporary schedule was created with `repeat_rule='none'`
-  - temporary schedule was found by title
-  - `delete_schedule` returned `True`
-  - temporary schedule id was no longer returned after deletion
+- Final diff contains only:
+  - `manage_instruction/Work_Log.md`
+  - `manage_instruction/Work_Task_Prompts.md`
