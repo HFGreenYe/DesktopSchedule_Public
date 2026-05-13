@@ -281,3 +281,29 @@
 - 风险或疑点：
   - 本轮未触碰迁移策略与业务逻辑，风险较低；后续仍需在完整 B 轮中继续执行剩余任务并联调验证。
 
+## 2026-05-13 第一轮 B-5（get_category 单条读取委托）
+
+- 本轮任务名称：第一轮 B-5（get_category 单条读取委托）。
+- 实际修改文件：
+  - `src/data/database.py`
+  - `manage_instruction/Work_Log.md`
+- 委托的方法：
+  - `DatabaseManager.get_category(cat_id)` -> `self.category_repository.get_category(cat_id)`
+- 语义说明：
+  - 保持旧行为：查不到或异常时返回 `None`（由 `CategoryRepository.get_category` 内部 `try/except` 保持）。
+- 验证命令和结果：
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; print('database import ok'); print('missing category', db_manager.get_category(-999999))"`
+  - 结果：通过。
+    - `database import ok`
+    - `missing category None`
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; cats=db_manager.get_active_categories(); print('active categories', len(cats)); print('first category ok', bool(db_manager.get_category(cats[0].id)) if cats else 'no sample')"`
+  - 结果：通过。
+    - `active categories 6`
+    - `first category ok True`
+  - `git diff --name-only -- src/ui` -> 无输出（UI 未改动）。
+  - `git diff --name-only` -> 写日志前仅 `src/data/database.py`。
+- 是否有未完成事项：
+  - 第一轮 B 仍未完整执行；本轮仅完成 `get_category` 单条读取委托。
+- 风险或疑点：
+  - 本轮为低风险读路径委托，外部接口与返回语义保持不变；其余委托与迁移相关任务待后续轮次执行。
+

@@ -345,10 +345,7 @@ class DatabaseManager:
         return self.category_repository.get_category_map()
         
     def get_category(self, cat_id):
-        try:
-            return Category.get_by_id(cat_id)
-        except:
-            return None
+        return self.category_repository.get_category(cat_id)
 
     def add_category(self, name, color="#0cc0df", list_type='schedule'):
         try:
