@@ -90,3 +90,56 @@
 - 未完成事项或风险：
   - 该环境下仍无法完成运行级 Python 验证；仅能继续进行静态代码确认。
 
+## 2026-05-13 复核指令与环境重测
+
+- 本轮任务名称：复读日志并对照指令文件检查遗漏，重跑环境验证。
+- 修改文件：
+  - `manage_instruction/Work_Log.md`
+- 指令对照结论（第一轮 A）：
+  - 已完成：目录骨架（第1步）、Theme 基础文件与 ThemeManager 基础能力（第2/3步）、signals 兼容式扩展（第5~7步要求已覆盖）。
+  - 无需单独施工：第4步为“本轮不做事项”约束，当前实现未违反。
+  - 仍遗漏：运行级验收尚未通过（应用可启动、signals import+emit、ThemeManager import/read_qss 需在可运行 Python 环境下验证）。
+- 验证命令和结果：
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe --version` -> 失败
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.utils.signals import global_signals; global_signals.skin_changed.connect(lambda: None); global_signals.skin_changed.emit(); print('signals ok')"` -> 失败
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.theme.theme_manager import ThemeManager; tm=ThemeManager(); print('theme manager ok'); print('light len', len(tm.read_qss('light.qss'))); print('dark len', len(tm.read_qss('dark.qss')))"` -> 失败
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from PyQt6.QtWidgets import QApplication; from src.ui.main_window import MainWindow; app=QApplication([]); w=MainWindow(); print('app startup ok'); w.close(); app.quit()"` -> 失败
+  - 统一失败摘要：`Unable to create process using '"C:\Users\hfgre\AppData\Local\Programs\Python\Python311\python.exe" ...'`
+  - 数据库改动检查：`git diff --name-only -- src/data/database.py` 无输出。
+- 是否仍有 Python 环境问题：是，仍存在。
+- 未完成事项或风险：
+  - 第一轮 A 的代码改造基本完成，但运行级验收被 Python 解释器损坏阻塞。
+  - 风险：若不修复 `.venv` 解释器指向，后续所有 Python 验证与测试都会失败。
+
+## 2026-05-13 环境修复状态同步（用户本地已完成）
+
+- 本轮任务名称：记录用户已完成的环境修复与验证结果（仅日志更新）。
+- 修改文件：
+  - `manage_instruction/Work_Log.md`
+- 环境处理说明：
+  - 按用户要求，本轮未重建 `.venv`，未执行任何代码修改。
+  - 环境问题由用户在本地 CMD 修复。
+- 用户侧已完成事项：
+  - 删除旧 `.venv_old`。
+  - 重建 `.venv`。
+  - 安装 `requirements.txt`。
+  - 补装 `zhdate==0.1`。
+  - 将 `zhdate==0.1` 写入 `requirements.txt`。
+  - 已提交 commit：`2803436 fix: add missing zhdate dependency`。
+- 用户侧验证结果（已通过）：
+  - `.\.venv\Scripts\python.exe -c "from src.utils.signals import global_signals; print('signals ok')"` -> 输出 `signals ok`
+  - `.\.venv\Scripts\python.exe -c "from src.theme.theme_manager import ThemeManager; tm=ThemeManager(); print(tm.read_qss('light.qss')[:20]); print('theme ok')"` -> 输出 `theme ok`
+  - `.\.venv\Scripts\python.exe .\main.py` -> 应用成功启动，图标正常。
+- 风险/未完成事项：
+  - 本条记录基于用户提供的本地验证结果；当前轮次未再次本地复跑。
+
+## 2026-05-13 执行沙箱权限说明
+
+- 执行窗口此前使用普通沙箱运行 Python 验证失败，错误根因不是代码或当前 `.venv` 损坏，而是沙箱内访问基础解释器路径受限。
+- 当前 `.venv` 会转调 `C:\Users\hfgre\AppData\Local\Programs\Python\Python311\python.exe`。
+- 执行窗口使用沙箱外权限复跑：
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.utils.signals import global_signals; print('signals ok')"`
+  - 结果通过，输出 `signals ok`。
+- 后续需要运行 Python 验证时，应优先使用用户本地 CMD 验证，或由执行窗口申请沙箱外权限运行。
+- 这不是第一轮 A 代码问题。
+
