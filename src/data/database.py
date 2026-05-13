@@ -326,41 +326,7 @@ class DatabaseManager:
         return self.schedule_repository.get_all_schedules()
     
     def get_schedules_for_date(self, target_date: datetime.date):
-        all_data = list(Schedule.select())
-        filtered = []
-        for s in all_data:
-            s_type = s.item_type  
-            if s_type == 'todo':
-                if not s.end_time: 
-                    filtered.append(s)
-                    continue
-            start = s.start_time.date() if s.start_time else None
-            end = s.end_time.date() if s.end_time else None
-            if start and end:
-                if start <= target_date <= end: filtered.append(s)
-            elif end:
-                if end == target_date: filtered.append(s)
-            else:
-                filtered.append(s)
-
-        now = datetime.datetime.now()
-        def sort_key(item):
-            rank_pin = 0 if item.is_pinned else 1
-            is_completed = (item.status == 1)
-            is_expired = False
-            if item.end_time and item.end_time < now and not is_completed:
-                is_expired = True
-            
-            if is_completed: rank_status = 3
-            elif is_expired: rank_status = 2
-            else: rank_status = 1
-                
-            time_val = item.start_time if item.start_time else item.created_at
-            if not time_val: time_val = datetime.datetime.min
-            return (rank_pin, rank_status, time_val)
-
-        filtered.sort(key=sort_key)
-        return filtered
+        return self.schedule_repository.get_schedules_for_date(target_date)
 
     def get_active_categories(self, list_type=None):
         return self.category_repository.get_active_categories(list_type)
@@ -374,8 +340,7 @@ class DatabaseManager:
             return False
 
     def get_category_map(self):
-        categories = Category.select()
-        return {c.id: c for c in categories}
+        return self.category_repository.get_category_map()
         
     def get_category(self, cat_id):
         try:

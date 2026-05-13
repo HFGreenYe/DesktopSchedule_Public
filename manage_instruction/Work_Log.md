@@ -230,3 +230,25 @@
 - 复核结果：
   - 当前 `database.py` diff 仅剩 B-2 预期改动：在 `DatabaseManager.__init__` 中实例化 Repository，并让 `get_all_schedules()`、`get_active_categories(list_type=None)` 委托 Repository。
 
+## 2026-05-13 第一轮 B-3（两个查询方法委托）
+
+- 本轮任务名称：第一轮 B-3（两个查询方法委托）。
+- 实际修改文件：
+  - `src/data/database.py`
+  - `manage_instruction/Work_Log.md`
+- 委托的方法：
+  - `DatabaseManager.get_schedules_for_date(target_date)` -> `self.schedule_repository.get_schedules_for_date(target_date)`
+  - `DatabaseManager.get_category_map()` -> `self.category_repository.get_category_map()`
+- 验证命令和结果：
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from datetime import date; from src.data.database import db_manager; schedules=db_manager.get_schedules_for_date(date.today()); category_map=db_manager.get_category_map(); print('database import ok'); print('today schedules', len(schedules), type(schedules).__name__); print('category map', len(category_map), type(category_map).__name__)"`
+  - 结果：通过。
+    - `database import ok`
+    - `today schedules 8 list`
+    - `category map 6 dict`
+  - `git diff --name-only -- src/ui` -> 无输出（UI 未改动）。
+  - `git diff --name-only` -> 写日志前仅 `src/data/database.py`。
+- 是否有未完成事项：
+  - 第一轮 B 仍未完整执行；本轮仅按要求完成 B-3 两个查询方法委托。
+- 风险或疑点：
+  - 本轮仅做最小读委托，外部接口保持不变；其余委托与迁移相关事项仍待后续轮次处理。
+
