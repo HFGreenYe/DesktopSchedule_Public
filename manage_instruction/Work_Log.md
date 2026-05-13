@@ -185,3 +185,48 @@
 - 风险/疑点：
   - Repository 当前为独立层，尚未接入 `db_manager`；行为一致性需在后续 B-2/B-3 委托接入后再做联调验证。
 
+## 2026-05-13 第一轮 B-2（DatabaseManager 最小读方法委托）
+
+- 本轮任务名称：只执行第一轮 B-2，不执行完整第一轮 B。
+- 修改文件：
+  - `src/data/database.py`
+  - `manage_instruction/Work_Log.md`
+- 委托的方法：
+  - `DatabaseManager.get_all_schedules()` -> `self.schedule_repository.get_all_schedules()`
+  - `DatabaseManager.get_active_categories(list_type=None)` -> `self.category_repository.get_active_categories(list_type)`
+- 结构性最小变更：
+  - 在 `DatabaseManager.__init__` 中延迟导入并实例化：
+    - `self.schedule_repository = ScheduleRepository()`
+    - `self.category_repository = CategoryRepository()`
+  - 未修改写入方法（`add_schedule`、`update_schedule_with_repeat`、`delete_schedule`、`update_schedule_status`、分类删除等）。
+  - 未修改 `_migrate_db` 迁移逻辑。
+- 验证命令和结果：
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.repositories.schedule_repository import ScheduleRepository; from src.repositories.category_repository import CategoryRepository; print('repositories import ok'); from src.data.database import db_manager; print('database import ok'); print('all_schedules len', len(db_manager.get_all_schedules())); print('active_categories len', len(db_manager.get_active_categories()))"`
+  - 结果：通过。
+    - `repositories import ok`
+    - `database import ok`
+    - `all_schedules len 9`
+    - `active_categories len 6`
+  - `git diff --name-only -- src/ui` -> 无输出（未修改 UI）。
+  - `git diff --name-only` -> 仅 `src/data/database.py`（写日志前）。
+- 未完成事项：
+  - 第一轮 B 其余步骤未执行（例如更多方法委托、迁移逻辑修复、更广泛联调验证）。
+- 风险或疑点：
+  - 本轮为最小读委托，外部接口保持兼容；更深层行为一致性需在后续 B 阶段继续验证。
+
+## 2026-05-13 第一轮 B-2 顾问窗口复核修正
+
+- 本轮任务名称：复核执行窗口 B-2 改动并清理非逻辑性文件头问题。
+- 修改文件：
+  - `src/data/database.py`
+  - `manage_instruction/Work_Log.md`
+- 修正内容：
+  - 复核 `git diff -- src/data/database.py` 时发现文件首行被加入 UTF-8 BOM/隐藏字符，表现为首行从 `# src/data/database.py` 变成带隐藏字符的 `﻿# src/data/database.py`。
+  - 已移除该隐藏字符，恢复为普通 `# src/data/database.py`。
+- 逻辑影响：
+  - 未修改 `DatabaseManager` 委托逻辑。
+  - 未修改数据库迁移逻辑。
+  - 未修改 UI、Repository、主题或信号文件。
+- 复核结果：
+  - 当前 `database.py` diff 仅剩 B-2 预期改动：在 `DatabaseManager.__init__` 中实例化 Repository，并让 `get_all_schedules()`、`get_active_categories(list_type=None)` 委托 Repository。
+

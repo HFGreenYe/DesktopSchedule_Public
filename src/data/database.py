@@ -51,6 +51,10 @@ class DatabaseManager:
         self._connect()
         self._create_tables()
         self._migrate_db() # 检查并自动升级表结构
+        from src.repositories import CategoryRepository, ScheduleRepository
+
+        self.schedule_repository = ScheduleRepository()
+        self.category_repository = CategoryRepository()
 
     def _connect(self):
         db.connect()
@@ -319,7 +323,7 @@ class DatabaseManager:
             return False
 
     def get_all_schedules(self):
-        return list(Schedule.select().order_by(Schedule.created_at.desc()))
+        return self.schedule_repository.get_all_schedules()
     
     def get_schedules_for_date(self, target_date: datetime.date):
         all_data = list(Schedule.select())
@@ -359,10 +363,7 @@ class DatabaseManager:
         return filtered
 
     def get_active_categories(self, list_type=None):
-        query = Category.select().where(Category.is_deleted == False)
-        if list_type:
-            query = query.where(Category.list_type == list_type)
-        return list(query.order_by(Category.sort_order.desc(), Category.created_at.asc()))
+        return self.category_repository.get_active_categories(list_type)
     
     def update_category_fields(self, cat_id, **kwargs):
         try:
