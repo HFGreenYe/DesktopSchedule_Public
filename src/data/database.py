@@ -352,10 +352,6 @@ class DatabaseManager:
         return self.category_repository.soft_delete_category(cat_id)
 
     def hard_delete_category(self, cat_id):
-        try:
-            Category.delete().where(Category.id == cat_id).execute()
-            return True
-        except:
-            return False
+        return self.category_repository.hard_delete_category(cat_id)
 
 db_manager = DatabaseManager()
