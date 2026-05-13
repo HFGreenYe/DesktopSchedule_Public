@@ -540,3 +540,35 @@
   - 旧 `DatabaseManager` 的异常打印文案与当前 `ScheduleRepository.update_schedule_fields` 打印文案可能不一致；本轮按约束未修改 Repository。
   - 工作区存在 `manage_instruction/Work_Task_Prompts.md` 既有改动，影响“仅两文件改动”校验观感；本轮未触碰该文件。
 
+
+## 2026-05-14 第一轮 B-14（delete_schedule 委托）
+
+- 本轮任务名称：第一轮 B-14（delete_schedule 委托）。
+- 实际修改文件：
+  - `src/data/database.py`
+  - `manage_instruction/Work_Log.md`
+- 改动说明：
+  - `DatabaseManager.delete_schedule(schedule_id)` 内部逻辑替换为委托调用：
+    - `return self.schedule_repository.delete_schedule(schedule_id)`
+  - 未修改 repository、UI、migration、分类方法、其他 Schedule 写入方法。
+- 验证命令和结果：
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; import time; print('db import ok'); missing=db_manager.delete_schedule(-999999); print('missing id path:', missing); name='__tmp_b14_delete_'+str(int(time.time())); data={'title': name, 'item_type': 'schedule', 'priority': 0, 'repeat_rule': 'none', 'description': 'temporary delete validation', 'category_id': None}; created=db_manager.add_schedule(data); print('created:', created); assert created is True; matches=[s for s in db_manager.get_all_schedules() if s.title == name]; print('matches:', len(matches)); assert len(matches) == 1; temp_id=matches[0].id; print('temp id:', temp_id); result=db_manager.delete_schedule(temp_id); print('delete result:', result); assert result is True; remaining=[s for s in db_manager.get_all_schedules() if s.id == temp_id]; print('remaining:', len(remaining)); assert len(remaining) == 0"`
+  - 结果：通过。
+    - `db import ok`
+    - `missing id path: True`
+    - `created: True`
+    - `matches: 1`
+    - `temp id: 16`
+    - `delete result: True`
+    - `remaining: 0`
+  - `git diff --name-only -- src/ui` -> 无输出（UI 未改动）。
+  - `git diff --name-only -- schedule.db` -> 无输出（未留下数据库文件 diff）。
+  - `git diff --name-only` -> 写日志前显示：
+    - `src/data/database.py`
+    - `manage_instruction/Work_Task_Prompts.md`（既有改动，非本轮新增）
+    - 写日志后另含 `manage_instruction/Work_Log.md`。
+- 未完成事项：
+  - 第一轮 B 仍未完整执行；本轮仅完成 `delete_schedule` 单方法委托。
+- 风险或疑点：
+  - 缺失 ID 路径当前返回 `True`（保持现有语义，不在本轮调整）。
+  - 工作区存在 `manage_instruction/Work_Task_Prompts.md` 既有改动，影响“仅两文件改动”校验观感；本轮未触碰该文件。

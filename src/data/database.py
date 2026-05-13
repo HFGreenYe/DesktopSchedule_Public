@@ -295,11 +295,7 @@ class DatabaseManager:
             return False
 
     def delete_schedule(self, schedule_id):
-        try:
-            Schedule.delete().where(Schedule.id == schedule_id).execute()
-            return True
-        except Exception as e:
-            return False
+        return self.schedule_repository.delete_schedule(schedule_id)
 
     def update_schedule_status(self, schedule_id, new_status):
         return self.schedule_repository.update_schedule_status(schedule_id, new_status)

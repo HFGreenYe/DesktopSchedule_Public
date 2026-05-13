@@ -3,18 +3,18 @@
 This file records the current small task prompt and later review result. The user-facing Chinese prompt is sent in chat for copy/paste; this file is kept as a compact review anchor.
 
 Previous completed task:
-- B-12 `toggle_pin_status` delegation: completed in commit `cc0274b refactor: delegate schedule pin toggle`.
+- B-13 `update_schedule_fields` delegation: completed in commit `b2894b4 refactor: delegate schedule field updates`.
 
 ---
 
-## 2026-05-13 B-13 update_schedule_fields delegation
+## 2026-05-14 B-14 delete_schedule delegation
 
 Status: reviewed / pending commit
 Commit: pending
 
 ### Task Scope
 
-- Delegate only `DatabaseManager.update_schedule_fields(schedule_id, **kwargs)`.
+- Delegate only `DatabaseManager.delete_schedule(schedule_id)`.
 - Allowed execution-window files:
   - `src/data/database.py`
   - `manage_instruction/Work_Log.md`
@@ -22,7 +22,7 @@ Commit: pending
 
 ### Forbidden Changes
 
-- Do not modify `src/repositories/` unless `ScheduleRepository.update_schedule_fields` is missing; stop and explain first if so.
+- Do not modify `src/repositories/` unless `ScheduleRepository.delete_schedule` is missing; stop and explain first if so.
 - Do not modify `src/ui/`.
 - Do not modify `main.py`.
 - Do not modify `src/theme/`.
@@ -32,35 +32,40 @@ Commit: pending
 - Do not modify `Work_Task_Prompts.md` from the execution window.
 - Do not leave any tracked `schedule.db` diff.
 - Do not modify migration logic.
-- Do not modify other Schedule write methods: `delete_schedule`, `update_schedule_status`, `toggle_pin_status`.
+- Do not modify other Schedule write methods: `update_schedule_status`, `update_schedule_fields`, `toggle_pin_status`.
 - Do not modify category methods.
 - Do not modify repeat schedule logic: `add_schedule`, `update_schedule_with_repeat`, `_add_months`.
+- Do not delete or modify existing real schedule samples.
 
 ### Expected Code Change
 
 ```python
-return self.schedule_repository.update_schedule_fields(schedule_id, **kwargs)
+return self.schedule_repository.delete_schedule(schedule_id)
 ```
 
 ### Required Validation
 
 - Database import must pass.
 - Missing id path should be printed but not hard-asserted.
-- If an existing schedule sample exists, write the original title back to the same schedule and verify it remains unchanged.
-- If no sample exists, do not create complex schedule data; record that real write validation was skipped.
+- Create a temporary schedule through existing `db_manager.add_schedule(data)`.
+- Temporary schedule title must start with `__tmp_b14_delete_`.
+- Temporary schedule must use `repeat_rule='none'`.
+- Find the temporary schedule by title.
+- Delete only the temporary schedule.
+- Confirm the temporary schedule id is no longer returned by `db_manager.get_all_schedules()`.
 - Confirm `src/ui` has no diff.
 - Confirm `schedule.db` has no tracked diff.
-- If repository exception logging differs from the old `DatabaseManager` message, do not change repository in this task; record the risk.
 
 ### Review Result
 
-- `Work_Log.md` includes the B-13 task name, changed files, validation command/result, unfinished items, and risk notes.
-- `git diff -- src/data/database.py` shows only the expected `update_schedule_fields` delegation.
+- `Work_Log.md` includes the B-14 task name, changed files, validation command/result, unfinished items, and risk notes.
+- `git diff -- src/data/database.py` shows only the expected `delete_schedule` delegation.
 - `git diff --name-only -- src/ui` has no output.
 - `git diff --name-only -- schedule.db` has no output.
 - Advisor reran validation successfully:
   - `db import ok`
   - missing id path was printed and not hard-asserted
-  - existing sample schedule had its original title written back
-  - verification confirmed the title remained unchanged
-- Risk noted in `Work_Log.md`: repository exception logging text may differ from old `DatabaseManager` logging text; this task intentionally did not modify repository behavior.
+  - temporary schedule was created with `repeat_rule='none'`
+  - temporary schedule was found by title
+  - `delete_schedule` returned `True`
+  - temporary schedule id was no longer returned after deletion
