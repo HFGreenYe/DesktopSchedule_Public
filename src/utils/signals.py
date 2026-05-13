@@ -1,9 +1,16 @@
-# src/utils/signals.py
-from PyQt6.QtCore import QObject, pyqtSignal
+﻿from PyQt6.QtCore import QObject, pyqtSignal
+
 
 class AppSignals(QObject):
-    # 定义一个信号：当皮肤改变时触发
+    # Legacy signal must remain no-arg for compatibility.
     skin_changed = pyqtSignal()
 
-# 创建全局单例实例
+    # Event bus channels for new architecture layers.
+    theme_changed = pyqtSignal(str)
+    schedule_added = pyqtSignal(object)
+    schedule_updated = pyqtSignal(object)
+    schedule_deleted = pyqtSignal(int)
+    category_changed = pyqtSignal()
+
+
 global_signals = AppSignals()
