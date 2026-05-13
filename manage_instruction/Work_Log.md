@@ -473,3 +473,37 @@
   - 缺失 ID 路径当前返回 `True`（保持现有语义，不在本轮调整）。
   - 工作区存在 `manage_instruction/Work_Task_Prompts.md` 既有改动，影响“仅两文件改动”校验观感；本轮未触碰该文件。
 
+## 2026-05-13 第一轮 B-12（toggle_pin_status 委托）
+
+- 本轮任务名称：第一轮 B-12（toggle_pin_status 委托）。
+- 实际修改文件：
+  - `src/data/database.py`
+  - `manage_instruction/Work_Log.md`
+- 改动说明：
+  - `DatabaseManager.toggle_pin_status(schedule_id, current_pin_status)` 内部逻辑替换为委托调用：
+    - `return self.schedule_repository.toggle_pin_status(schedule_id, current_pin_status)`
+  - 未修改 repository 文件、迁移逻辑、UI、分类方法、其他 Schedule 写入方法。
+- 验证命令和结果：
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; print('db import ok'); missing=db_manager.toggle_pin_status(-999999, False); print('missing id path:', missing); schedules=db_manager.get_all_schedules(); print('schedules', len(schedules)); sample=schedules[0] if schedules else None; sid=getattr(sample, 'id', None); original=getattr(sample, 'is_pinned', None); first=db_manager.toggle_pin_status(sid, original) if sample else 'no sample'; refreshed=next((s for s in db_manager.get_all_schedules() if sample and s.id == sid), None) if sample else None; toggled_ok=(refreshed is not None and refreshed.is_pinned == (not original)) if sample else 'no sample'; second=db_manager.toggle_pin_status(sid, refreshed.is_pinned) if sample and refreshed else 'no sample'; restored=next((s for s in db_manager.get_all_schedules() if sample and s.id == sid), None) if sample else None; restored_ok=(restored is not None and restored.is_pinned == original) if sample else 'no sample'; print('sample id:', sid); print('original pinned:', original); print('first toggle:', first); print('toggled ok:', toggled_ok); print('second toggle:', second); print('restored ok:', restored_ok); assert (sample is None) or (first is True and second is True and toggled_ok is True and restored_ok is True)"`
+  - 结果：通过。
+    - `db import ok`
+    - `missing id path: True`
+    - `schedules 9`
+    - `sample id: 15`
+    - `original pinned: False`
+    - `first toggle: True`
+    - `toggled ok: True`
+    - `second toggle: True`
+    - `restored ok: True`
+  - `git diff --name-only -- src/ui` -> 无输出（UI 未改动）。
+  - `git diff --name-only -- schedule.db` -> 无输出（未留下数据库文件 diff）。
+  - `git diff --name-only` -> 写日志前显示：
+    - `src/data/database.py`
+    - `manage_instruction/Work_Task_Prompts.md`（既有改动，非本轮新增）
+    - 写日志后另含 `manage_instruction/Work_Log.md`。
+- 未完成事项：
+  - 第一轮 B 仍未完整执行；本轮仅完成 `toggle_pin_status` 单方法委托。
+- 风险或疑点：
+  - 缺失 ID 路径当前返回 `True`（保持现有语义，不在本轮调整）。
+  - 工作区存在 `manage_instruction/Work_Task_Prompts.md` 既有改动，影响“仅两文件改动”校验观感；本轮未触碰该文件。
+

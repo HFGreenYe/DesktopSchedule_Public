@@ -313,12 +313,7 @@ class DatabaseManager:
             return False
         
     def toggle_pin_status(self, schedule_id, current_pin_status):
-        try:
-            new_status = not current_pin_status
-            Schedule.update(is_pinned=new_status).where(Schedule.id == schedule_id).execute()
-            return True
-        except Exception as e:
-            return False
+        return self.schedule_repository.toggle_pin_status(schedule_id, current_pin_status)
 
     def get_all_schedules(self):
         return self.schedule_repository.get_all_schedules()
