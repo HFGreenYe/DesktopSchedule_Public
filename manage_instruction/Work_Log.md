@@ -330,3 +330,26 @@
 - 风险或疑点：
   - 本轮为只读状态判断委托，返回值集合语义保持为 `empty / active / historical`。
 
+## 2026-05-13 第一轮 B-7（update_category_fields 委托）
+
+- 本轮任务名称：第一轮 B-7（update_category_fields 委托）。
+- 实际修改文件：
+  - `src/data/database.py`
+  - `manage_instruction/Work_Log.md`
+- 改动说明：
+  - `DatabaseManager.update_category_fields(cat_id, **kwargs)` 内部逻辑替换为委托调用：
+    - `return self.category_repository.update_category_fields(cat_id, **kwargs)`
+  - 未修改 repository 文件、迁移逻辑、UI、其他写入/状态方法。
+- 验证命令和结果：
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; print('db import ok'); cats=db_manager.get_active_categories(); print('cats', len(cats)); result=db_manager.update_category_fields(cats[0].id, color=cats[0].color) if cats else 'no sample'; print('update_category_fields path:', result)"`
+  - 结果：通过。
+    - `db import ok`
+    - `cats 6`
+    - `update_category_fields path: True`
+  - `git diff --name-only -- src/ui` -> 无输出（UI 未改动）。
+  - `git diff --name-only` -> 写日志前仅 `src/data/database.py`。
+- 是否有未完成事项：
+  - 第一轮 B 仍未完整执行；本轮仅完成 `update_category_fields` 单方法委托。
+- 风险或疑点：
+  - 本轮为低风险写入路径委托，外部接口与返回语义保持不变；其余写入/状态方法待后续轮次推进。
+

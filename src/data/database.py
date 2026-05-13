@@ -334,12 +334,7 @@ class DatabaseManager:
         return self.category_repository.get_active_categories(list_type)
     
     def update_category_fields(self, cat_id, **kwargs):
-        try:
-            Category.update(**kwargs).where(Category.id == cat_id).execute()
-            return True
-        except Exception as e:
-            print(f"❌ [DB] 更新分类字段失败: {e}")
-            return False
+        return self.category_repository.update_category_fields(cat_id, **kwargs)
 
     def get_category_map(self):
         return self.category_repository.get_category_map()
