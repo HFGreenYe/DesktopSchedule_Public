@@ -507,3 +507,36 @@
   - 缺失 ID 路径当前返回 `True`（保持现有语义，不在本轮调整）。
   - 工作区存在 `manage_instruction/Work_Task_Prompts.md` 既有改动，影响“仅两文件改动”校验观感；本轮未触碰该文件。
 
+## 2026-05-13 第一轮 B-13（update_schedule_fields 委托）
+
+- 本轮任务名称：第一轮 B-13（update_schedule_fields 委托）。
+- 实际修改文件：
+  - `src/data/database.py`
+  - `manage_instruction/Work_Log.md`
+- 改动说明：
+  - `DatabaseManager.update_schedule_fields(schedule_id, **kwargs)` 内部逻辑替换为委托调用：
+    - `return self.schedule_repository.update_schedule_fields(schedule_id, **kwargs)`
+  - 未修改 repository 文件、迁移逻辑、UI、分类方法、其他 Schedule 写入方法。
+- 验证命令和结果：
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; print('db import ok'); missing=db_manager.update_schedule_fields(-999999, title='__missing__'); print('missing id path:', missing); schedules=db_manager.get_all_schedules(); print('schedules', len(schedules)); sample=schedules[0] if schedules else None; sid=getattr(sample, 'id', None); original=getattr(sample, 'title', None); result=db_manager.update_schedule_fields(sid, title=original) if sample else 'no sample'; refreshed=next((s for s in db_manager.get_all_schedules() if sample and s.id == sid), None) if sample else None; verified=(refreshed is not None and refreshed.title == original) if sample else 'no sample'; print('sample id:', sid); print('original title:', original); print('update result:', result); print('verified:', verified); assert (sample is None) or (result is True and verified is True)"`
+  - 结果：通过。
+    - `db import ok`
+    - `missing id path: True`
+    - `schedules 9`
+    - `sample id: 15`
+    - `original title: Бхзы`
+    - `update result: True`
+    - `verified: True`
+  - `git diff --name-only -- src/ui` -> 无输出（UI 未改动）。
+  - `git diff --name-only -- schedule.db` -> 无输出（未留下数据库文件 diff）。
+  - `git diff --name-only` -> 写日志前显示：
+    - `src/data/database.py`
+    - `manage_instruction/Work_Task_Prompts.md`（既有改动，非本轮新增）
+    - 写日志后另含 `manage_instruction/Work_Log.md`。
+- 未完成事项：
+  - 第一轮 B 仍未完整执行；本轮仅完成 `update_schedule_fields` 单方法委托。
+- 风险或疑点：
+  - 缺失 ID 路径当前返回 `True`（保持现有语义，不在本轮调整）。
+  - 旧 `DatabaseManager` 的异常打印文案与当前 `ScheduleRepository.update_schedule_fields` 打印文案可能不一致；本轮按约束未修改 Repository。
+  - 工作区存在 `manage_instruction/Work_Task_Prompts.md` 既有改动，影响“仅两文件改动”校验观感；本轮未触碰该文件。
+

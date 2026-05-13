@@ -305,13 +305,8 @@ class DatabaseManager:
         return self.schedule_repository.update_schedule_status(schedule_id, new_status)
 
     def update_schedule_fields(self, schedule_id, **kwargs):
-        try:
-            Schedule.update(**kwargs).where(Schedule.id == schedule_id).execute()
-            return True
-        except Exception as e:
-            print(f"❌ [DB] 更新字段失败: {e}")
-            return False
-        
+        return self.schedule_repository.update_schedule_fields(schedule_id, **kwargs)
+
     def toggle_pin_status(self, schedule_id, current_pin_status):
         return self.schedule_repository.toggle_pin_status(schedule_id, current_pin_status)
 
