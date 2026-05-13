@@ -143,3 +143,45 @@
 - 后续需要运行 Python 验证时，应优先使用用户本地 CMD 验证，或由执行窗口申请沙箱外权限运行。
 - 这不是第一轮 A 代码问题。
 
+## 2026-05-13 第一轮 B-1（仅新增 Repository 薄封装）
+
+- 本轮任务名称：阅读 `Work_Instruction.md` 后，仅执行第一轮 B-1，不执行完整第一轮 B。
+- 修改文件：
+  - `src/repositories/schedule_repository.py`
+  - `src/repositories/category_repository.py`
+  - `src/repositories/__init__.py`
+  - `manage_instruction/Work_Log.md`
+- 主要方法（按指令清单实现）：
+  - `ScheduleRepository`：
+    - `delete_schedule(schedule_id)`
+    - `update_schedule_status(schedule_id, new_status)`
+    - `update_schedule_fields(schedule_id, **kwargs)`
+    - `toggle_pin_status(schedule_id, current_pin_status)`
+    - `get_all_schedules()`
+    - `get_schedules_for_date(target_date)`
+  - `CategoryRepository`：
+    - `get_active_categories(list_type=None)`
+    - `update_category_fields(cat_id, **kwargs)`
+    - `get_category_map()`
+    - `get_category(cat_id)`
+    - `add_category(name, color="#0cc0df", list_type="schedule")`
+    - `check_category_status(cat_id)`
+    - `soft_delete_category(cat_id)`
+    - `hard_delete_category(cat_id)`
+- 实现边界说明：
+  - 仅做 Peewee 模型低风险薄封装；未迁移 Peewee Model。
+  - 未修改 `DatabaseManager`，未让 UI 直接引用 Repository，未实现新功能。
+- 验证命令和结果：
+  - import 验证（沙箱外权限）：
+    - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.repositories.schedule_repository import ScheduleRepository; from src.repositories.category_repository import CategoryRepository; from src.repositories import ScheduleRepository as SR, CategoryRepository as CR; print('repositories ok')"`
+    - 结果：通过，输出 `repositories ok`。
+  - 禁止改动检查：
+    - `git diff --name-only -- src/data/database.py` -> 无输出（未修改）
+    - `git diff --name-only -- src/ui` -> 无输出（未修改）
+  - 当前工作区变更检查：
+    - `git status --short` -> 仅显示 `src/repositories/*` 本轮相关改动。
+- 未完成事项：
+  - 第一轮 B 的后续步骤（`DatabaseManager` 内部委托、`_migrate_db` 风险修复、数据库低风险调用链验证）本轮未执行。
+- 风险/疑点：
+  - Repository 当前为独立层，尚未接入 `db_manager`；行为一致性需在后续 B-2/B-3 委托接入后再做联调验证。
+
