@@ -533,3 +533,7 @@ git commit -m "refactor: describe this small step"
 - 不想公开的密钥文件
 
 `.env` 里如果包含 API key，提交前要特别小心。本项目是本地私用时问题不大，但如果以后推到 GitHub，必须先处理 `.env`。
+
+## 2026-05-14 阶段进度补充
+
+第一轮 B 已完成（B-1 ~ B-14 委托落地，B-15 整体技术验收通过）。

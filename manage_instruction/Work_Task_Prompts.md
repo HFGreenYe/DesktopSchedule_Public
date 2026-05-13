@@ -46,3 +46,12 @@ Commit: pending
 - Final diff contains only:
   - `manage_instruction/Work_Log.md`
   - `manage_instruction/Work_Task_Prompts.md`
+
+## 2026-05-14 B-16 closeout note
+
+Review result for B-15:
+- Overall technical validation passed.
+- Repository import, db_manager import, delegated read/write paths, and GUI smoke test all passed.
+- `src/ui` diff: clean.
+- `schedule.db` tracked diff: clean.
+- Round-B status: completed (B-1 ~ B-15).

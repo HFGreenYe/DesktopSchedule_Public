@@ -200,3 +200,9 @@ cd /d D:\CodeProjects\DesktopSchedule\DesktopSchedule
 待推进：
 - B-8：委托 `add_category(name, color="#0cc0df", list_type="schedule")`。
 - 后续：`soft_delete_category`、`hard_delete_category`、`update_schedule_status`、`toggle_pin_status`、`update_schedule_fields`、`delete_schedule` 等。
+
+## 2026-05-14 第一轮 B 进度更新（B-16）
+
+- B-1 到 B-14：已完成。
+- B-15（B 轮整体技术验收）：已完成。
+- 第一轮 B 当前状态：已完成，可进入下一轮任务拆分。

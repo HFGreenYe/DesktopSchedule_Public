@@ -623,3 +623,17 @@
   - 本轮仅做 B-15 验收，不执行新架构改动。
 - 风险或疑点：
   - 工作区存在既有非本轮文件改动：`manage_instruction/Work_Task_Prompts.md`，导致“git diff 只包含日志文件”的理想状态不成立；本轮未触碰该文件。
+
+## 2026-05-14 第一轮 B 完成总结（B-16）
+
+- 第一轮 B 范围结论：
+  - B-1 ~ B-14 已完成（Repository 薄封装 + DatabaseManager 兼容委托逐步落地）。
+  - B-15 整体技术验收已完成（读写路径、GUI smoke、非侵入约束均通过）。
+- 本轮（B-16）仅文档收口，不做代码改动。
+- 本轮文档更新：
+  - `manage_instruction/Work_Log.md`（追加完成总结）
+  - `manage_instruction/Workflow_Guide.md`（更新第一轮 B 进度）
+  - `manage_instruction/Work_Task_Prompts.md`（补充 B-15 复核结论）
+  - `manage_instruction/Work_Formulation.md`（补充阶段完成说明）
+- 当前状态：
+  - 第一轮 B 已完成，可进入下一轮规划与拆单。
