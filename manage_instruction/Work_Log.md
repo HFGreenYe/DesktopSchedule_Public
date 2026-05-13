@@ -382,3 +382,33 @@
 - 风险或疑点：
   - 工作区存在 `manage_instruction/Work_Task_Prompts.md` 的既有改动，影响“仅两文件改动”校验观感；本轮未触碰该文件内容。
 
+## 2026-05-13 第一轮 B-9（soft_delete_category 委托）
+
+- 本轮任务名称：第一轮 B-9（soft_delete_category 委托）。
+- 实际修改文件：
+  - `src/data/database.py`
+  - `manage_instruction/Work_Log.md`
+- 改动说明：
+  - `DatabaseManager.soft_delete_category(cat_id)` 内部逻辑替换为委托调用：
+    - `return self.category_repository.soft_delete_category(cat_id)`
+  - 未修改 repository 文件、迁移逻辑、UI、其他写入/状态方法。
+- 验证命令和结果：
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; import time; print('db import ok'); name='__tmp_b9_soft_delete_'+str(int(time.time())); cat_id=db_manager.add_category(name, color='#0cc0df', list_type='schedule'); print('created id:', cat_id); assert cat_id is not None; result=db_manager.soft_delete_category(cat_id); print('soft delete:', result); assert result is True; active_ids=[c.id for c in db_manager.get_active_categories()]; print('still active:', cat_id in active_ids); assert cat_id not in active_ids; cleanup=db_manager.hard_delete_category(cat_id); print('cleanup:', cleanup); assert cleanup is True; print('after cleanup:', db_manager.get_category(cat_id)); assert db_manager.get_category(cat_id) is None"`
+  - 结果：通过。
+    - `db import ok`
+    - `created id: 7`
+    - `soft delete: True`
+    - `still active: False`
+    - `cleanup: True`
+    - `after cleanup: None`
+  - `git diff --name-only -- src/ui` -> 无输出（UI 未改动）。
+  - `git diff --name-only -- schedule.db` -> 无输出（未留下数据库文件 diff）。
+  - `git diff --name-only` -> 写日志前显示：
+    - `src/data/database.py`
+    - `manage_instruction/Work_Task_Prompts.md`（既有改动，非本轮新增）
+    - 写日志后另含 `manage_instruction/Work_Log.md`。
+- 未完成事项：
+  - 第一轮 B 仍未完整执行；本轮仅完成 `soft_delete_category` 单方法委托。
+- 风险或疑点：
+  - 工作区存在 `manage_instruction/Work_Task_Prompts.md` 既有改动，影响“仅两文件改动”校验观感；本轮未触碰该文件。
+

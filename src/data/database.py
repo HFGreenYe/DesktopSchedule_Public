@@ -349,11 +349,7 @@ class DatabaseManager:
         return self.category_repository.check_category_status(cat_id)
 
     def soft_delete_category(self, cat_id):
-        try:
-            Category.update(is_deleted=True).where(Category.id == cat_id).execute()
-            return True
-        except:
-            return False
+        return self.category_repository.soft_delete_category(cat_id)
 
     def hard_delete_category(self, cat_id):
         try:
