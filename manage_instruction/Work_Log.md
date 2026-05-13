@@ -76,3 +76,17 @@
   - 运行级信号连通验证未完成，仅完成静态确认。
   - 本轮未改 UI、未接入 ThemeManager、未实现新功能，改动范围符合约束。
 
+## 2026-05-13 指定解释器验证（内层目录 + 显式 .venv python）
+
+- 本轮任务名称：按用户新规则执行路径固定验证并记录日志。
+- 修改文件：
+  - `manage_instruction/Work_Log.md`
+- 验证命令和结果：
+  - `cd /d D:\CodeProjects\DesktopSchedule\DesktopSchedule`（在 PowerShell 中等价执行为 `Set-Location 'D:\CodeProjects\DesktopSchedule\DesktopSchedule'`）
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.utils.signals import global_signals; print('signals ok')"`
+  - 结果：失败。
+  - 错误摘要：`Unable to create process using '"C:\Users\hfgre\AppData\Local\Programs\Python\Python311\python.exe" ...'`
+- 是否仍有 Python 环境问题：是。当前 `.venv\Scripts\python.exe` 仍依赖不存在的基础解释器路径。
+- 未完成事项或风险：
+  - 该环境下仍无法完成运行级 Python 验证；仅能继续进行静态代码确认。
+
