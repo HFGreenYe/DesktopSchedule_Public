@@ -1,9 +1,9 @@
 # src/data/database.py
-from peewee import *
+from peewee import CharField, DoubleField
 import datetime
 import uuid 
 from src.data.connection import BASE_DIR, DB_PATH, db
-from src.data.models import BaseModel, Category, Schedule
+from src.data.models import Category, Schedule
 
 class DatabaseManager:
     def __init__(self):
