@@ -1,13 +1,8 @@
 # src/data/database.py
 from peewee import *
 import datetime
-import os
 import uuid 
-
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DB_PATH = os.path.join(BASE_DIR, "schedule.db")
-
-db = SqliteDatabase(DB_PATH)
+from src.data.connection import BASE_DIR, DB_PATH, db
 
 class BaseModel(Model):
     class Meta:
