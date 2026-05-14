@@ -6,7 +6,7 @@ class ScheduleRepository:
 
     def __init__(self, schedule_model=None):
         if schedule_model is None:
-            from src.data.database import Schedule
+            from src.data.models import Schedule
 
             schedule_model = Schedule
         self._schedule_model = schedule_model
@@ -93,4 +93,3 @@ class ScheduleRepository:
 
         filtered.sort(key=sort_key)
         return filtered
-

@@ -155,3 +155,49 @@
   - 第二轮 A-4/A-5/A-6 待后续工单执行。
 - 风险或疑点：
   - 未发现循环导入问题；`models.py` -> `connection.py` 单向依赖，`database.py` -> `models.py` + `connection.py`，当前导入链可用。
+
+## 2026-05-14 第二轮 A-4（ScheduleRepository 模型导入来源调整）
+
+- 本轮任务名称：第二轮 A-4（ScheduleRepository 模型导入来源调整）。
+- 实际修改文件：
+  - `src/repositories/schedule_repository.py`
+  - `manage_instruction/Work_Log.md`
+- 修改内容说明：
+  - 仅调整 `ScheduleRepository.__init__` 在 `schedule_model is None` 时的延迟导入来源：
+    - 从 `from src.data.database import Schedule`
+    - 改为 `from src.data.models import Schedule`
+  - 其余方法实现未改动。
+- 构造函数注入能力确认：
+  - 已保留 `schedule_model` 注入能力与 `self._schedule_model = schedule_model` 逻辑不变。
+- 验证命令和结果：
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.repositories.schedule_repository import ScheduleRepository; from src.data.models import Schedule; repo=ScheduleRepository(); print('schedule repo import ok'); print('uses models Schedule:', repo._schedule_model is Schedule)"`
+    - 结果：
+      - `schedule repo import ok`
+      - `uses models Schedule: True`
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from datetime import date; from src.data.database import db_manager; print('db import ok'); print('all schedules', len(db_manager.get_all_schedules())); print('today schedules', len(db_manager.get_schedules_for_date(date.today())))"`
+    - 结果：
+      - `db import ok`
+      - `all schedules 62`
+      - `today schedules 9`
+  - 静态检查：
+    - `rg -n "from src\.data\.database import Schedule|from \.\.data\.database import Schedule|from \.database import Schedule" src/repositories/schedule_repository.py`
+    - 结果：无输出（退出码 1，符合预期）。
+- diff 范围检查结果：
+  - `git diff --name-only -- src/repositories/category_repository.py` -> 无输出。
+  - `git diff --name-only -- src/data/database.py` -> 无输出。
+  - `git diff --name-only -- src/data/models.py` -> 无输出。
+  - `git diff --name-only -- src/data/connection.py` -> 无输出。
+  - `git diff --name-only -- src/ui` -> 无输出。
+  - `git diff --name-only -- schedule.db` -> 无输出。
+  - `git diff --name-only` ->
+    - `src/repositories/schedule_repository.py`
+    - `manage_instruction/Work_Task_Prompts.md`（本轮开始前既有改动）
+    - 写日志后另含 `manage_instruction/Work_Log.md`。
+  - `git status --short --branch` ->
+    - `M src/repositories/schedule_repository.py`
+    - `M manage_instruction/Work_Task_Prompts.md`（既有改动）
+    - 写日志后另含 `M manage_instruction/Work_Log.md`。
+- 未完成事项：
+  - A-5/A-6 待后续工单执行。
+- 风险或疑点：
+  - 未发现行为回归或循环导入；默认模型来源已切换至 `models.py`，兼容注入路径保持不变。

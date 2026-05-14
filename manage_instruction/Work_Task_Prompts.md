@@ -4,23 +4,24 @@
 
 ## 当前小工单
 
-第二轮 A-3：新增 `src/data/models.py`，并移动 Peewee 模型类。
+第二轮 A-4：调整 `ScheduleRepository` 模型导入来源。
 
 状态：等待执行窗口执行，执行后由顾问窗口复核。
 
 ## 正式执行提示词
 
 ~~~text
-请执行第二轮 A-3：新增 src/data/models.py，并将 Peewee 模型类从 src/data/database.py 移入 models.py。不执行 A-4/A-5/A-6，也不执行第二轮 B/C/D。
+请执行第二轮 A-4：只调整 ScheduleRepository 的模型导入来源，不执行 A-5/A-6，也不执行第二轮 B/C/D。
 
 本轮允许修改：
-- src/data/models.py
-- src/data/database.py
+- src/repositories/schedule_repository.py
 - manage_instruction/Work_Log.md
 
 本轮禁止修改：
+- src/repositories/category_repository.py
+- src/data/database.py
+- src/data/models.py
 - src/data/connection.py
-- src/repositories/
 - src/ui/
 - main.py
 - src/theme/
@@ -32,89 +33,61 @@
 - Work_Task_Prompts.md
 
 原则：
-- 只移动模型类，不改业务逻辑。
-- 不修改 Repository。
-- 不改数据库字段含义、默认值、字段名、表名。
-- 不改 _migrate_db 的迁移步骤、迁移顺序和补值策略。
-- 不改 DatabaseManager 公开方法行为。
-- 不迁移 add_schedule、update_schedule_with_repeat、_add_months。
-- 不新增 Service。
+- 只把 ScheduleRepository 中从 src.data.database 延迟导入 Schedule 的位置，改为从 src.data.models 导入 Schedule。
+- 保留构造函数注入能力，schedule_model 参数仍然可用。
+- 不改变任何 Repository 方法名、参数、返回值语义、排序逻辑、过滤逻辑、CRUD 行为。
+- 不修改 CategoryRepository。
 - 不做额外重构。
-- 保持 db_manager 对外方法名、参数、返回值语义不变。
+- 不改数据库字段、迁移逻辑或业务逻辑。
 
 具体任务：
-1. 新增 src/data/models.py。
-2. 将以下类从 src/data/database.py 移入 src/data/models.py：
-   - BaseModel
-   - Category
-   - Schedule
-3. models.py 必须从 connection.py 导入 db：
-   from src.data.connection import db
-   或：
-   from .connection import db
-4. models.py 不得从 database.py 导入任何内容。
-5. database.py 应从 models.py 导入：
-   from src.data.models import BaseModel, Category, Schedule
-   或等价相对导入。
-6. database.py 中不再保留 BaseModel、Category、Schedule 的类定义。
-7. 暂不修改 src/repositories/，Repository 导入来源留到 A-4/A-5 单独处理。
+1. 在 src/repositories/schedule_repository.py 中定位 ScheduleRepository.__init__。
+2. 将 schedule_model is None 时的 Schedule 导入来源改为 src.data.models。
+3. 保持 self._schedule_model = schedule_model 的注入逻辑不变。
+4. 不修改其他方法实现。
 
 验收要求：
-1. 验证 models.py 和 database.py import：
-   D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.models import BaseModel, Category, Schedule; from src.data.database import db_manager; print('models import ok'); print('db import ok'); print(len(db_manager.get_all_schedules()))"
 
-2. 验证基础读路径：
-   D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from datetime import date; from src.data.database import db_manager; print('all schedules', len(db_manager.get_all_schedules())); print('active categories', len(db_manager.get_active_categories())); print('today schedules', len(db_manager.get_schedules_for_date(date.today())))"
+1. Repository import 和默认模型来源验证：
 
-3. 验证临时分类写路径：
-   D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; import time; name='__tmp_round2a3_category_'+str(int(time.time())); cat_id=db_manager.add_category(name, color='#0cc0df', list_type='schedule'); print('created category', cat_id); assert cat_id is not None; cat=db_manager.get_category(cat_id); print('category exists', bool(cat)); assert cat and cat.name == name; deleted=db_manager.hard_delete_category(cat_id); print('deleted category', deleted); assert deleted is True; after=db_manager.get_category(cat_id); print('after delete', after); assert after is None"
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.repositories.schedule_repository import ScheduleRepository; from src.data.models import Schedule; repo=ScheduleRepository(); print('schedule repo import ok'); print('uses models Schedule:', repo._schedule_model is Schedule)"
 
-4. 验证临时日程创建/删除路径：
-   D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; import time; name='__tmp_round2a3_schedule_'+str(int(time.time())); data={'title': name, 'item_type': 'schedule', 'priority': 0, 'repeat_rule': 'none', 'description': 'temporary round2a3 validation', 'category_id': None}; created=db_manager.add_schedule(data); print('created schedule', created); assert created is True; matches=[s for s in db_manager.get_all_schedules() if s.title == name]; print('matches', len(matches)); assert len(matches) == 1; schedule_id=matches[0].id; deleted=db_manager.delete_schedule(schedule_id); print('deleted schedule', deleted); assert deleted is True; remaining=[s for s in db_manager.get_all_schedules() if s.id == schedule_id]; print('remaining', len(remaining)); assert len(remaining) == 0"
+2. db_manager 基础读取验证：
 
-5. 验证 GUI smoke test：
-   D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from PyQt6.QtWidgets import QApplication; from src.ui.main_window import MainWindow; app=QApplication([]); w=MainWindow(); print('gui smoke ok'); w.close(); app.quit()"
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from datetime import date; from src.data.database import db_manager; print('db import ok'); print('all schedules', len(db_manager.get_all_schedules())); print('today schedules', len(db_manager.get_schedules_for_date(date.today())))"
 
-如果 GUI smoke test 因显示环境或沙箱限制失败，请记录原因，并执行兜底：
-   D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import main; print('main import ok')"
+3. 静态检查 ScheduleRepository 不再从 database.py 导入 Schedule：
 
-6. 验证导入边界：
-   rg -n "from .*database import|import .*database" src/data/models.py
-   rg -n "^class (BaseModel|Category|Schedule)" src/data/database.py
-   rg -n "^class (BaseModel|Category|Schedule)" src/data/models.py
+rg -n "from src\.data\.database import Schedule|from \.\.data\.database import Schedule|from \.database import Schedule" src/repositories/schedule_repository.py
 
-预期：
-- models.py 不应导入 database.py。
-- database.py 不应再定义 BaseModel、Category、Schedule。
-- models.py 应定义 BaseModel、Category、Schedule。
+预期：没有输出。
 
-7. 验证未改禁止范围：
-   git diff --name-only -- src/data/connection.py
-   git diff --name-only -- src/repositories
-   git diff --name-only -- src/ui
-   git diff --name-only -- schedule.db
+4. 验证禁止文件无改动：
 
-8. 验证本轮修改范围：
-   git diff --name-only
-   git status --short --branch
+git diff --name-only -- src/repositories/category_repository.py
+git diff --name-only -- src/data/database.py
+git diff --name-only -- src/data/models.py
+git diff --name-only -- src/data/connection.py
+git diff --name-only -- src/ui
+git diff --name-only -- schedule.db
+
+5. 验证本轮修改范围：
+
+git diff --name-only
 
 预期只包含：
-- src/data/models.py
-- src/data/database.py
+- src/repositories/schedule_repository.py
 - manage_instruction/Work_Log.md
 
-更新 Work_Log.md，至少记录：
-- 本轮任务名称：第二轮 A-3（新增 models.py 并移动 Peewee 模型类）
+更新 manage_instruction/Work_Log.md，至少记录：
+- 本轮任务名称：第二轮 A-4（ScheduleRepository 模型导入来源调整）
 - 实际修改文件
-- 移动的模型类：BaseModel、Category、Schedule
-- 是否确认 models.py 从 connection.py 导入 db
-- 是否确认 models.py 没有从 database.py 导入内容
-- 是否确认本轮没有修改 Repository
-- 是否确认字段含义、默认值、字段名、表名未改变
+- 修改内容说明
+- 是否保留构造函数注入能力
 - 验证命令和结果
 - diff 范围检查结果
 - 未完成事项
-- 风险或疑点，尤其是是否出现循环导入
+- 风险或疑点
 
 如果 Python 验证受沙箱权限影响，请申请沙箱外权限运行；若仍受限，请写明需用户本地 CMD 复跑命令。
 
@@ -123,8 +96,7 @@
 
 ## 复核锚点
 
-- 只允许修改 `src/data/models.py`、`src/data/database.py`、`manage_instruction/Work_Log.md`。
-- `BaseModel`、`Category`、`Schedule` 应从 `database.py` 移到 `models.py`。
-- `models.py` 必须从 `connection.py` 导入 `db`，不得从 `database.py` 导入。
-- 本轮不得修改 `src/repositories/`、`src/ui/`、`schedule.db`。
-- 字段含义、默认值、字段名、表名必须保持不变。
+- 只允许修改 `src/repositories/schedule_repository.py` 和 `manage_instruction/Work_Log.md`。
+- `ScheduleRepository.__init__` 默认导入来源应改为 `src.data.models.Schedule`。
+- `schedule_model` 注入能力必须保留。
+- 不得修改 `CategoryRepository`、`src/data/*`、`src/ui/`、`schedule.db`。
