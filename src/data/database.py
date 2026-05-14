@@ -22,7 +22,7 @@ class DatabaseManager:
         with db:
             db.create_tables([Schedule, Category])
 
-    def _migrate_db(self):
+    def _migrate_schedules_table(self):
         columns = [col.name for col in db.get_columns('schedules')]
         if 'group_id' not in columns:
             from playhouse.migrate import migrate, SqliteMigrator
@@ -41,15 +41,18 @@ class DatabaseManager:
             try:
                 # 1. 给数据库表增加新列
                 migrate(migrator.add_column('schedules', 'sort_order', sort_order_field))
-                
+
                 # 2. 为老数据平滑赋初始权重（直接转换老创建时间为时间戳），不丢原顺序
                 for s in Schedule.select():
                     s.sort_order = s.created_at.timestamp() if s.created_at else 0.0
                     s.save()
-                    
+
                 print("✅ [DB] 成功迁移数据库，已添加 sort_order 字段并平滑过渡老数据")
             except Exception as e:
                 print(f"❌ [DB] 数据库迁移失败 (sort_order): {e}")
+
+    def _migrate_db(self):
+        self._migrate_schedules_table()
         
         columns_cat = [col.name for col in db.get_columns('categories')]
         if 'list_type' not in columns_cat:
