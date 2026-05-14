@@ -257,3 +257,69 @@
   - A-6 待后续工单执行。
 - 风险或疑点：
   - 未发现行为回归或循环导入；默认模型来源已切换至 `models.py`，注入路径保持兼容。
+
+## 2026-05-14 第二轮 A-6（第二轮 A 整体验收）
+
+- 本轮任务名称：第二轮 A-6（第二轮 A 整体验收）。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+- 验收前范围前置检查：
+  - 执行前 `git diff --name-only` 仅显示 `manage_instruction/Work_Task_Prompts.md`（既有改动），无代码文件 diff，符合“可继续验收”前置条件。
+- 验证命令与结果摘要：
+  - import 链路 + 模型来源 + 连接一致性：
+    - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.connection import db as db1, DB_PATH as p1; from src.data.models import BaseModel, Category, Schedule; from src.data.database import db as db2, DB_PATH as p2, db_manager; from src.repositories.schedule_repository import ScheduleRepository; from src.repositories.category_repository import CategoryRepository; ..."`
+    - 结果：通过。
+      - `connection/models/database/repositories import ok`
+      - `db_manager import ok`
+      - `same db object: True`
+      - `same path: True`
+      - `schedule repo uses models.Schedule: True`
+      - `category repo uses models.Category: True`
+      - `category repo uses models.Schedule: True`
+  - 导入边界静态检查：
+    - `rg -n "from .*database import|import .*database" src/data/models.py` -> 无输出（符合预期）。
+    - `rg -n "^class (BaseModel|Category|Schedule)" src/data/database.py` -> 无输出（符合预期）。
+    - `rg -n "^class (BaseModel|Category|Schedule)" src/data/models.py` -> 命中 3 条（符合预期）。
+  - 基础读路径：
+    - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from datetime import date; from src.data.database import db_manager; ..."`
+    - 结果：
+      - `all schedules 62`
+      - `today schedules 9`
+      - `active categories 7`
+      - `category map 7`
+      - `sample category id 7`
+      - `get_category sample True`
+      - `check_category_status sample active`
+  - 临时分类写路径（已清理）：
+    - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; import time; ..."`
+    - 结果：
+      - `created category 8`
+      - `category exists True`
+      - `updated True`
+      - `soft deleted True`
+      - `hard deleted True`
+      - `after delete None`
+  - 临时日程写路径（已清理，repeat_rule='none'）：
+    - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; import time; ..."`
+    - 结果：
+      - `created schedule True`
+      - `matches 1`
+      - `deleted schedule True`
+      - `remaining 0`
+  - GUI smoke test：
+    - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from PyQt6.QtWidgets import QApplication; from src.ui.main_window import MainWindow; app=QApplication([]); w=MainWindow(); print('gui smoke ok'); w.close(); app.quit()"`
+    - 结果：通过，输出 `gui smoke ok`；附带 `libpng warning: tRNS: invalid with alpha channel`，不影响验收结论。
+- diff 范围检查结果：
+  - `git diff --name-only -- src/data/connection.py` -> 无输出。
+  - `git diff --name-only -- src/data/models.py` -> 无输出。
+  - `git diff --name-only -- src/data/database.py` -> 无输出。
+  - `git diff --name-only -- src/repositories` -> 无输出。
+  - `git diff --name-only -- src/ui` -> 无输出。
+  - `git diff --name-only -- schedule.db` -> 无输出。
+  - `git diff --name-only` -> `manage_instruction/Work_Task_Prompts.md`（既有改动）；写日志后另含 `manage_instruction/Work_Log.md`。
+  - `git status --short --branch` -> `M manage_instruction/Work_Task_Prompts.md`（既有改动）；写日志后另含 `M manage_instruction/Work_Log.md`。
+- 未完成事项：
+  - 无；第二轮 A 的 A-6 验收项已完成。
+- 风险或疑点：
+  - 未发现循环导入、连接对象不一致或行为回归。
+  - 当前工作区存在 `manage_instruction/Work_Task_Prompts.md` 既有改动（非本轮新增代码改动）。
