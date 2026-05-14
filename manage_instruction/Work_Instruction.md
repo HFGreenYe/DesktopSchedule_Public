@@ -67,7 +67,15 @@ UI -> db_manager 兼容门面 -> Repository -> src/data/models.py -> src/data/co
 
 ## 本轮目标
 
-只创建 `src/data/connection.py` 和 `src/data/models.py`，并把 Peewee 模型定义从 `src/data/database.py` 移入 `models.py`。
+第二轮 A 的总目标是创建 `src/data/connection.py` 和 `src/data/models.py`，并把 Peewee 模型定义从 `src/data/database.py` 移入 `models.py`。
+
+但第二轮 A 不允许一次性完整执行。执行窗口必须按 A-1 ~ A-6 的小工单逐步推进，每次只执行当前被明确下发的小节。
+
+当前建议第一步只执行：
+
+```text
+第二轮 A-1：只新增 src/data/connection.py，暂不切换旧代码引用。
+```
 
 本轮只处理数据层最底部依赖：
 
@@ -80,242 +88,214 @@ UI -> db_manager 兼容门面 -> Repository -> src/data/models.py -> src/data/co
 
 同时调整必要 import，让现有行为保持不变。
 
-## 本轮允许修改
+## 第二轮 A 小工单拆分
+
+### 第二轮 A-1：只新增 connection.py，不切换旧引用
+
+目标：
+
+- 新增 `src/data/connection.py`。
+- 在该文件中定义与当前 `src/data/database.py` 一致的 `BASE_DIR`、`DB_PATH`、`db = SqliteDatabase(DB_PATH)`。
+- 暂不修改 `src/data/database.py`。
+- 暂不新增或修改 `src/data/models.py`。
+- 暂不修改 Repository。
+
+允许修改：
+
+- `src/data/connection.py`
+- `manage_instruction/Work_Log.md`
+
+禁止修改：
+
+- 不修改 `src/data/database.py`。
+- 不修改 `src/data/models.py`。
+- 不修改 `src/repositories/`。
+- 不修改 `src/ui/`。
+- 不修改 `schedule.db`。
+- 不修改业务逻辑。
+
+验收：
+
+- `from src.data.connection import db, BASE_DIR, DB_PATH` 可执行。
+- `DB_PATH` 与 `src.data.database.DB_PATH` 一致。
+- `src.data.database` 和 `db_manager` 仍可 import。
+- 基础读路径仍可调用。
+- `src/ui` 无 diff。
+- `schedule.db` 无 tracked diff。
+- `git diff --name-only` 只包含 `src/data/connection.py` 和 `manage_instruction/Work_Log.md`，以及本轮开始前已有的管理文档改动。
+
+### 第二轮 A-2：database.py 改用 connection.py 的 db
+
+目标：
+
+- 只让 `src/data/database.py` 从 `src/data/connection.py` 导入 `BASE_DIR`、`DB_PATH`、`db`。
+- 删除或替换 `database.py` 中原本直接创建 `SqliteDatabase(DB_PATH)` 的定义。
+- 暂不移动 Peewee 模型。
+- 暂不修改 Repository。
+
+允许修改：
+
+- `src/data/database.py`
+- `manage_instruction/Work_Log.md`
+
+禁止修改：
+
+- 不修改 `src/data/models.py`。
+- 不修改 `src/repositories/`。
+- 不修改 `src/ui/`。
+- 不修改业务逻辑。
+- 不改 `_migrate_db` 迁移步骤、迁移顺序和补值策略。
+
+验收：
+
+- `src.data.connection` 可 import。
+- `src.data.database` 可 import。
+- `db_manager` 可创建。
+- `db_manager.get_all_schedules()`、`get_active_categories()`、`get_schedules_for_date(date.today())` 可调用。
+- 临时分类增删路径可用。
+- `src/ui` 无 diff。
+- `schedule.db` 无 tracked diff。
+
+### 第二轮 A-3：新增 models.py 并移动 BaseModel/Category/Schedule
+
+目标：
+
+- 新增 `src/data/models.py`。
+- 将 `BaseModel`、`Category`、`Schedule` 从 `database.py` 移入 `models.py`。
+- `models.py` 必须从 `connection.py` 导入 `db`。
+- `database.py` 从 `models.py` 导入 `BaseModel`、`Category`、`Schedule`。
+- 暂不修改 Repository。
+
+允许修改：
 
 - `src/data/models.py`
-- `src/data/connection.py`
 - `src/data/database.py`
-- `src/repositories/category_repository.py`
+- `manage_instruction/Work_Log.md`
+
+禁止修改：
+
+- 不修改 `src/repositories/`。
+- 不修改 `src/ui/`。
+- 不改字段含义、默认值、字段名、表名。
+- 不改 `_migrate_db` 迁移步骤、迁移顺序和补值策略。
+- 不改业务逻辑。
+
+验收：
+
+- `src.data.models` 可 import。
+- `src.data.database` 可 import。
+- `db_manager` 可创建。
+- 基础读路径可调用。
+- 临时分类增删路径可用。
+- 临时日程创建/删除路径可用。
+- GUI smoke test 通过或记录环境限制并执行 `import main` 兜底。
+- `src/ui` 无 diff。
+- `schedule.db` 无 tracked diff。
+
+### 第二轮 A-4：调整 ScheduleRepository 模型导入来源
+
+目标：
+
+- 只调整 `src/repositories/schedule_repository.py`。
+- 如果当前从 `src.data.database` 延迟导入 `Schedule`，改为从 `src.data.models` 导入 `Schedule`。
+- 保留构造函数注入模型类的兼容能力。
+- 不改变任何 Repository 方法语义。
+
+允许修改：
+
 - `src/repositories/schedule_repository.py`
 - `manage_instruction/Work_Log.md`
 
-## 本轮禁止修改
+禁止修改：
 
-- 不修改任何 `src/ui/` 文件。
-- 不修改 `main.py`。
-- 不修改 `src/theme/`。
-- 不修改 `src/utils/signals.py`。
-- 不修改 `requirements.txt`。
+- 不修改 `src/data/database.py`。
+- 不修改 `src/data/models.py`，除非发现 A-3 明显遗漏且先说明。
+- 不修改 `src/repositories/category_repository.py`。
+- 不修改 `src/ui/`。
+- 不改日程 CRUD 返回语义。
+
+验收：
+
+- `ScheduleRepository` 可单独 import。
+- `db_manager` 可 import。
+- `db_manager.get_all_schedules()` 可调用。
+- `db_manager.get_schedules_for_date(date.today())` 可调用。
+- 临时日程创建/删除路径可用。
+- `src/ui` 无 diff。
+- `schedule.db` 无 tracked diff。
+
+### 第二轮 A-5：调整 CategoryRepository 模型导入来源
+
+目标：
+
+- 只调整 `src/repositories/category_repository.py`。
+- 如果当前从 `src.data.database` 延迟导入 `Category`、`Schedule`，改为从 `src.data.models` 导入。
+- 保留构造函数注入模型类的兼容能力。
+- 不改变任何 Repository 方法语义。
+
+允许修改：
+
+- `src/repositories/category_repository.py`
+- `manage_instruction/Work_Log.md`
+
+禁止修改：
+
+- 不修改 `src/data/database.py`。
+- 不修改 `src/data/models.py`，除非发现 A-3 明显遗漏且先说明。
+- 不修改 `src/repositories/schedule_repository.py`。
+- 不修改 `src/ui/`。
+- 不改清单 CRUD、状态判断、删除策略返回语义。
+
+验收：
+
+- `CategoryRepository` 可单独 import。
+- `db_manager` 可 import。
+- `db_manager.get_active_categories()` 可调用。
+- `db_manager.get_category_map()` 可调用。
+- 临时分类创建、读取、软删、硬删路径可用。
+- `src/ui` 无 diff。
+- `schedule.db` 无 tracked diff。
+
+### 第二轮 A-6：第二轮 A 整体验收
+
+目标：
+
+- 不做新的代码改动。
+- 对 A-1 ~ A-5 的模型拆分和导入关系做总体验收。
+
+允许修改：
+
+- `manage_instruction/Work_Log.md`
+- `manage_instruction/Work_Task_Prompts.md`（仅当顾问窗口要求维护复核锚点）
+
+禁止修改：
+
+- 不修改任何源码文件。
+- 不修改 `src/data/connection.py`。
+- 不修改 `src/data/models.py`。
+- 不修改 `src/data/database.py`。
+- 不修改 `src/repositories/`。
+- 不修改 `src/ui/`。
 - 不修改 `schedule.db`。
-- 不修改 `Work_Snapshot.md`。
-- 不修改 `Work_Formulation.md`，除非决策窗口另行要求。
-- 不修改 `Work_Task_Prompts.md`，除非顾问窗口另行要求。
-- 不改任何业务逻辑。
-- 不改任何数据库字段定义的含义、默认值、字段名、表名。
-- 不改 `_migrate_db` 的迁移步骤、迁移顺序和补值策略。
-- 不改 `DatabaseManager` 公开方法行为。
-- 不迁移 `add_schedule`、`update_schedule_with_repeat`、`_add_months`。
-- 不新增 Service。
-- 不做格式化大扫除。
 
-## 具体要求
-
-1. 新增 `src/data/connection.py`。
-
-该文件只放数据库连接基础对象：
-
-```python
-import os
-from peewee import SqliteDatabase
-
-BASE_DIR = ...
-DB_PATH = ...
-db = SqliteDatabase(DB_PATH)
-```
-
-`BASE_DIR`、`DB_PATH`、`db` 应从 `src/data/database.py` 移入该文件，避免 `models.py` 反向导入 `database.py` 造成循环导入。
-
-2. 新增 `src/data/models.py`。
-
-3. 将以下定义从 `src/data/database.py` 移动到 `src/data/models.py`：
-
-```python
-class BaseModel(Model):
-    ...
-
-class Category(BaseModel):
-    ...
-
-class Schedule(BaseModel):
-    ...
-```
-
-4. `src/data/models.py` 必须从 `connection.py` 导入同一个 `db` 实例。
-
-推荐方式固定为：
-
-```python
-from src.data.connection import db
-```
-
-或等价相对导入：
-
-```python
-from .connection import db
-```
-
-不得让 `models.py` 从 `database.py` 导入 `db`。
-
-5. `src/data/database.py` 应从 `connection.py` 导入并继续暴露同一个连接对象：
-
-```python
-from src.data.connection import BASE_DIR, DB_PATH, db
-```
-
-或等价相对导入。
-
-`database.py` 不再直接定义 `db = SqliteDatabase(DB_PATH)`，但可以导入并暴露 `db`，以保持旧模块内使用方式和外部兼容性。
-
-6. `src/data/database.py` 中保留：
-
-- `DatabaseManager`
-- `db_manager`
-- 数据库连接、建表、迁移逻辑
-
-7. `src/data/database.py` 应从模型文件导入：
-
-```python
-from src.data.models import BaseModel, Category, Schedule
-```
-
-如需使用相对导入，也必须确保从项目根目录执行验证命令时可正常 import。
-
-8. 调整 Repository 的模型导入来源。
-
-当前 Repository 如仍从 `src.data.database` 延迟导入模型，应改为从 `src.data.models` 导入：
-
-```python
-from src.data.models import Schedule
-from src.data.models import Category
-```
-
-或等价的低风险写法。
-
-9. 保持 Repository 构造函数兼容。
-
-如果当前构造函数支持注入模型类，例如：
-
-```python
-def __init__(self, schedule_model=None):
-```
-
-该能力必须保留，不要删除。
-
-10. 不移动 `src/repositories/` 目录。
-
-第二轮 A 只整理 import 依赖，不做目录路径震荡。
-
-## 循环导入处理原则
-
-本轮最大风险是 `database.py`、`models.py`、repository 之间出现循环导入。
-
-处理原则：
-
-- `db` 的定义移动到 `src/data/connection.py`。
-- `database.py` 可以导入并暴露同一个 `db`。
-- `models.py` 只定义 Peewee 模型，不创建 `DatabaseManager`。
-- `models.py` 只允许依赖 `connection.py`，不得依赖 `database.py`。
-- repository 只依赖模型，不依赖 `db_manager`。
-- `DatabaseManager.__init__` 中仍可延迟导入 Repository，保持第一轮的低风险结构。
-- 不在 UI 文件中引入新的数据层导入。
-
-如果发现上述依赖方向仍无法避免循环导入，不要扩大重构范围；先停止并在窗口中说明原因，等待决策窗口确认。
-
-## 验收要求
-
-执行窗口完成后至少验证：
-
-1. `src.data.models` 可以 import。
-2. `src.data.connection` 可以 import，并能导出 `db`、`BASE_DIR`、`DB_PATH`。
-3. `src.data.database` 可以 import。
-4. `db_manager` 可以正常创建。
-5. `ScheduleRepository`、`CategoryRepository` 可以 import。
-6. `db_manager.get_all_schedules()` 可调用。
-7. `db_manager.get_active_categories()` 可调用。
-8. `db_manager.get_schedules_for_date(date.today())` 可调用。
-9. 使用临时分类验证清单基础写路径：
-   - `add_category`
-   - `get_category`
-   - `hard_delete_category`
-10. 使用临时日程验证日程删除路径：
-   - `add_schedule` 创建 `repeat_rule='none'` 的临时日程。
-   - `delete_schedule` 删除该临时日程。
-   - 确认删除后 `get_all_schedules()` 找不到该 id。
-11. GUI smoke test 至少通过一种：
-    - 优先：创建并关闭 `MainWindow`。
-    - 若 GUI 环境受限：执行 `import main` 兜底，并记录限制原因。
-12. `src/ui/` 无改动。
-13. `schedule.db` 无 tracked diff。
-14. `git diff --name-only` 只出现本轮允许文件。
-
-## 建议验证命令
-
-### 1. import 与读路径验证
-
-```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from datetime import date; from src.data.connection import db, BASE_DIR, DB_PATH; from src.data.models import BaseModel, Category, Schedule; from src.repositories.schedule_repository import ScheduleRepository; from src.repositories.category_repository import CategoryRepository; from src.data.database import db_manager; print('connection import ok', bool(DB_PATH)); print('models import ok'); print('repositories import ok'); print('db import ok'); print('all schedules', len(db_manager.get_all_schedules())); print('active categories', len(db_manager.get_active_categories())); print('today schedules', len(db_manager.get_schedules_for_date(date.today())))"
-```
-
-### 2. 临时分类写路径验证
-
-```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; import time; name='__tmp_round2a_category_'+str(int(time.time())); cat_id=db_manager.add_category(name, color='#0cc0df', list_type='schedule'); print('created category', cat_id); assert cat_id is not None; cat=db_manager.get_category(cat_id); print('category exists', bool(cat)); assert cat and cat.name == name; deleted=db_manager.hard_delete_category(cat_id); print('deleted category', deleted); assert deleted is True; after=db_manager.get_category(cat_id); print('after delete', after); assert after is None"
-```
-
-### 3. 临时日程删除路径验证
-
-```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; import time; name='__tmp_round2a_schedule_'+str(int(time.time())); data={'title': name, 'item_type': 'schedule', 'priority': 0, 'repeat_rule': 'none', 'description': 'temporary round2a validation', 'category_id': None}; created=db_manager.add_schedule(data); print('created schedule', created); assert created is True; matches=[s for s in db_manager.get_all_schedules() if s.title == name]; print('matches', len(matches)); assert len(matches) == 1; schedule_id=matches[0].id; deleted=db_manager.delete_schedule(schedule_id); print('deleted schedule', deleted); assert deleted is True; remaining=[s for s in db_manager.get_all_schedules() if s.id == schedule_id]; print('remaining', len(remaining)); assert len(remaining) == 0"
-```
-
-### 4. GUI smoke test
-
-```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from PyQt6.QtWidgets import QApplication; from src.ui.main_window import MainWindow; app=QApplication([]); w=MainWindow(); print('gui smoke ok'); w.close(); app.quit()"
-```
-
-若 GUI smoke test 因显示环境或沙箱限制失败，记录原因，并执行：
-
-```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import main; print('main import ok')"
-```
-
-### 5. 修改范围检查
-
-```powershell
-git diff --name-only -- src/ui
-git diff --name-only -- schedule.db
-git diff --name-only
-git status --short --branch
-```
-
-## Work_Log.md 记录要求
-
-执行窗口完成后，必须更新 `manage_instruction/Work_Log.md`，至少记录：
-
-- 本轮任务名称：第二轮 A（Peewee 模型拆分到 src/data/models.py）。
-- 实际修改文件。
-- import 与读路径验证命令和结果。
-- 临时分类写路径验证命令和结果。
-- 临时日程删除路径验证命令和结果。
-- GUI smoke test 结果；若失败，记录失败原因和兜底验证结果。
-- `src/ui` diff 结果。
-- `schedule.db` diff 结果。
-- `git diff --name-only` 范围。
-- 未完成事项。
-- 风险或疑点，尤其是 `connection.py -> models.py -> database.py/repositories` 的依赖方向是否保持干净。
-
-如果任务中途失败，也必须写入：
-
-- 失败位置。
-- 关键报错摘要。
-- 是否已回滚。
-- 当前工作区状态。
-
-## 完成后要求
-
-- 完成后不要提交 Git，等待顾问窗口复核。
-- 不要继续执行第二轮 B 或其他后续任务。
+验收：
+
+- `src.data.connection`、`src.data.models`、`src.data.database` 可 import。
+- `ScheduleRepository`、`CategoryRepository` 可 import。
+- `db_manager` 可创建。
+- 读路径可调用：
+  - `get_all_schedules`
+  - `get_schedules_for_date`
+  - `get_active_categories`
+  - `get_category_map`
+- 分类临时写路径可用。
+- 日程临时写路径可用。
+- GUI smoke test 通过或执行 `import main` 兜底。
+- `models.py` 没有从 `database.py` 导入 `db`。
+- Repository 没有依赖 `db_manager`。
+- `src/ui` 无 diff。
+- `schedule.db` 无 tracked diff。
+- `git diff --name-only` 只包含允许的日志/提示词文件，或本轮开始前已有的管理文档改动。
 
 ---
 
