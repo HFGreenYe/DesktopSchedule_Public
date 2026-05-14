@@ -90,3 +90,116 @@
 - 风险或疑点：
   - 本轮中途曾出现一次文本编码导致的语法错误风险，已通过恢复并采用局部补丁方式完成，最终 import/读写验证通过。
   - 未发现循环导入问题；`schedule.db` 无 diff。
+
+## 2026-05-14 第二轮 B-3（只抽离 categories 表迁移块）
+
+- 本轮任务名称：第二轮 B-3（只抽离 categories 表迁移块）。
+- 实际修改文件：
+  - `src/data/database.py`
+  - `manage_instruction/Work_Log.md`
+- 抽离的方法名：
+  - `_migrate_categories_table(self)`
+- 改动说明：
+  - 将 `_migrate_db` 中 categories 表迁移逻辑抽离到 `_migrate_categories_table(self)`，包含：
+    - `columns_cat = [col.name for col in db.get_columns('categories')]`
+    - `list_type` 字段迁移分支
+    - `sort_order` 字段迁移分支
+    - `categories.sort_order` 老数据补值循环
+  - `_migrate_db` 调整为顺序调用：
+    - `self._migrate_schedules_table()`
+    - `self._migrate_categories_table()`
+- 顺序与边界确认：
+  - 已确认 `_migrate_db` 保持先 schedules、后 categories 顺序。
+  - 已确认本轮未改 `_migrate_schedules_table` 的实现代码（仅在 `_migrate_db` 调用顺序中引用）。
+  - 已确认未改迁移字段、默认值、字段名、表名、补值策略、异常捕获和 migrate 调用顺序（categories 逻辑仅位置迁移）。
+  - 已确认未修改 `_connect`、`_create_tables`、DatabaseManager 对外方法和业务方法。
+- 验证命令与结果：
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; print('database import ok'); print('active categories', len(db_manager.get_active_categories()))"`
+    - 结果：失败。
+    - 报错：`SyntaxError: unterminated string literal (detected at line 49)`（位于 `_migrate_schedules_table` 中的旧打印字符串行）。
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; import time; name='__tmp_b3_category_'+str(int(time.time())); ..."`
+    - 结果：失败。
+    - 原因同上（import 阶段即触发同一 SyntaxError）。
+  - `rg -n "def _migrate_categories_table|self\._migrate_categories_table\(\)" src/data/database.py`
+    - 结果：命中方法定义与调用。
+  - `rg -n "self\._migrate_schedules_table\(\)|self\._migrate_categories_table\(\)" src/data/database.py`
+    - 结果：两者均命中，且 `self._migrate_schedules_table()` 行号在前，`self._migrate_categories_table()` 行号在后。
+  - `rg -n "def _migrate_schedules_table|group_id_field|sort_order_field" src/data/database.py`
+    - 结果：命中 schedules 迁移方法与字段定义，说明方法仍存在。
+- diff 范围检查结果：
+  - `git diff --name-only -- src/data/connection.py` -> 无输出。
+  - `git diff --name-only -- src/data/models.py` -> 无输出。
+  - `git diff --name-only -- src/repositories` -> 无输出。
+  - `git diff --name-only -- src/ui` -> 无输出。
+  - `git diff --name-only -- main.py` -> 无输出。
+  - `git diff --name-only -- schedule.db` -> 无输出。
+  - `git diff --name-only` -> `src/data/database.py` + `manage_instruction/Work_Task_Prompts.md`（本轮开始前既有改动）；写日志后另含 `manage_instruction/Work_Log.md`。
+  - `git status --short --branch` -> `M src/data/database.py`、`M manage_instruction/Work_Task_Prompts.md`（既有改动）；写日志后另含 `M manage_instruction/Work_Log.md`。
+- 未完成事项：
+  - Python 运行验收未通过（被 `_migrate_schedules_table` 中既有语法错误阻断）。
+- 风险或疑点：
+  - 主要风险：`src/data/database.py` 目前存在语法错误，影响 import 与运行验证。
+  - 按本轮约束“不修改 _migrate_schedules_table”，本轮未修复该语法错误。
+  - 未发现循环导入迹象；`schedule.db` 未产生 diff。
+- 失败位置/回滚状态：
+  - 失败位置：Python import `src.data.database` 阶段。
+  - 关键报错：`SyntaxError: unterminated string literal (line 49)`。
+  - 回滚状态：未回滚本轮 B-3 抽离改动（保留等待复核/后续决策）。
+
+## 2026-05-14 第二轮 B-3 重试记录（恢复 database.py 后重做）
+
+- 重试背景：
+  - 第一次 B-3 失败日志已保留在 `Work_Log.md`。
+  - 按指令先执行恢复：`git checkout HEAD -- src/data/database.py`（保留 `Work_Log.md` 与 `Work_Task_Prompts.md` 改动）。
+- 重试执行约束：
+  - 不整文件重写业务区块；仅对 categories 迁移块进行最小局部抽离。
+  - 不修改 `_migrate_schedules_table`。
+  - 不修改 `add_schedule`、`update_schedule_with_repeat`、`_add_months` 等业务方法。
+- 本次重试实际修改文件：
+  - `src/data/database.py`
+  - `manage_instruction/Work_Log.md`
+- 重试改动内容：
+  - 新增私有方法：`_migrate_categories_table(self)`。
+  - 将 `_migrate_db` 中 categories 迁移逻辑迁移到 `_migrate_categories_table`。
+  - `_migrate_db` 调整为按顺序调用：
+    - `self._migrate_schedules_table()`
+    - `self._migrate_categories_table()`
+- 关键确认：
+  - 已确认 `_migrate_db` 调用顺序为先 schedules、后 categories。
+  - 已确认未修改 `_migrate_schedules_table` 实现内容。
+  - 已确认未修改迁移字段、默认值、字段名、表名、补值策略、异常捕获和 migrate 调用顺序（categories 逻辑仅位置迁移）。
+  - 已确认未修改 `_connect`、`_create_tables`、DatabaseManager 对外方法和业务方法。
+- 验证命令与结果：
+  - 语法预检（按要求先执行）：
+    - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src\data\database.py`
+    - 结果：通过。
+  - 基础分类读取：
+    - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; print('database import ok'); print('active categories', len(db_manager.get_active_categories()))"`
+    - 结果：`database import ok`，`active categories 7`。
+  - 临时分类创建/硬删除（并清理）：
+    - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; import time; name='__tmp_b3_category_'+str(int(time.time())); cat_id=db_manager.add_category(name, color='#0cc0df', list_type='schedule'); print('created category', cat_id); assert cat_id is not None; cat=db_manager.get_category(cat_id); print('category exists', bool(cat)); assert cat and cat.name == name; deleted=db_manager.hard_delete_category(cat_id); print('deleted category', deleted); assert deleted is True; after=db_manager.get_category(cat_id); print('after delete', after); assert after is None"`
+    - 结果：`created category 8`，`category exists True`，`deleted category True`，`after delete None`。
+  - 静态检查：
+    - `rg -n "def _migrate_categories_table|self\._migrate_categories_table\(\)" src/data/database.py`
+      - 结果：命中方法定义与调用。
+    - `rg -n "self\._migrate_schedules_table\(\)|self\._migrate_categories_table\(\)" src/data/database.py`
+      - 结果：`_migrate_schedules_table` 行号在 `_migrate_categories_table` 之前。
+    - `rg -n "def _migrate_schedules_table|group_id_field|sort_order_field" src/data/database.py`
+      - 结果：schedules 迁移方法及字段定义仍存在。
+- diff 范围检查结果：
+  - `git diff --name-only -- src/data/connection.py` -> 无输出。
+  - `git diff --name-only -- src/data/models.py` -> 无输出。
+  - `git diff --name-only -- src/repositories` -> 无输出。
+  - `git diff --name-only -- src/ui` -> 无输出。
+  - `git diff --name-only -- main.py` -> 无输出。
+  - `git diff --name-only -- schedule.db` -> 无输出。
+  - `git diff --name-only` ->
+    - `src/data/database.py`
+    - `manage_instruction/Work_Log.md`
+    - `manage_instruction/Work_Task_Prompts.md`（本轮开始前既有改动）
+  - `git status --short --branch` -> `M src/data/database.py`、`M manage_instruction/Work_Log.md`、`M manage_instruction/Work_Task_Prompts.md`（既有改动）。
+- 未完成事项：
+  - B-4/B-5 待后续工单。
+- 风险或疑点：
+  - 未发现迁移行为新增风险、循环导入风险。
+  - `schedule.db` 无 diff；临时分类验证数据已清理。

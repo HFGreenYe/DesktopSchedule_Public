@@ -51,9 +51,7 @@ class DatabaseManager:
             except Exception as e:
                 print(f"❌ [DB] 数据库迁移失败 (sort_order): {e}")
 
-    def _migrate_db(self):
-        self._migrate_schedules_table()
-        
+    def _migrate_categories_table(self):
         columns_cat = [col.name for col in db.get_columns('categories')]
         if 'list_type' not in columns_cat:
             from playhouse.migrate import migrate, SqliteMigrator
@@ -78,6 +76,10 @@ class DatabaseManager:
                 print("✅ [DB] 成功迁移 categories，已添加 sort_order 字段")
             except Exception as e:
                 print(f"❌ [DB] categories 迁移失败(sort_order): {e}")
+
+    def _migrate_db(self):
+        self._migrate_schedules_table()
+        self._migrate_categories_table()
 
     # 辅助计算月份函数
     def _add_months(self, sourcedate, months):
