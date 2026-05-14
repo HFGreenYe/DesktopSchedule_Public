@@ -13,11 +13,54 @@
 
 ## 归档记录
 
+## 2026-05-14 第一轮总归档 - 基建与 Repository 兼容层
+
+状态：已完成。
+
+结果：第一轮架构改写已收口，并已由用户创建 checkpoint：
+
+```text
+cbf0175 checkpoint: complete first architecture refactor round
+```
+
+第一轮拆为两个主要部分：
+
+- 第一轮 A：目录骨架、ThemeManager/QSS 占位、兼容式 EventBus。
+- 第一轮 B：Repository 薄封装、`DatabaseManager` 兼容委托、迁移作用域修复、整体验收。
+
+第一轮的核心架构变化：
+
+```text
+改写前：UI -> db_manager/database.py -> Peewee Model
+改写后：UI -> db_manager 兼容门面 -> Repository -> Peewee Model/database.py
+```
+
+第一轮没有做的事：
+
+- 未拆 UI 大文件。
+- 未让 UI 直接调用 Repository。
+- 未迁移重复日程高风险写入逻辑。
+- 未实现四象限、搜索、筛选、导出、同步等新功能。
+- 未正式接入完整主题/换肤 UI。
+
+第一轮验收结论：
+
+- 应用可启动。
+- Repository import 可用。
+- `db_manager` 读写路径基础验证通过。
+- GUI smoke test 通过。
+- `src/ui` 未在 B 轮被修改。
+- `schedule.db` 未留下 tracked diff。
+
 ## 2026-05-13 第一轮 A - 架构骨架 + 主题/EventBus 基建
 
 状态：已完成。
 
-对应提交：执行日志记录用户侧已提交 `2803436 fix: add missing zhdate dependency`；第一轮 A 代码本身在读取时工作区已干净，具体提交号请以 `git log` 为准。
+对应提交：
+
+- `3ca93f1 refactor: add architecture skeleton theme manager and event bus`
+- `2803436 fix: add missing zhdate dependency`
+- `a7bca33 docs: clarify python sandbox validation issue`
 
 ### 任务目标
 
@@ -138,9 +181,25 @@ category_changed = pyqtSignal()
 - B-15 整体技术验收通过（import、读写路径、GUI smoke、范围检查通过）。
 
 关键提交摘要（简述）：
-- 一组 `refactor` 提交完成 B-1 ~ B-14 的逐步委托落地。
-- `fix: add missing zhdate dependency`（`2803436`）补齐环境依赖。
-- 代表性删除委托提交：`1079352 refactor: delegate schedule deletion`。
+
+- `562eb0b docs: prepare repository refactor instruction`
+- `b63c097 refactor: add schedule and category repositories`
+- `dc5c68a refactor: delegate basic read methods to repositories`
+- `f93f902 refactor: delegate schedule date query and category map`
+- `e012696 fix: define migrator for category list type migration`
+- `9c504d0 refactor: delegate category lookup to repository`
+- `ee5a317 refactor: delegate category status check`
+- `5c9b449 refactor: delegate category field updates`
+- `ab29c0e refactor: delegate category creation`
+- `71cdcbf refactor: delegate category soft delete`
+- `64f0427 refactor: delegate category hard delete`
+- `a493df6 refactor: delegate schedule status update`
+- `cc0274b refactor: delegate schedule pin toggle`
+- `b2894b4 refactor: delegate schedule field updates`
+- `1079352 refactor: delegate schedule deletion`
+- `333b7f2 test: validate repository delegation round`
+- `31bc1f7 docs: close out repository delegation round`
+- `d57c9d6 docs: archive repository delegation instructions`
 
 备注：
 - 第一轮 B 的执行明细与验证命令见 `Work_Log.md`。

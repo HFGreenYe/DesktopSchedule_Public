@@ -41,6 +41,13 @@
 - 新 UI 必须使用 QSS + 动态属性。
 - 第一批只建立 `ThemeManager`、`light.qss`、`dark.qss` 和加载能力。
 
+主题方向补充：
+
+- 后续主题系统不以“亮色模式 + 暗色模式”双体系为核心，而以“颜色皮肤 / Skin Preset”为核心。
+- 第一轮留下的 `light.qss`、`dark.qss` 只是主题基建占位，不代表最终必须为每套皮肤维护亮暗两套 QSS。
+- 深色外观可以作为一套深色皮肤实现，避免形成 `N 个皮肤 × 2 套亮暗模式` 的维护成本。
+- 后续进入主题设计轮次时，优先考虑基础 QSS + 皮肤变量/皮肤配置，而不是提前承诺固定的 light/dark 文件结构。
+
 ---
 
 ## 3. Qt 样式编码规范
@@ -537,3 +544,271 @@ git commit -m "refactor: describe this small step"
 ## 2026-05-14 阶段进度补充
 
 第一轮 B 已完成（B-1 ~ B-14 委托落地，B-15 整体技术验收通过）。
+
+---
+
+# 架构改写轮次路线图
+
+生成日期：2026-05-14
+
+本路线图用于把“首批施工蓝图”和“最终目标版本”之间的过渡路径明确下来。后续 `Work_Instruction.md` 应按本路线图逐轮发布阶段指令；执行窗口仍按小工单推进，不一次性执行整轮。
+
+## 总体判断
+
+当前项目不适合一次性改到最终架构。更合适的方式是继续采用兼容式渐进重构：
+
+- 每一轮只移动一个主要责任边界。
+- 每一轮都保留 `db_manager` 或现有 UI 信号作为兼容接口。
+- UI 行为不变优先于目录“看起来漂亮”。
+- 新功能暂时不混入架构迁移，除非该轮明确以新功能为目标。
+- 每轮结束都做 Git checkpoint。
+
+## 当前已完成：第一轮
+
+第一轮目标是“打地基，不动产品行为”。
+
+已完成内容：
+
+- 新建 `src/models/`、`src/repositories/`、`src/services/`、`src/controllers/`、`src/theme/`。
+- 新增 `ThemeManager`、`light.qss`、`dark.qss`。
+- 兼容式扩展 `global_signals`，保留无参 `skin_changed`。
+- 新增 `ScheduleRepository`、`CategoryRepository`。
+- `DatabaseManager` 低风险公开方法已逐步委托到 repository。
+- 修复 `_migrate_db` 中 `migrator` 作用域风险。
+- 通过 B-15 整体验收和人工启动检查。
+
+当前结构可理解为：
+
+```text
+UI -> db_manager 兼容门面 -> Repository -> Peewee Model/database.py
+```
+
+## 第二轮：Data 层整理与模型拆分
+
+目标：把数据库模型、连接、迁移、仓储职责进一步分清，但仍不改变 UI 调用。
+
+建议范围：
+
+- 从 `src/data/database.py` 拆出 Peewee 模型到 `src/data/models.py`。
+- `src/data/database.py` 只保留数据库连接、初始化、迁移、`DatabaseManager` 兼容门面。
+- 调整 `src/repositories/` 只依赖 `src/data/models.py` 和数据库连接，不再反向依赖 `DatabaseManager`。
+- 保留 `src/repositories/` 这个当前位置，暂不为了目录洁癖移动到 `src/data/`，避免无收益路径震荡。
+- 修正或记录 `__pycache__`、临时文件、依赖缺漏等工程卫生问题。
+
+验收重点：
+
+- 应用可启动。
+- `db_manager` 对外 API 不变。
+- 日程/清单基础增删改查不变。
+- repository import 不产生循环依赖。
+
+不做：
+
+- 不抽业务 service。
+- 不拆 UI。
+- 不实现新功能。
+
+## 第三轮：纯业务查询与排序服务
+
+目标：把“怎么筛选、怎么排序、怎么分类”的纯逻辑从 UI 和 repository 中分离。
+
+建议新增/完善：
+
+- `src/services/schedule_query_service.py`
+- `src/services/schedule_sort_service.py`
+- `src/services/category_policy_service.py`
+- `src/services/matrix_classification_service.py`
+
+优先顺序：
+
+1. 日期过滤与日程/待办区分。
+2. 日视图、周视图、待办看板排序规则。
+3. 清单状态判断和删除策略。
+4. 四象限分类纯逻辑。
+
+验收重点：
+
+- 服务函数可以脱离 QWidget 单独验证。
+- UI 展示顺序和旧逻辑一致。
+- 四象限只产生数据分类结果，不做 UI。
+
+不做：
+
+- 不迁移重复日程写入逻辑。
+- 不接四象限界面。
+
+## 第四轮：日程写入与重复规则服务
+
+目标：把高风险写入逻辑从 `DatabaseManager` 中逐步迁到 service，但继续由 `db_manager` 对外兜住旧接口。
+
+建议范围：
+
+- 新增或完善 `src/services/schedule_service.py`。
+- 迁移 `add_schedule`。
+- 迁移 `update_schedule_with_repeat`。
+- 迁移 `_add_months` 或相关日期计算到规则模块。
+- 明确重复日程 group_id、update_future、repeat_rule 的行为基线。
+
+验收重点：
+
+- 单次日程新增不变。
+- 每日、每周、每月、每年重复生成不变。
+- 编辑重复日程时“只改本条/改后续”行为不变。
+- 不改变数据库字段含义。
+
+说明：这是前几轮中风险最高的一轮，必须拆成多个小工单。
+
+## 第五轮：提醒与运行期状态服务
+
+目标：把提醒扫描、触发去重、提醒弹窗调用条件从 `MainWindow` 中分离。
+
+建议新增：
+
+- `src/services/reminder_service.py`
+
+迁移范围：
+
+- 提醒扫描逻辑。
+- `triggered_reminders` 本次运行内去重逻辑。
+- 提醒时间判断。
+- 过期/无提醒/不提醒状态判断。
+
+验收重点：
+
+- 到点仍弹提醒。
+- 关闭/停止按钮仍停止声音。
+- 本次运行内不重复弹同一个提醒。
+- 重启后去重状态不持久化，保持旧行为。
+
+不做：
+
+- 不改提醒弹窗 UI。
+- 不新增提醒持久化功能。
+
+## 第六轮：Controller / Router / EventBus 接管跨视图协调
+
+目标：逐步降低 `MainWindow`、`WeekWindow`、`TodoBoardWindow`、`MonthWindow` 之间的互相引用和直接刷新耦合。
+
+建议新增/完善：
+
+- `src/controllers/main_controller.py`
+- `src/controllers/view_router.py`
+- `src/controllers/refresh_coordinator.py`
+
+迁移范围：
+
+- 视图切换。
+- 添加页来源记录。
+- picker 返回流程。
+- 日程/清单变更后的跨视图刷新。
+- 新增视图优先监听 `global_signals` 新信号。
+
+验收重点：
+
+- 日、周、月、待办之间切换不变。
+- 添加、编辑、删除后相关视图刷新不变。
+- 已打开详情弹窗刷新行为不变。
+
+不做：
+
+- 不一次性重写窗口结构。
+- 不修改旧信号签名。
+
+## 第七轮：Theme/QSS 接入与样式债务控制
+
+目标：让主题系统开始真正参与应用，但先控制新增代码和新组件，不追求一口气清完旧样式。
+
+主题路线：本轮应按“颜色皮肤 / Skin Preset”设计，不按每套皮肤再拆 light/dark 双模式设计。深色主题作为深色皮肤处理即可。
+
+建议范围：
+
+- 在应用启动处接入 `ThemeManager` 默认主题加载。
+- 建立 QSS 动态属性命名规范。
+- 为新视图、新组件使用 `role`/`state` 等动态属性。
+- 选择少量公共按钮、卡片、输入框做样式试点。
+
+验收重点：
+
+- 默认视觉尽量保持。
+- 动态属性刷新可用。
+- 不出现大面积字体、颜色、布局突变。
+
+不做：
+
+- 不批量删除所有旧 `setStyleSheet(...)`。
+- 不在本轮实现完整换肤设置页，除非后续明确把它作为功能轮。
+
+## 第八轮：UI 大文件拆分与公共组件沉淀
+
+目标：在数据层、服务层、控制层稳定后，再拆 UI 大文件，降低复制旧逻辑的风险。
+
+优先对象：
+
+- `src/ui/todo_board.py`
+- `src/ui/week_window.py`
+- `src/ui/main_window.py`
+- picker、tooltip、icon loader、toast、schedule card、folder card 等公共组件。
+
+建议拆分方向：
+
+- `src/ui/components/`
+- `src/ui/views/`
+- `src/ui/dialogs/` 或 `src/ui/popups/`
+
+验收重点：
+
+- 页面显示不变。
+- 拖拽、右键菜单、弹窗、排序、置顶、删除不变。
+- 不引入新功能。
+
+说明：这一轮看起来最像“整理代码”，但应该放在业务和协调逻辑稳定之后，否则容易把旧耦合复制到更多文件。
+
+## 第九轮：新功能准备与四象限视图
+
+目标：在架构已经能承载新功能后，再开始补功能。
+
+优先功能：
+
+- 四象限视图。
+- 主题/换肤 UI。
+- 搜索和筛选。
+- 导出、同步等占位功能再单独评估。
+
+四象限建议路径：
+
+- 先用 `MatrixClassificationService` 提供四类数据。
+- UI 只负责四个容器展示，不写复杂判断。
+- 日程/待办变更后通过 EventBus 刷新。
+- 不新增数据库字段，优先基于现有 `priority` 和时间字段。
+
+## 建议轮次数量
+
+如果只算“把当前已实现功能迁移到比较理想的架构，不补新功能”，建议至少按 8 轮走：
+
+1. 第一轮：基建 + repository + db_manager 兼容委托（已完成）。
+2. 第二轮：Data 层整理与 Peewee 模型拆分。
+3. 第三轮：查询、排序、清单策略等纯业务服务。
+4. 第四轮：日程写入与重复规则服务。
+5. 第五轮：提醒服务。
+6. 第六轮：Controller / Router / EventBus 协调层。
+7. 第七轮：Theme/QSS 接入与样式规范落地。
+8. 第八轮：UI 大文件拆分与公共组件沉淀。
+
+如果把“四象限、换肤 UI、搜索筛选、导出同步”等新功能也算入最终目标，则至少再加第九轮及后续功能轮。
+
+## 下一步建议
+
+下一阶段建议发布“第二轮：Data 层整理与模型拆分”的阶段指令。
+
+推荐先拆成小工单：
+
+1. 只创建 `src/data/models.py` 并移动 Peewee `BaseModel`、`Category`、`Schedule`。
+2. 调整 `database.py`、repository import，保持 `db_manager` 可用。
+3. 单独验证迁移、建表、基础读写。
+4. 再考虑是否需要整理数据库连接和迁移工具函数。
+
+第二轮开始前应先确认：
+
+- `git status` 干净。
+- 第一轮 checkpoint 已提交。
+- `Work_Instruction.md` 写入第二轮阶段合同。
