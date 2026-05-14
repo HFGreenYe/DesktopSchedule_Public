@@ -10,12 +10,28 @@
 
 ## 正式执行提示词
 
-~~~text
-# 第二轮 A-1 执行提示词：只新增 connection.py，不切换旧引用
+~~~markdown
+# 第二轮 A-1 执行任务：只新增 connection.py，不切换旧代码引用
 
-请执行第二轮 A-1：只新增 `src/data/connection.py`，不切换旧代码引用。
+你现在执行的是第二轮 A 的第一个小工单。
 
-本次只执行 A-1，不得执行 A-2/A-3/A-4/A-5/A-6。
+第二轮 A 总目标是逐步拆分 Data 层底部结构，最终形成：
+
+```text
+connection.py -> models.py -> database.py / repositories
+```
+
+但本次只执行 **第二轮 A-1**。
+
+第二轮 A 后续还会有 A-2/A-3/A-4/A-5/A-6，但本次全部禁止执行：
+
+- A-2：让 `database.py` 改用 `connection.py` 的 `db`
+- A-3：新增 `models.py` 并移动 `BaseModel / Category / Schedule`
+- A-4：调整 `ScheduleRepository` 导入来源
+- A-5：调整 `CategoryRepository` 导入来源
+- A-6：第二轮 A 整体验收
+
+本次只做 A-1：**只新增 `src/data/connection.py`，不切换任何旧代码引用。**
 
 ## 本轮目标
 
@@ -25,18 +41,18 @@
 - `DB_PATH`
 - `db = SqliteDatabase(DB_PATH)`
 
-本轮只是建立连接基础文件，不让任何旧代码改用它。
+本轮只是建立连接基础文件，为后续 A-2 做准备。
 
 ## 允许修改
 
-只允许修改：
+本轮只允许修改：
 
 - `src/data/connection.py`
 - `manage_instruction/Work_Log.md`
 
 ## 禁止修改
 
-禁止修改：
+本轮禁止修改：
 
 - `src/data/database.py`
 - `src/data/models.py`
@@ -67,31 +83,43 @@
 
 1. 新增文件：
 
-   `src/data/connection.py`
+```text
+src/data/connection.py
+```
 
 2. `connection.py` 中只放数据库连接基础对象，逻辑必须与当前 `src/data/database.py` 中的定义一致。
 
-   也就是保持同样的：
+当前 `database.py` 中的逻辑应等价迁入：
 
-   - `BASE_DIR` 计算方式
-   - `DB_PATH` 计算方式
-   - `db = SqliteDatabase(DB_PATH)`
+```python
+import os
+from peewee import SqliteDatabase
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+DB_PATH = os.path.join(BASE_DIR, "schedule.db")
+
+db = SqliteDatabase(DB_PATH)
+```
 
 3. `connection.py` 不得导入：
 
-   - `src.data.database`
-   - `src.data.models`
-   - `src.repositories`
-   - `db_manager`
-   - 任何 UI 模块
+- `src.data.database`
+- `src.data.models`
+- `src.repositories`
+- `db_manager`
+- 任何 UI 模块
 
-4. 本轮完成后，旧运行路径仍然保持：
+4. 本轮完成后，旧运行路径必须保持不变：
 
-   `database.py` 继续使用它自己当前的 `BASE_DIR`、`DB_PATH`、`db` 定义。
+```text
+database.py 继续使用它自己当前的 BASE_DIR / DB_PATH / db 定义
+```
 
-5. 本轮只是为后续 A-2 做准备，不改变当前应用行为。
+也就是说：本轮只是新增 `connection.py`，不切换任何现有代码。
 
-## 建议验收命令
+## 验收命令
+
+请在内层项目根目录执行。
 
 ### 1. connection.py import 验证
 
@@ -135,7 +163,7 @@ git status --short --branch
   - `manage_instruction/Work_Log.md`
   - 以及本轮开始前已经存在的管理文档改动
 
-如出现非允许范围文件，停止并说明原因。
+如果出现非允许范围文件，请停止并说明原因。
 
 ## Work_Log.md 记录要求
 
