@@ -201,3 +201,59 @@
   - A-5/A-6 待后续工单执行。
 - 风险或疑点：
   - 未发现行为回归或循环导入；默认模型来源已切换至 `models.py`，兼容注入路径保持不变。
+
+## 2026-05-14 第二轮 A-5（CategoryRepository 模型导入来源调整）
+
+- 本轮任务名称：第二轮 A-5（CategoryRepository 模型导入来源调整）。
+- 实际修改文件：
+  - `src/repositories/category_repository.py`
+  - `manage_instruction/Work_Log.md`
+- 修改内容说明：
+  - 仅调整 `CategoryRepository.__init__` 在 `category_model is None` 或 `schedule_model is None` 时的延迟导入来源：
+    - 从 `from src.data.database import Category, Schedule`
+    - 改为 `from src.data.models import Category, Schedule`
+  - 其他方法实现未改动。
+- 构造函数注入能力确认：
+  - 已保留 `category_model / schedule_model` 注入能力与 `self._category_model = category_model`、`self._schedule_model = schedule_model` 逻辑不变。
+- 验证命令和结果：
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.repositories.category_repository import CategoryRepository; from src.data.models import Category, Schedule; repo=CategoryRepository(); print('category repo import ok'); print('uses models Category:', repo._category_model is Category); print('uses models Schedule:', repo._schedule_model is Schedule)"`
+    - 结果：
+      - `category repo import ok`
+      - `uses models Category: True`
+      - `uses models Schedule: True`
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; print('db import ok'); cats=db_manager.get_active_categories(); cmap=db_manager.get_category_map(); print('active categories', len(cats)); print('category map', len(cmap)); print('sample status', db_manager.check_category_status(cats[0].id) if cats else 'no sample')"`
+    - 结果：
+      - `db import ok`
+      - `active categories 7`
+      - `category map 7`
+      - `sample status active`
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; import time; name='__tmp_round2a5_category_'+str(int(time.time())); cat_id=db_manager.add_category(name, color='#0cc0df', list_type='schedule'); print('created category', cat_id); assert cat_id is not None; cat=db_manager.get_category(cat_id); print('category exists', bool(cat)); assert cat and cat.name == name; updated=db_manager.update_category_fields(cat_id, color='#0cc0df'); print('updated category', updated); assert updated is True; soft=db_manager.soft_delete_category(cat_id); print('soft deleted', soft); assert soft is True; hard=db_manager.hard_delete_category(cat_id); print('hard deleted', hard); assert hard is True; after=db_manager.get_category(cat_id); print('after delete', after); assert after is None"`
+    - 结果：
+      - `created category 8`
+      - `category exists True`
+      - `updated category True`
+      - `soft deleted True`
+      - `hard deleted True`
+      - `after delete None`
+  - 静态检查：
+    - `rg -n "from src\.data\.database import Category|from src\.data\.database import Schedule|from src\.data\.database import Category, Schedule|from \.\.data\.database import Category|from \.\.data\.database import Schedule|from \.database import Category|from \.database import Schedule" src/repositories/category_repository.py`
+    - 结果：无输出（退出码 1，符合预期）。
+- diff 范围检查结果：
+  - `git diff --name-only -- src/repositories/schedule_repository.py` -> 无输出。
+  - `git diff --name-only -- src/data/database.py` -> 无输出。
+  - `git diff --name-only -- src/data/models.py` -> 无输出。
+  - `git diff --name-only -- src/data/connection.py` -> 无输出。
+  - `git diff --name-only -- src/ui` -> 无输出。
+  - `git diff --name-only -- schedule.db` -> 无输出。
+  - `git diff --name-only` ->
+    - `src/repositories/category_repository.py`
+    - `manage_instruction/Work_Task_Prompts.md`（本轮开始前既有改动）
+    - 写日志后另含 `manage_instruction/Work_Log.md`。
+  - `git status --short --branch` ->
+    - `M src/repositories/category_repository.py`
+    - `M manage_instruction/Work_Task_Prompts.md`（既有改动）
+    - 写日志后另含 `M manage_instruction/Work_Log.md`。
+- 未完成事项：
+  - A-6 待后续工单执行。
+- 风险或疑点：
+  - 未发现行为回归或循环导入；默认模型来源已切换至 `models.py`，注入路径保持兼容。

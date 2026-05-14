@@ -6,7 +6,7 @@ class CategoryRepository:
 
     def __init__(self, category_model=None, schedule_model=None):
         if category_model is None or schedule_model is None:
-            from src.data.database import Category, Schedule
+            from src.data.models import Category, Schedule
 
             if category_model is None:
                 category_model = Category
@@ -73,4 +73,3 @@ class CategoryRepository:
             return True
         except Exception:
             return False
-
