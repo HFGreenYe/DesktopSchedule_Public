@@ -4,29 +4,27 @@
 
 ## 当前小工单
 
-第二轮 B-3：只抽离 categories 表迁移块。
+第二轮 B-4：database.py 迁移入口与职责复核。
 
 状态：等待执行窗口执行，执行后由顾问窗口复核。
 
 ## 正式执行提示词
 
 ```text
-请执行第二轮 B-3：只抽离 categories 表迁移块。本轮只做这一项，不再改 schedules 表迁移块，不做其他重构。
+请执行第二轮 B-4：database.py 迁移入口与职责复核。本轮重点是复核 _migrate_db 是否只承担迁移调度职责；如果没有必要整理代码，可以只记录“无需改代码”。
 
 ## 1. 本轮目标
 
-只把 src/data/database.py 中 _migrate_db 里的 categories 表相关迁移逻辑抽成私有方法，例如：
+复核 src/data/database.py 中 DatabaseManager._migrate_db 的职责是否已经收敛为迁移调度入口。
 
-_migrate_categories_table(self)
+目标状态：
+- _migrate_db 只按顺序调用：
+  - self._migrate_schedules_table()
+  - self._migrate_categories_table()
+- schedules 表迁移逻辑保留在 _migrate_schedules_table。
+- categories 表迁移逻辑保留在 _migrate_categories_table。
 
-本轮要求：
-- _migrate_db 仍保持先调用 self._migrate_schedules_table()，再调用 categories 迁移。
-- 本轮不再改 schedules 表迁移块。
-- 只移动原代码，不改迁移字段、默认值、字段名、表名、补值策略、异常捕获和 migrate 调用顺序。
-- 不改条件判断。
-- 不合并任何迁移分支。
-- 不重写迁移逻辑。
-- 不改变已有数据库兼容策略。
+本轮只允许极小范围的命名、注释、空行整理；如果当前代码已经满足目标，优先不改代码，只更新 Work_Log.md 记录复核结论。
 
 ## 2. 允许/禁止
 
@@ -49,72 +47,66 @@ _migrate_categories_table(self)
 - Work_Task_Prompts.md
 
 本轮禁止改动：
+- 迁移目标
+- 迁移顺序
+- 旧数据补值策略
+- 异常捕获
+- migrate 调用顺序
 - _connect
 - _create_tables
-- _migrate_schedules_table
-- DatabaseManager 对外方法
-- add_schedule
-- update_schedule_with_repeat
-- _add_months
-- delete_schedule
-- update_schedule_status
-- toggle_pin_status
-- update_schedule_fields
-- 所有分类业务方法
-- 任何非迁移相关业务方法
+- DatabaseManager 对外 API
+- 所有业务方法
+- 重复日程逻辑
+
+禁止抽取业务方法，禁止移动重复日程逻辑，禁止重写迁移逻辑。
 
 如果发现必须修改禁止范围内的文件，先停止并说明原因，不要自行扩大修改范围。
 
 ## 3. 具体任务
 
-1. 在 src/data/database.py 中定位 DatabaseManager._migrate_db。
-2. 将 categories 表相关迁移逻辑抽成私有方法，例如：
-
-   def _migrate_categories_table(self):
-
-3. categories 表相关迁移逻辑包括：
-   - columns_cat = [col.name for col in db.get_columns('categories')]
-   - list_type 字段迁移分支
-   - sort_order 字段迁移分支
-   - sort_order 老数据补值循环
-
-4. 修改后 _migrate_db 应保持调度顺序：
-   - 先调用 self._migrate_schedules_table()
-   - 再调用 self._migrate_categories_table()
-
-5. 不修改 _migrate_schedules_table 的实现。
-6. 不改变任何迁移字段、默认值、字段名、表名、补值策略、异常捕获和 migrate 调用顺序。
-7. 不做额外重构。
+1. 检查 src/data/database.py 中的 _migrate_db。
+2. 确认 _migrate_db 是否只承担迁移调度职责。
+3. 确认 _migrate_db 是否按顺序调用：
+   - self._migrate_schedules_table()
+   - self._migrate_categories_table()
+4. 如果已有结构清晰，不要改代码，只在 Work_Log.md 记录“无需改代码”。
+5. 如果确有必要，只允许做极小范围的命名、注释或空行整理。
+6. 不修改 _migrate_schedules_table 和 _migrate_categories_table 内部迁移逻辑。
+7. 不修改任何业务方法。
 
 ## 4. 验收命令
 
-1. database import 和基础分类读取验证：
+1. import 验证：
 
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; print('database import ok'); print('active categories', len(db_manager.get_active_categories()))"
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.connection import db as db1; from src.data.models import Category, Schedule; from src.data.database import db as db2, db_manager; print('imports ok'); print('same db object:', db1 is db2)"
 
-2. 临时分类创建/硬删除路径验证，验证后必须清理：
+2. 基础读取验证：
 
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; import time; name='__tmp_b3_category_'+str(int(time.time())); cat_id=db_manager.add_category(name, color='#0cc0df', list_type='schedule'); print('created category', cat_id); assert cat_id is not None; cat=db_manager.get_category(cat_id); print('category exists', bool(cat)); assert cat and cat.name == name; deleted=db_manager.hard_delete_category(cat_id); print('deleted category', deleted); assert deleted is True; after=db_manager.get_category(cat_id); print('after delete', after); assert after is None"
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; print('all schedules', len(db_manager.get_all_schedules())); print('active categories', len(db_manager.get_active_categories()))"
 
-3. 静态检查新私有方法存在：
+3. 临时分类创建/硬删除验证，验证后必须清理：
 
-rg -n "def _migrate_categories_table|self\._migrate_categories_table\(\)" src/data/database.py
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; import time; name='__tmp_b4_category_'+str(int(time.time())); cid=db_manager.add_category(name, color='#0cc0df', list_type='schedule'); print('created category', cid); assert cid is not None; cat=db_manager.get_category(cid); assert cat and cat.name == name; deleted=db_manager.hard_delete_category(cid); print('deleted category', deleted); assert deleted is True; assert db_manager.get_category(cid) is None"
 
-预期：能看到方法定义和 _migrate_db 中的调用。
+4. 临时日程创建/删除验证，验证后必须清理：
 
-4. 静态检查 _migrate_db 中调用顺序正确：
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; import time; name='__tmp_b4_schedule_'+str(int(time.time())); data={'title':name,'item_type':'schedule','priority':0,'repeat_rule':'none','description':'temporary b4 validation','category_id':None}; created=db_manager.add_schedule(data); print('created schedule', created); assert created is True; matches=[s for s in db_manager.get_all_schedules() if s.title==name]; assert len(matches)==1; sid=matches[0].id; deleted=db_manager.delete_schedule(sid); print('deleted schedule', deleted); assert deleted is True; assert not [s for s in db_manager.get_all_schedules() if s.id==sid]"
 
-rg -n "self\._migrate_schedules_table\(\)|self\._migrate_categories_table\(\)" src/data/database.py
+5. GUI smoke test：
 
-预期：_migrate_schedules_table 的调用行号在 _migrate_categories_table 之前。
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from PyQt6.QtWidgets import QApplication; from src.ui.main_window import MainWindow; app=QApplication([]); w=MainWindow(); print('gui smoke ok'); w.close(); app.quit()"
 
-5. 静态检查 schedules 迁移方法仍存在：
+如果 GUI smoke 因环境限制失败，请记录原因，并执行兜底：
 
-rg -n "def _migrate_schedules_table|group_id_field|sort_order_field" src/data/database.py
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import main; print('main import ok')"
 
-预期：仍能看到 schedules 迁移方法和原有字段定义。
+6. 静态检查 _migrate_db 调度顺序：
 
-6. 验证禁止文件无改动：
+rg -n "def _migrate_db|self\._migrate_schedules_table\(\)|self\._migrate_categories_table\(\)" src/data/database.py
+
+预期：_migrate_db 中先调用 _migrate_schedules_table，再调用 _migrate_categories_table。
+
+7. 验证禁止文件无改动：
 
 git diff --name-only -- src/data/connection.py
 git diff --name-only -- src/data/models.py
@@ -123,11 +115,14 @@ git diff --name-only -- src/ui
 git diff --name-only -- main.py
 git diff --name-only -- schedule.db
 
-7. 验证本轮修改范围：
+8. 验证本轮修改范围：
 
 git diff --name-only
 
-预期只包含：
+如果本轮无需代码改动，预期只包含：
+- manage_instruction/Work_Log.md
+
+如果确实做了极小范围整理，预期只包含：
 - src/data/database.py
 - manage_instruction/Work_Log.md
 
@@ -135,13 +130,13 @@ git diff --name-only
 
 更新 manage_instruction/Work_Log.md，至少记录：
 
-- 本轮任务名称：第二轮 B-3（只抽离 categories 表迁移块）
+- 本轮任务名称：第二轮 B-4（database.py 迁移入口与职责复核）
 - 实际修改文件
-- 抽离的方法名，例如 _migrate_categories_table
-- 是否确认 _migrate_db 仍保持先 schedules、后 categories 的顺序
-- 是否确认本轮未修改 _migrate_schedules_table
-- 是否确认未改迁移字段、默认值、字段名、表名、补值策略、异常捕获和 migrate 调用顺序
-- 是否确认未修改 _connect、_create_tables、DatabaseManager 对外方法和业务方法
+- 是否有代码改动；如果没有，记录“无需改代码”
+- _migrate_db 职责复核结论
+- 是否确认 _migrate_db 只负责顺序调用 _migrate_schedules_table 和 _migrate_categories_table
+- 是否确认未改迁移目标、迁移顺序、旧数据补值策略、异常捕获和 migrate 调用顺序
+- 是否确认未改 _connect、_create_tables、DatabaseManager 对外 API 和业务方法
 - 验证命令和结果
 - diff 范围检查结果
 - 未完成事项
@@ -154,8 +149,7 @@ git diff --name-only
 
 ## 复核锚点
 
-- 本轮只允许抽离 categories 表迁移块。
-- `_migrate_schedules_table` 的实现不得修改。
-- `_migrate_db` 必须先调用 `self._migrate_schedules_table()`，再调用 `self._migrate_categories_table()`。
-- 不允许改迁移字段、默认值、字段名、表名、补值策略、异常捕获和 `migrate(...)` 调用顺序。
-- 不允许修改 `src/data/connection.py`、`src/data/models.py`、`src/repositories/`、`src/ui/`、`main.py`、`schedule.db`。
+- B-4 优先不改代码；如果无需整理，只更新 `Work_Log.md`。
+- `_migrate_db` 应只负责顺序调用 `_migrate_schedules_table()` 和 `_migrate_categories_table()`。
+- 不允许改迁移目标、迁移顺序、旧数据补值策略、异常捕获和 `migrate(...)` 调用顺序。
+- 不允许修改业务方法、重复日程逻辑、`src/ui/`、`schedule.db`。
