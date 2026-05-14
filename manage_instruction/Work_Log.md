@@ -108,3 +108,50 @@
 - 风险或疑点：
   - 未发现循环导入。
   - `database.py` 与 `connection.py` 数据库连接对象一致（`same db object: True`）。
+
+## 2026-05-14 第二轮 A-3（新增 models.py 并移动 Peewee 模型类）
+
+- 本轮任务名称：第二轮 A-3（新增 models.py 并移动 Peewee 模型类）。
+- 实际修改文件：
+  - `src/data/models.py`
+  - `src/data/database.py`
+  - `manage_instruction/Work_Log.md`
+- 移动的模型类：
+  - `BaseModel`
+  - `Category`
+  - `Schedule`
+- 结构调整结果：
+  - `models.py` 已从 `connection.py` 导入 `db`：`from src.data.connection import db`
+  - `models.py` 未从 `database.py` 导入任何内容。
+  - `database.py` 已改为从 `models.py` 导入模型：`from src.data.models import BaseModel, Category, Schedule`
+  - `database.py` 中不再保留 `BaseModel`、`Category`、`Schedule` 类定义。
+- 约束确认：
+  - 本轮没有修改 `src/repositories/`。
+  - 本轮没有修改数据库字段含义、默认值、字段名、表名（仅类定义迁移位置）。
+  - 本轮未执行 A-4/A-5/A-6，未执行第二轮 B/C/D。
+- 验证命令和结果：
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.models import BaseModel, Category, Schedule; from src.data.database import db_manager; print('models import ok'); print('db import ok'); print(len(db_manager.get_all_schedules()))"`
+    - 结果：`models import ok` / `db import ok` / `62`
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from datetime import date; from src.data.database import db_manager; print('all schedules', len(db_manager.get_all_schedules())); print('active categories', len(db_manager.get_active_categories())); print('today schedules', len(db_manager.get_schedules_for_date(date.today())))"`
+    - 结果：`all schedules 62` / `active categories 7` / `today schedules 9`
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; import time; name='__tmp_round2a3_category_'+str(int(time.time())); cat_id=db_manager.add_category(name, color='#0cc0df', list_type='schedule'); print('created category', cat_id); assert cat_id is not None; cat=db_manager.get_category(cat_id); print('category exists', bool(cat)); assert cat and cat.name == name; deleted=db_manager.hard_delete_category(cat_id); print('deleted category', deleted); assert deleted is True; after=db_manager.get_category(cat_id); print('after delete', after); assert after is None"`
+    - 结果：`created category 8` / `category exists True` / `deleted category True` / `after delete None`
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; import time; name='__tmp_round2a3_schedule_'+str(int(time.time())); data={'title': name, 'item_type': 'schedule', 'priority': 0, 'repeat_rule': 'none', 'description': 'temporary round2a3 validation', 'category_id': None}; created=db_manager.add_schedule(data); print('created schedule', created); assert created is True; matches=[s for s in db_manager.get_all_schedules() if s.title == name]; print('matches', len(matches)); assert len(matches) == 1; schedule_id=matches[0].id; deleted=db_manager.delete_schedule(schedule_id); print('deleted schedule', deleted); assert deleted is True; remaining=[s for s in db_manager.get_all_schedules() if s.id == schedule_id]; print('remaining', len(remaining)); assert len(remaining) == 0"`
+    - 结果：`created schedule True` / `matches 1` / `deleted schedule True` / `remaining 0`
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from PyQt6.QtWidgets import QApplication; from src.ui.main_window import MainWindow; app=QApplication([]); w=MainWindow(); print('gui smoke ok'); w.close(); app.quit()"`
+    - 结果：`gui smoke ok`（附带 `libpng warning: tRNS: invalid with alpha channel`，不影响结论）
+- 导入边界验证：
+  - `rg -n "from .*database import|import .*database" src/data/models.py` -> 无匹配（退出码 1，符合预期）。
+  - `rg -n "^class (BaseModel|Category|Schedule)" src/data/database.py` -> 无匹配（退出码 1，符合预期）。
+  - `rg -n "^class (BaseModel|Category|Schedule)" src/data/models.py` -> 匹配到 3 个类定义（符合预期）。
+- diff 范围检查结果：
+  - `git diff --name-only -- src/data/connection.py` -> 无输出。
+  - `git diff --name-only -- src/repositories` -> 无输出。
+  - `git diff --name-only -- src/ui` -> 无输出。
+  - `git diff --name-only -- schedule.db` -> 无输出。
+  - `git diff --name-only` -> `src/data/database.py` + `src/data/models.py` + `manage_instruction/Work_Task_Prompts.md`（本轮开始前既有改动）；写日志后另含 `manage_instruction/Work_Log.md`。
+  - `git status --short --branch` -> `M src/data/database.py`、`?? src/data/models.py`、`M manage_instruction/Work_Task_Prompts.md`（既有改动）；写日志后另含 `M manage_instruction/Work_Log.md`。
+- 未完成事项：
+  - 第二轮 A-4/A-5/A-6 待后续工单执行。
+- 风险或疑点：
+  - 未发现循环导入问题；`models.py` -> `connection.py` 单向依赖，`database.py` -> `models.py` + `connection.py`，当前导入链可用。
