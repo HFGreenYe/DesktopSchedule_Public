@@ -97,3 +97,44 @@
   - 等待顾问窗口复核并下发后续小工单。
 - 风险或疑点：
   - `Workflow_Guide.md` 的临时改动已移出本轮 C-2；当前最终范围仅包含 `Work_Log.md` 与 `Work_Task_Prompts.md`。
+
+## 2026-05-15 第二轮 C-3（repositories/__init__.py 轻量导出复核）
+
+- 本轮任务名称：第二轮 C-3（repositories/__init__.py 轻量导出复核）。
+- 开工前是否已有管理文档 diff：
+  - 有。开工前 `git status --short --branch` 显示 `D manage_instruction/Work_Task_Prompts.md`（顾问窗口流程相关变更，按对话说明不作为本轮源码改动）。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+- `__init__.py` 当前导出内容：
+  - `from .category_repository import CategoryRepository`
+  - `from .schedule_repository import ScheduleRepository`
+  - `__all__ = ["ScheduleRepository", "CategoryRepository"]`
+- 是否发现 `db_manager`、UI、`src.data.database` 或重型副作用导入：
+  - 未发现。
+  - 静态检查命令：`rg -n "db_manager|src\.ui|src\.data\.database|from .*database import|import .*database" src/repositories/__init__.py`
+  - 结果：无输出（退出码 1，符合预期）。
+- 是否进入“无需整理”分支：
+  - 是。C-3 无需整理，不修改 `src/repositories/__init__.py`。
+- import 验证结果：
+  - 包级导入：
+    - 命令：`D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.repositories import ScheduleRepository, CategoryRepository; print('repositories package import ok'); print(ScheduleRepository is not None, CategoryRepository is not None)"`
+    - 输出：`repositories package import ok` / `True True`
+  - 模块级导入：
+    - 命令：`D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.repositories.schedule_repository import ScheduleRepository; from src.repositories.category_repository import CategoryRepository; print('repository modules import ok'); print(ScheduleRepository is not None, CategoryRepository is not None)"`
+    - 输出：`repository modules import ok` / `True True`
+  - `db_manager` 导入与读取：
+    - 命令：`D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; print('db_manager import ok'); print('all schedules', len(db_manager.get_all_schedules()))"`
+    - 输出：`db_manager import ok` / `all schedules 75`
+- diff 范围检查结果：
+  - `git diff --name-only -- src/repositories/category_repository.py` -> 无输出。
+  - `git diff --name-only -- src/repositories/schedule_repository.py` -> 无输出。
+  - `git diff --name-only -- src/data` -> 无输出。
+  - `git diff --name-only -- src/ui` -> 无输出。
+  - `git diff --name-only -- main.py` -> 无输出。
+  - `git diff --name-only -- schedule.db` -> 无输出。
+  - `git diff --name-only` -> `manage_instruction/Work_Log.md`、`manage_instruction/Work_Task_Prompts.md`。
+  - `git status --short --branch` -> `M manage_instruction/Work_Log.md`、`M manage_instruction/Work_Task_Prompts.md`。
+- 未完成事项：
+  - 等待顾问窗口复核并下发后续小工单。
+- 风险或疑点：
+  - 本轮仅做复核与日志记录；管理文档 `Work_Task_Prompts.md` 的变更来自顾问流程，不属于本轮源码改动。
