@@ -138,3 +138,40 @@
   - 等待顾问窗口复核并下发后续小工单。
 - 风险或疑点：
   - 本轮仅做复核与日志记录；管理文档 `Work_Task_Prompts.md` 的变更来自顾问流程，不属于本轮源码改动。
+
+## 2026-05-15 第二轮 C-4（Repository 行为回归验收）
+
+- 本轮任务名称：第二轮 C-4（Repository 行为回归验收）。
+- 开工前是否已有管理文档 diff：
+  - 有。开工前 `git status --short --branch` 显示：`M manage_instruction/Work_Task_Prompts.md`（顾问窗口维护变更，不视为本轮源码改动）。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+- import 验证结果：
+  - 命令：`D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.repositories import ScheduleRepository, CategoryRepository; from src.repositories.schedule_repository import ScheduleRepository as SR; from src.repositories.category_repository import CategoryRepository as CR; from src.data.database import db_manager; print('imports ok'); print(ScheduleRepository is SR, CategoryRepository is CR); print('db_manager ok', db_manager is not None)"`
+  - 输出：`imports ok` / `True True` / `db_manager ok True`
+- 基础读路径验证结果：
+  - 命令：`D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from datetime import date; from src.data.database import db_manager; all_schedules=db_manager.get_all_schedules(); today=db_manager.get_schedules_for_date(date.today()); cats=db_manager.get_active_categories(); cmap=db_manager.get_category_map(); print('all schedules', len(all_schedules)); print('today schedules', len(today)); print('active categories', len(cats)); print('category map', len(cmap)); assert isinstance(all_schedules, list); assert isinstance(today, list); assert isinstance(cats, list); assert isinstance(cmap, dict)"`
+  - 输出：`all schedules 75` / `today schedules 8` / `active categories 7` / `category map 7`
+- 临时分类写入/清理验证结果：
+  - 命令：`D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; import time; name='__tmp_c4_category_'+str(int(time.time())); cid=db_manager.add_category(name, color='#0cc0df', list_type='schedule'); print('created category', cid); assert cid is not None; cat=db_manager.get_category(cid); assert cat and cat.name == name; updated=db_manager.update_category_fields(cid, color='#0cc0df'); print('updated', updated); assert updated is True; soft=db_manager.soft_delete_category(cid); print('soft deleted', soft); assert soft is True; hard=db_manager.hard_delete_category(cid); print('hard deleted', hard); assert hard is True; assert db_manager.get_category(cid) is None"`
+  - 输出：`created category 8` / `updated True` / `soft deleted True` / `hard deleted True`
+- 临时日程写入/清理验证结果：
+  - 命令：`D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; import time; name='__tmp_c4_schedule_'+str(int(time.time())); data={'title':name,'item_type':'schedule','priority':0,'repeat_rule':'none','description':'temporary c4 validation','category_id':None}; created=db_manager.add_schedule(data); print('created schedule', created); assert created is True; matches=[s for s in db_manager.get_all_schedules() if s.title==name]; print('matches', len(matches)); assert len(matches)==1; sid=matches[0].id; deleted=db_manager.delete_schedule(sid); print('deleted schedule', deleted); assert deleted is True; remaining=[s for s in db_manager.get_all_schedules() if s.id==sid]; print('remaining', len(remaining)); assert len(remaining)==0"`
+  - 输出：`created schedule True` / `matches 1` / `deleted schedule True` / `remaining 0`
+- GUI smoke test 结果：
+  - 命令：`D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from PyQt6.QtWidgets import QApplication; from src.ui.main_window import MainWindow; app=QApplication([]); w=MainWindow(); print('gui smoke ok'); w.close(); app.quit()"`
+  - 输出：`gui smoke ok`
+  - 备注：出现 `libpng warning: tRNS: invalid with alpha channel`，不影响本次 smoke 通过。
+- diff 检查结果：
+  - `git diff --name-only -- src/repositories` -> 无输出。
+  - `git diff --name-only -- src/data` -> 无输出。
+  - `git diff --name-only -- src/ui` -> 无输出。
+  - `git diff --name-only -- main.py` -> 无输出。
+  - `git diff --name-only -- requirements.txt` -> 无输出。
+  - `git diff --name-only -- schedule.db` -> 无输出。
+  - `git diff --name-only` -> 验证时为 `manage_instruction/Work_Task_Prompts.md`；写入本日志后另含 `manage_instruction/Work_Log.md`。
+  - `git status --short --branch` -> 验证时为 `M manage_instruction/Work_Task_Prompts.md`；写入本日志后另含 `M manage_instruction/Work_Log.md`。
+- 未完成事项：
+  - 等待顾问窗口复核并下发后续工单。
+- 风险或疑点：
+  - 本轮临时分类与临时日程均已清理，`schedule.db` 无 tracked diff。
