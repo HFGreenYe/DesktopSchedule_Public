@@ -246,3 +246,73 @@
   - B-5 待后续工单。
 - 风险或疑点：
   - 未发现迁移行为变化风险、循环导入风险或 `schedule.db` 变更风险。
+
+## 2026-05-14 第二轮 B-5（第二轮 B 整体技术验收）
+
+- 本轮任务名称：第二轮 B-5（第二轮 B 整体技术验收）。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+- import 验证结果：
+  - 命令：
+    - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.connection import db as db1, DB_PATH as p1; from src.data.models import Category, Schedule; from src.data.database import db as db2, DB_PATH as p2, db_manager; from src.repositories.schedule_repository import ScheduleRepository; from src.repositories.category_repository import CategoryRepository; print('imports ok'); print('same db object:', db1 is db2); print('same path:', p1 == p2); print('repos ok', ScheduleRepository is not None, CategoryRepository is not None)"`
+  - 结果：
+    - `imports ok`
+    - `same db object: True`
+    - `same path: True`
+    - `repos ok True True`
+- _migrate_db 迁移调度职责验证结果：
+  - 命令：
+    - `rg -n "def _migrate_db|self\._migrate_schedules_table\(\)|self\._migrate_categories_table\(\)" src/data/database.py`
+  - 结果：
+    - `def _migrate_db` 存在。
+    - `_migrate_db` 中按顺序调用：`self._migrate_schedules_table()` -> `self._migrate_categories_table()`。
+- 基础读路径验证结果：
+  - 命令：
+    - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from datetime import date; from src.data.database import db_manager; all_schedules=db_manager.get_all_schedules(); today=db_manager.get_schedules_for_date(date.today()); cats=db_manager.get_active_categories(); cmap=db_manager.get_category_map(); print('all schedules', len(all_schedules)); print('today schedules', len(today)); print('active categories', len(cats)); print('category map', len(cmap))"`
+  - 结果：
+    - `all schedules 62`
+    - `today schedules 9`
+    - `active categories 7`
+    - `category map 7`
+- 临时分类写入/清理验证结果：
+  - 命令：
+    - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; import time; name='__tmp_b5_category_'+str(int(time.time())); cid=db_manager.add_category(name, color='#0cc0df', list_type='schedule'); print('created category', cid); assert cid is not None; cat=db_manager.get_category(cid); assert cat and cat.name == name; updated=db_manager.update_category_fields(cid, color='#0cc0df'); print('updated', updated); assert updated is True; soft=db_manager.soft_delete_category(cid); print('soft deleted', soft); assert soft is True; hard=db_manager.hard_delete_category(cid); print('hard deleted', hard); assert hard is True; assert db_manager.get_category(cid) is None"`
+  - 结果：
+    - `created category 8`
+    - `updated True`
+    - `soft deleted True`
+    - `hard deleted True`
+  - 临时分类已清理。
+- 临时日程写入/清理验证结果：
+  - 命令：
+    - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; import time; name='__tmp_b5_schedule_'+str(int(time.time())); data={'title':name,'item_type':'schedule','priority':0,'repeat_rule':'none','description':'temporary b5 validation','category_id':None}; created=db_manager.add_schedule(data); print('created schedule', created); assert created is True; matches=[s for s in db_manager.get_all_schedules() if s.title==name]; assert len(matches)==1; sid=matches[0].id; deleted=db_manager.delete_schedule(sid); print('deleted schedule', deleted); assert deleted is True; assert not [s for s in db_manager.get_all_schedules() if s.id==sid]"`
+  - 结果：
+    - `created schedule True`
+    - `deleted schedule True`
+  - 临时日程已清理。
+- GUI smoke test 结果：
+  - 命令：
+    - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from PyQt6.QtWidgets import QApplication; from src.ui.main_window import MainWindow; app=QApplication([]); w=MainWindow(); print('gui smoke ok'); w.close(); app.quit()"`
+  - 结果：通过。
+    - `gui smoke ok`
+    - 附带 `libpng warning: tRNS: invalid with alpha channel`，不影响验收结论。
+  - 兜底 `import main` 未触发。
+- diff 检查结果：
+  - `git diff --name-only -- src/data` -> 无输出。
+  - `git diff --name-only -- src/repositories` -> 无输出。
+  - `git diff --name-only -- src/ui` -> 无输出。
+  - `git diff --name-only -- main.py` -> 无输出。
+  - `git diff --name-only -- requirements.txt` -> 无输出。
+  - `git diff --name-only -- schedule.db` -> 无输出。
+- git diff / status 结果：
+  - 记录前：
+    - `git diff --name-only` -> 无输出。
+    - `git status --short --branch` -> `## main...origin/main [ahead 40]`。
+  - 写日志后：
+    - `git diff --name-only` -> `manage_instruction/Work_Log.md`。
+    - `git status --short --branch` -> 含 `M manage_instruction/Work_Log.md`。
+- 未完成事项：
+  - 第二轮 B 后续任务（如有）待顾问窗口继续拆分。
+- 风险或疑点：
+  - 本轮未发现迁移行为变化风险、循环导入风险。
+  - `schedule.db` 未产生 diff。
