@@ -159,3 +159,57 @@
 - 风险或疑点：
   - 分类临时数据已按流程清理；未发现 `schedule.db` tracked diff。
   - 验证阶段出现管理文档 `Work_Task_Prompts.md` 变更，视为顾问窗口维护项，不属于本轮源码改动。
+
+## 2026-05-15 第二轮 D-4（日程写路径临时验收）
+
+- 本轮任务名称：第二轮 D-4（日程写路径临时验收）。
+- 开工前是否已有管理文档 diff：
+  - 有。开工前已有 `manage_instruction/Work_Task_Prompts.md`（顾问窗口维护的 D-4 提示词锚点）diff，不视为本轮源码改动。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+- 是否存在可安全恢复的日程样本：
+  - 是。样本数量 `75`，样本 id `72`。
+- `update_schedule_status` 写入/恢复验证结果：
+  - 原值：`status=0`
+  - 测试写入值：`1`
+  - 输出：`status write/restore True True`
+  - 恢复结果：`restored status 0`
+  - 结论：通过。
+- `toggle_pin_status` 切换/恢复验证结果：
+  - 原值：`is_pinned=False`
+  - 输出：`pin toggle/restore True True`
+  - 恢复结果：`restored pin False`
+  - 结论：通过。
+- `update_schedule_fields` 临时 title 写入/恢复验证结果：
+  - 原值：`title=测试`
+  - 临时值：`测试__d4_tmp_1778843910`
+  - 输出：`temp title set True`、`title temp/restore True True`
+  - 恢复结果：`restored title 测试`
+  - 结论：通过。
+- 临时日程名称与 id：
+  - 名称：`__tmp_d4_schedule_1778843910`
+  - id：`83`
+- `add_schedule` 验证结果：
+  - 输出：`created schedule True`、`matches 1`
+  - 结论：通过（成功创建唯一临时日程）。
+- `delete_schedule` 验证结果：
+  - 输出：`deleted schedule True`
+  - 结论：通过。
+- 删除后是否查询不到临时 id：
+  - 输出：`remaining 0`
+  - 结论：是，删除后查询不到该临时 id。
+- schedule.db 是否无 tracked diff：
+  - `git diff --name-only -- schedule.db` -> 无输出。
+- diff 范围检查结果：
+  - `git diff --name-only -- src/data` -> 无输出。
+  - `git diff --name-only -- src/repositories` -> 无输出。
+  - `git diff --name-only -- src/ui` -> 无输出。
+  - `git diff --name-only -- main.py` -> 无输出。
+  - `git diff --name-only -- requirements.txt` -> 无输出。
+  - `git diff --name-only -- schedule.db` -> 无输出。
+  - `git diff --name-only` -> 验证时为 `manage_instruction/Work_Task_Prompts.md`；写入本日志后另含 `manage_instruction/Work_Log.md`。
+  - `git status --short --branch` -> 验证时为 `M manage_instruction/Work_Task_Prompts.md`；写入本日志后另含 `M manage_instruction/Work_Log.md`。
+- 未完成事项：
+  - 等待顾问窗口复核并下发后续 D 工单。
+- 风险或疑点：
+  - 本轮只做验收写路径与恢复/清理，未做源码改动；未发现 `schedule.db` tracked diff 异常。
