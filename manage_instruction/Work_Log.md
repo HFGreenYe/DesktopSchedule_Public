@@ -112,3 +112,50 @@
   - 等待顾问窗口复核并下发 D-3 工单。
 - 风险或疑点：
   - 本轮仅读路径验证，未触发写入；未发现 `schedule.db` tracked diff 或源码范围异常。
+
+## 2026-05-15 第二轮 D-3（分类写路径临时验收）
+
+- 本轮任务名称：第二轮 D-3（分类写路径临时验收）。
+- 开工前是否已有管理文档 diff：
+  - 有。开工前已有 `manage_instruction/Work_Task_Prompts.md`（顾问窗口维护的 D-3 提示词锚点）diff，不视为本轮源码改动。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+- 临时分类名称与 id：
+  - 名称：`__tmp_d3_category_1778843489`
+  - id：`8`
+- `add_category` 验证结果：
+  - 输出：`created category 8`
+  - 结论：通过。
+- `get_category` 验证结果：
+  - 输出：`category exists True`
+  - 结论：通过（创建后可读取，且名称匹配）。
+- `update_category_fields` 验证结果：
+  - 输出：`updated True`
+  - 结论：通过。
+- `soft_delete_category` 验证结果：
+  - 输出：`soft deleted True`
+  - 结论：通过。
+- `hard_delete_category` 验证结果：
+  - 输出：`hard deleted True`
+  - 结论：通过。
+- 清理后 `get_category(cat_id)` 是否返回 `None`：
+  - 输出：`after delete None`
+  - 结论：是，返回 `None`。
+- 是否确认本轮未修改源码：
+  - 是。本轮仅执行验收写路径命令与日志记录。
+- schedule.db 是否无 tracked diff：
+  - `git diff --name-only -- schedule.db` -> 无输出。
+- diff 范围检查结果：
+  - `git diff --name-only -- src/data` -> 无输出。
+  - `git diff --name-only -- src/repositories` -> 无输出。
+  - `git diff --name-only -- src/ui` -> 无输出。
+  - `git diff --name-only -- main.py` -> 无输出。
+  - `git diff --name-only -- requirements.txt` -> 无输出。
+  - `git diff --name-only -- schedule.db` -> 无输出。
+  - `git diff --name-only` -> 验证时为 `manage_instruction/Work_Task_Prompts.md`；写入本日志后另含 `manage_instruction/Work_Log.md`。
+  - `git status --short --branch` -> 验证时为 `M manage_instruction/Work_Task_Prompts.md`；写入本日志后另含 `M manage_instruction/Work_Log.md`。
+- 未完成事项：
+  - 等待顾问窗口复核并下发 D-4 工单。
+- 风险或疑点：
+  - 分类临时数据已按流程清理；未发现 `schedule.db` tracked diff。
+  - 验证阶段出现管理文档 `Work_Task_Prompts.md` 变更，视为顾问窗口维护项，不属于本轮源码改动。
