@@ -4,26 +4,28 @@
 
 ## 当前小工单
 
-第二轮 C-4：Repository 行为回归验收。
+第二轮 C-5：第二轮 C 整体验收与归档准备。
 
-状态：顾问窗口已审查，提示词与 `Work_Instruction.md` 中 C-4 边界一致，可转执行窗口。
+状态：顾问窗口已审查，提示词与 `Work_Instruction.md` 中 C-5 边界一致，可转执行窗口。
 
 提示词：
 
 ~~~~markdown
-请执行第二轮 C-4：Repository 行为回归验收。本轮只做行为回归验证，不做源码改动。
+请执行第二轮 C-5：第二轮 C 整体验收与归档准备。本轮只做整体验收和日志记录，不做任何代码改动。
 
 ## 1. 本轮目标
 
-验证 Repository 相关委托路径在 C-1 ~ C-3 依赖清理复核后没有行为回归。
+汇总并复核第二轮 C-1 到 C-4 的结果，为进入第二轮 D 做准备。
 
-重点验证：
-- Repository / db_manager import 正常。
-- 已委托读路径可用。
-- 临时分类写入路径可用，并清理干净。
-- 临时日程写入路径可用，并清理干净。
-- GUI smoke test 可通过，或失败时记录原因并执行 import main 兜底。
-- `src/ui`、`src/data`、`src/repositories`、`schedule.db` 最终无 tracked diff。
+重点确认：
+- Repository 不依赖 db_manager、UI 或 src.data.database。
+- Repository 默认模型来源为 src.data.models。
+- Repository 构造函数注入能力保留。
+- src/repositories/__init__.py 只做轻量导出。
+- ScheduleRepository、CategoryRepository、src.repositories、db_manager 可 import。
+- 已委托读写路径关键验证通过。
+- GUI smoke test 通过，或有 import main 兜底记录。
+- src/repositories、src/data、src/ui、main.py、requirements.txt、schedule.db 无 diff。
 
 ## 2. 允许/禁止
 
@@ -43,60 +45,66 @@
 - Work_Snapshot.md
 - Work_Formulation.md
 
-本轮允许为了验收进行临时数据库写入，但必须清理，并确认 `git diff --name-only -- schedule.db` 无输出。
-
-禁止改源码、禁止改业务逻辑、禁止改 Repository 方法名/参数/返回语义、禁止改查询排序/过滤/删除策略。
+禁止修改任何源码文件、数据库文件或业务逻辑。
 
 若开工前已有管理文档 diff，需在 Work_Log.md 中单独记录，不视为本轮源码改动。
 
 ## 3. 具体任务
 
-1. 验证 Repository 和 db_manager import。
-2. 验证基础读路径：
-   - get_all_schedules
-   - get_schedules_for_date
-   - get_active_categories
-   - get_category_map
-3. 验证分类临时写路径：
-   - add_category
-   - update_category_fields
-   - soft_delete_category
-   - hard_delete_category
-4. 验证日程临时写路径：
-   - add_schedule 创建 repeat_rule='none' 的临时日程
-   - delete_schedule 删除临时日程
-   - 删除后确认查询不到该临时 id
-5. 执行 GUI smoke test；如失败，记录原因并执行 import main 兜底。
-6. 检查源码、UI、数据库最终无 diff。
-7. 不做任何代码修复。
+1. 读取 Work_Log.md 中 C-1 到 C-4 的记录。
+2. 汇总 C-1 结论：Repository 静态依赖审查。
+3. 汇总 C-2 结论：Repository import 残留修正是否无需改代码。
+4. 汇总 C-3 结论：repositories/__init__.py 是否轻量导出。
+5. 汇总 C-4 结论：Repository 行为回归验收是否通过。
+6. 复跑最小关键验证：
+   - repository import
+   - db_manager import
+   - 基础读路径
+   - GUI smoke 或 import main 兜底
+   - diff 范围
+7. 记录是否可进入第二轮 D。
+8. 不做任何代码修复。
 
 ## 4. 验收命令
 
-1. import 验证：
+1. Repository 与 db_manager import 验证：
 
 ```cmd
 D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.repositories import ScheduleRepository, CategoryRepository; from src.repositories.schedule_repository import ScheduleRepository as SR; from src.repositories.category_repository import CategoryRepository as CR; from src.data.database import db_manager; print('imports ok'); print(ScheduleRepository is SR, CategoryRepository is CR); print('db_manager ok', db_manager is not None)"
 ```
 
-2. 基础读路径验证：
+2. 依赖边界静态复核：
+
+```cmd
+rg -n "db_manager|src\.ui|from .*data\.database|src\.data\.database|from .*database import" src/repositories
+```
+
+预期：无输出。
+
+3. 模型来源与注入能力复核：
+
+```cmd
+rg -n "from src\.data\.models import|def __init__\(self, schedule_model=None\)|def __init__\(self, category_model=None, schedule_model=None\)" src/repositories
+```
+
+预期：能看到 models 导入和两个 Repository 的构造函数注入参数。
+
+4. __init__.py 轻量导出复核：
+
+```cmd
+Get-Content -Path src\repositories\__init__.py -Encoding UTF8
+rg -n "db_manager|src\.ui|src\.data\.database|from .*database import|import .*database" src/repositories/__init__.py
+```
+
+预期：__init__.py 只导出 Repository；静态检查无输出。
+
+5. 基础读路径复核：
 
 ```cmd
 D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from datetime import date; from src.data.database import db_manager; all_schedules=db_manager.get_all_schedules(); today=db_manager.get_schedules_for_date(date.today()); cats=db_manager.get_active_categories(); cmap=db_manager.get_category_map(); print('all schedules', len(all_schedules)); print('today schedules', len(today)); print('active categories', len(cats)); print('category map', len(cmap)); assert isinstance(all_schedules, list); assert isinstance(today, list); assert isinstance(cats, list); assert isinstance(cmap, dict)"
 ```
 
-3. 临时分类写入/清理验证：
-
-```cmd
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; import time; name='__tmp_c4_category_'+str(int(time.time())); cid=db_manager.add_category(name, color='#0cc0df', list_type='schedule'); print('created category', cid); assert cid is not None; cat=db_manager.get_category(cid); assert cat and cat.name == name; updated=db_manager.update_category_fields(cid, color='#0cc0df'); print('updated', updated); assert updated is True; soft=db_manager.soft_delete_category(cid); print('soft deleted', soft); assert soft is True; hard=db_manager.hard_delete_category(cid); print('hard deleted', hard); assert hard is True; assert db_manager.get_category(cid) is None"
-```
-
-4. 临时日程写入/清理验证：
-
-```cmd
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; import time; name='__tmp_c4_schedule_'+str(int(time.time())); data={'title':name,'item_type':'schedule','priority':0,'repeat_rule':'none','description':'temporary c4 validation','category_id':None}; created=db_manager.add_schedule(data); print('created schedule', created); assert created is True; matches=[s for s in db_manager.get_all_schedules() if s.title==name]; print('matches', len(matches)); assert len(matches)==1; sid=matches[0].id; deleted=db_manager.delete_schedule(sid); print('deleted schedule', deleted); assert deleted is True; remaining=[s for s in db_manager.get_all_schedules() if s.id==sid]; print('remaining', len(remaining)); assert len(remaining)==0"
-```
-
-5. GUI smoke test：
+6. GUI smoke test：
 
 ```cmd
 D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from PyQt6.QtWidgets import QApplication; from src.ui.main_window import MainWindow; app=QApplication([]); w=MainWindow(); print('gui smoke ok'); w.close(); app.quit()"
@@ -108,7 +116,7 @@ D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "fro
 D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import main; print('main import ok')"
 ```
 
-6. diff 范围检查：
+7. diff 范围检查：
 
 ```cmd
 git diff --name-only -- src/repositories
@@ -134,18 +142,21 @@ git status --short --branch
 
 更新 manage_instruction/Work_Log.md，至少记录：
 
-- 本轮任务名称：第二轮 C-4（Repository 行为回归验收）
+- 本轮任务名称：第二轮 C-5（第二轮 C 整体验收与归档准备）
 - 开工前是否已有管理文档 diff
 - 实际修改文件
+- C-1 依赖审查结论
+- C-2 import 残留修正确认结论
+- C-3 __init__.py 轻量导出结论
+- C-4 行为回归验收结论
+- Repository 依赖边界最终结论
 - import 验证结果
-- 基础读路径验证结果
-- 临时分类写入/清理验证结果
-- 临时日程写入/清理验证结果
+- 基础读路径复核结果
 - GUI smoke test 结果或 import main 兜底结果
-- `src/repositories`、`src/data`、`src/ui`、`main.py`、`requirements.txt`、`schedule.db` diff 检查结果
-- `git diff --name-only` 与 `git status --short --branch` 结果
+- diff 范围检查结果
+- 是否可以进入第二轮 D
 - 未完成事项
-- 风险或疑点，尤其是临时数据是否清理、schedule.db 是否无 tracked diff
+- 风险或疑点
 
 如果 Python 验证受沙箱权限影响，请申请沙箱外权限运行；若仍受限，请写明需用户本地 CMD 复跑命令。
 
@@ -154,6 +165,6 @@ git status --short --branch
 
 ## 复核锚点
 
-- C-4 允许临时写入数据库，但必须清理，最终 `schedule.db` 无 tracked diff。
-- C-4 不允许源码改动；复核时重点检查 `src/repositories/`、`src/data/`、`src/ui/`、`main.py`、`requirements.txt`、`schedule.db` 均无 diff。
-- 若 GUI smoke 失败，日志必须记录原因，并有 `import main` 兜底结果。
+- C-5 不允许源码、数据库或业务逻辑改动，只更新管理记录。
+- 复核时重点确认 C-1 到 C-4 结论被准确汇总，并且最终判断是否可进入第二轮 D。
+- 复核时重点检查 `src/repositories/`、`src/data/`、`src/ui/`、`main.py`、`requirements.txt`、`schedule.db` 均无 diff。

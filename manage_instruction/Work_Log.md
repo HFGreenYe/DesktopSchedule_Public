@@ -175,3 +175,59 @@
   - 等待顾问窗口复核并下发后续工单。
 - 风险或疑点：
   - 本轮临时分类与临时日程均已清理，`schedule.db` 无 tracked diff。
+
+## 2026-05-15 第二轮 C-5（第二轮 C 整体验收与归档准备）
+
+- 本轮任务名称：第二轮 C-5（第二轮 C 整体验收与归档准备）。
+- 开工前是否已有管理文档 diff：
+  - 有。开工前 `git status --short --branch` 显示：`M manage_instruction/Work_Task_Prompts.md`（顾问窗口维护变更，不视为本轮源码改动）。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+- C-1 依赖审查结论：
+  - Repository 未发现对 `db_manager`、`src.ui`、`src.data.database` 或 `database.py` 模型导入的依赖残留。
+- C-2 import 残留修正确认结论：
+  - 进入“无需修正”分支；未修改 `schedule_repository.py`、`category_repository.py`。
+- C-3 `__init__.py` 轻量导出结论：
+  - `src/repositories/__init__.py` 仅导出 `ScheduleRepository`、`CategoryRepository`，未发现重型副作用导入。
+- C-4 行为回归验收结论：
+  - 读路径、临时分类写入/清理、临时日程写入/清理验证通过；GUI smoke test 通过。
+- Repository 依赖边界最终结论：
+  - Repository 依赖边界满足第二轮 C 预期：不依赖 `db_manager`、UI、`src.data.database`；默认模型来源为 `src.data.models`；构造函数注入能力保留。
+- import 验证结果（C-5 复跑）：
+  - 命令：`D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.repositories import ScheduleRepository, CategoryRepository; from src.repositories.schedule_repository import ScheduleRepository as SR; from src.repositories.category_repository import CategoryRepository as CR; from src.data.database import db_manager; print('imports ok'); print(ScheduleRepository is SR, CategoryRepository is CR); print('db_manager ok', db_manager is not None)"`
+  - 输出：`imports ok` / `True True` / `db_manager ok True`
+- 依赖边界静态复核（C-5 复跑）：
+  - 命令：`rg -n "db_manager|src\.ui|from .*data\.database|src\.data\.database|from .*database import" src/repositories`
+  - 结果：无输出（退出码 1，符合预期）。
+- 模型来源与注入能力复核（C-5 复跑）：
+  - 命令：`rg -n "from src\.data\.models import|def __init__\(self, schedule_model=None\)|def __init__\(self, category_model=None, schedule_model=None\)" src/repositories`
+  - 结果：命中 `src.data.models` 导入与两个 Repository 的注入构造函数签名。
+- `__init__.py` 轻量导出复核（C-5 复跑）：
+  - `Get-Content` 结果：
+    - `from .category_repository import CategoryRepository`
+    - `from .schedule_repository import ScheduleRepository`
+    - `__all__ = ["ScheduleRepository", "CategoryRepository"]`
+  - 命令：`rg -n "db_manager|src\.ui|src\.data\.database|from .*database import|import .*database" src/repositories/__init__.py`
+  - 结果：无输出（退出码 1，符合预期）。
+- 基础读路径复核结果（C-5 复跑）：
+  - 命令：`D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from datetime import date; from src.data.database import db_manager; all_schedules=db_manager.get_all_schedules(); today=db_manager.get_schedules_for_date(date.today()); cats=db_manager.get_active_categories(); cmap=db_manager.get_category_map(); print('all schedules', len(all_schedules)); print('today schedules', len(today)); print('active categories', len(cats)); print('category map', len(cmap)); assert isinstance(all_schedules, list); assert isinstance(today, list); assert isinstance(cats, list); assert isinstance(cmap, dict)"`
+  - 输出：`all schedules 75` / `today schedules 8` / `active categories 7` / `category map 7`
+- GUI smoke test 结果（C-5 复跑）：
+  - 命令：`D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from PyQt6.QtWidgets import QApplication; from src.ui.main_window import MainWindow; app=QApplication([]); w=MainWindow(); print('gui smoke ok'); w.close(); app.quit()"`
+  - 输出：`gui smoke ok`
+  - 备注：出现 `libpng warning: tRNS: invalid with alpha channel`，不影响 smoke 通过。
+- diff 范围检查结果：
+  - `git diff --name-only -- src/repositories` -> 无输出。
+  - `git diff --name-only -- src/data` -> 无输出。
+  - `git diff --name-only -- src/ui` -> 无输出。
+  - `git diff --name-only -- main.py` -> 无输出。
+  - `git diff --name-only -- requirements.txt` -> 无输出。
+  - `git diff --name-only -- schedule.db` -> 无输出。
+  - `git diff --name-only` -> 验证时为 `manage_instruction/Work_Task_Prompts.md`；写入本日志后另含 `manage_instruction/Work_Log.md`。
+  - `git status --short --branch` -> 验证时为 `M manage_instruction/Work_Task_Prompts.md`；写入本日志后另含 `M manage_instruction/Work_Log.md`。
+- 是否可以进入第二轮 D：
+  - 可以。第二轮 C（C-1 ~ C-5）关键复核项已满足，具备进入第二轮 D 的条件。
+- 未完成事项：
+  - 等待顾问窗口复核并下发第二轮 D 工单。
+- 风险或疑点：
+  - 本轮未做源码改动；`schedule.db` 无 tracked diff。当前仅管理文档存在变更。
