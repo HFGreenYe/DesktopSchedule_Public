@@ -659,3 +659,254 @@ category_changed = pyqtSignal()
 - 风险或疑点，尤其是是否存在循环导入、迁移行为变化或数据库文件变更风险。
 
 ---
+
+## 第二轮 C - Repository 依赖清理与导入关系复核（已完成归档）
+
+归档时间：2026-05-15。
+
+对应提交：
+
+- `9054c43 docs: finalize round c repository review instructions`
+- `39237f1 docs: record round c1 repository dependency review`
+- `92df0c0 docs: record round c2 repository import review`
+- `a9c66ce docs: record round c3 repository package review`
+- `e4a2fb0 docs: record round c4 repository behavior regression`
+- `5b95c18 docs: close round c repository dependency review`
+
+### 本轮目标
+
+确认 Repository 只依赖模型与数据基础设施，不反向依赖 `DatabaseManager` 或 UI，进一步降低循环导入风险。
+
+本轮主要是依赖关系清理与复核，不做业务行为变更。
+
+第二轮 C 不允许一次性完整执行。执行窗口必须按 C-1 ~ C-5 的小工单逐步推进，每次只执行决策窗口明确下发的当前小节。
+
+### 本轮允许修改
+
+- `src/repositories/category_repository.py`
+- `src/repositories/schedule_repository.py`
+- `src/repositories/__init__.py`
+- `manage_instruction/Work_Log.md`
+
+### 本轮禁止修改
+
+- 不修改 `src/data/database.py`，除非 C-1/C-2 发现 repository 导入边界存在明确兼容问题；如需修改须先说明。
+- 不修改 `src/data/connection.py`。
+- 不修改 `src/data/models.py`，除非 C-1/C-2 发现模型导入边界存在明确兼容问题；如需修改须先说明。
+- 不修改 `src/ui/`。
+- 不修改 `main.py`。
+- 不修改 `src/theme/`。
+- 不修改 `src/utils/signals.py`。
+- 不修改 `requirements.txt`。
+- 不修改 `schedule.db`。
+- 不改变 Repository 方法名、参数、返回语义。
+- 不改变 `DatabaseManager` 对外公开方法。
+- 不改变查询排序、过滤、删除策略。
+- 不迁移业务 service。
+- 不迁移重复日程逻辑。
+- 不新增抽象基类。
+- 不做 repository 大重构。
+- 若开工前已有管理文档 diff，需在日志中单独记录，不视为本轮源码改动。
+
+### 第二轮 C 小工单拆分
+
+#### 第二轮 C-1：Repository 静态依赖审查
+
+目标：
+
+- 不改代码，只做静态审查。
+- 检查 `src/repositories/schedule_repository.py`、`src/repositories/category_repository.py`、`src/repositories/__init__.py` 是否依赖 `db_manager`、UI 或 `src.data.database`。
+- 确认 Repository 是否只依赖 `src.data.models` 中的模型，且保留构造函数注入能力。
+
+允许修改：
+
+- `manage_instruction/Work_Log.md`
+- `manage_instruction/Work_Task_Prompts.md`（仅当顾问窗口要求维护复核锚点）
+
+禁止修改：
+
+- 不修改任何源码文件。
+- 不修改 `src/repositories/`。
+- 不修改 `src/data/`。
+- 不修改 `src/ui/`。
+- 不修改 `main.py`。
+- 不修改 `schedule.db`。
+
+验收：
+
+- 静态检查 repository 文件中是否存在 `db_manager`、`src.ui`、`src.data.database` 或从 `database.py` 导入模型的痕迹。
+- 静态检查 repository 文件中是否从 `src.data.models` 导入 `Schedule`、`Category`。
+- `ScheduleRepository`、`CategoryRepository` 可单独 import。
+- `src/repositories/__init__.py` 可 import。
+- `src/ui` 无 diff。
+- `schedule.db` 无 tracked diff。
+- `git diff --name-only` 只包含允许的日志/提示词文件。
+
+#### 第二轮 C-2：Repository import 残留修正
+
+目标：
+
+- 仅当 C-1 发现残留导入问题时，做最小 import 修正。
+- 如没有问题，只记录“无需改代码”。
+- 保留 `category_model`、`schedule_model` 构造函数注入能力。
+- 不改变任何 Repository 方法名、参数、返回语义。
+
+允许修改：
+
+- `src/repositories/category_repository.py`
+- `src/repositories/schedule_repository.py`
+- `manage_instruction/Work_Log.md`
+
+禁止修改：
+
+- 不修改 `src/repositories/__init__.py`。
+- 不修改 `src/data/database.py`。
+- 不修改 `src/data/connection.py`。
+- 不修改 `src/data/models.py`。
+- 不修改 `src/ui/`。
+- 不修改 `main.py`。
+- 不修改 `schedule.db`。
+- 不改变查询排序、过滤、删除策略。
+- 不新增抽象基类。
+- 不做 repository 大重构。
+
+验收：
+
+- `ScheduleRepository`、`CategoryRepository` 可单独 import。
+- 默认模型来源如需验证，应来自 `src.data.models`。
+- 构造函数注入能力保留。
+- `db_manager` 可 import。
+- `get_all_schedules`、`get_active_categories` 可调用。
+- `src/ui` 无 diff。
+- `schedule.db` 无 tracked diff。
+- 如无需代码改动，`git diff --name-only` 只包含 `manage_instruction/Work_Log.md`。
+- 如确有 import 修正，`git diff --name-only` 只包含本小工单允许文件。
+
+#### 第二轮 C-3：repositories/__init__.py 轻量导出复核
+
+目标：
+
+- 检查 `src/repositories/__init__.py` 是否只做轻量导出，不触发数据库连接、`db_manager` 创建、UI 导入或其他重型副作用。
+- 如无需整理，只记录“无需改代码”。
+- 如需整理，只做最小导出关系修改。
+
+允许修改：
+
+- `src/repositories/__init__.py`
+- `manage_instruction/Work_Log.md`
+
+禁止修改：
+
+- 不修改 `src/repositories/category_repository.py`。
+- 不修改 `src/repositories/schedule_repository.py`。
+- 不修改 `src/data/`。
+- 不修改 `src/ui/`。
+- 不修改 `main.py`。
+- 不修改 `schedule.db`。
+- 不新增抽象基类。
+- 不做 repository 大重构。
+
+验收：
+
+- `from src.repositories import ScheduleRepository, CategoryRepository` 可执行。
+- `ScheduleRepository`、`CategoryRepository` 可单独 import。
+- 静态检查 `src/repositories/__init__.py` 不导入 `db_manager`、UI、`src.data.database`。
+- `db_manager` 可 import。
+- `src/ui` 无 diff。
+- `schedule.db` 无 tracked diff。
+- 如无需代码改动，`git diff --name-only` 只包含 `manage_instruction/Work_Log.md`。
+- 如确有最小整理，`git diff --name-only` 只包含本小工单允许文件。
+
+#### 第二轮 C-4：Repository 行为回归验收
+
+目标：
+
+- 不做新的架构改动。
+- 验证 Repository 相关委托路径在依赖清理后行为未破坏。
+- 覆盖已委托读写路径、临时分类/日程增删、GUI smoke、diff 范围。
+
+允许修改：
+
+- `manage_instruction/Work_Log.md`
+- `manage_instruction/Work_Task_Prompts.md`（仅当顾问窗口要求维护复核锚点）
+
+禁止修改：
+
+- 不修改任何源码文件。
+- 不修改 `src/repositories/`。
+- 不修改 `src/data/`。
+- 不修改 `src/ui/`。
+- 不修改 `main.py`。
+- 不保留 `schedule.db` 变更；允许验收临时写入，但必须清理并确认 `schedule.db` 无 tracked diff。
+
+验收：
+
+- `ScheduleRepository`、`CategoryRepository`、`src.repositories`、`db_manager` 可 import。
+- 验证读路径：
+  - `get_all_schedules`
+  - `get_schedules_for_date`
+  - `get_active_categories`
+  - `get_category_map`
+- 验证分类临时写路径：
+  - `add_category`
+  - `update_category_fields`
+  - `soft_delete_category`
+  - `hard_delete_category`
+- 验证日程临时写路径：
+  - 使用 `add_schedule` 创建 `repeat_rule='none'` 的临时日程。
+  - 使用 `delete_schedule` 删除临时日程。
+  - 删除后 `get_all_schedules()` 找不到该临时 id。
+- GUI smoke test 通过，或记录限制并执行 `import main` 兜底。
+- `src/ui` 无 diff。
+- `schedule.db` 无 tracked diff。
+- `git diff --name-only` 只包含允许的日志/提示词文件。
+
+#### 第二轮 C-5：第二轮 C 整体验收与归档准备
+
+目标：
+
+- 不做代码改动。
+- 对 C-1 ~ C-4 的依赖审查、import 边界、轻量导出、行为回归结果做总体验收。
+- 为第二轮 C 归档和进入第二轮 D 做准备。
+
+允许修改：
+
+- `manage_instruction/Work_Log.md`
+- `manage_instruction/Work_Task_Prompts.md`（仅当顾问窗口要求维护复核锚点）
+
+禁止修改：
+
+- 不修改任何源码文件。
+- 不修改 `src/repositories/`。
+- 不修改 `src/data/`。
+- 不修改 `src/ui/`。
+- 不修改 `main.py`。
+- 不修改 `schedule.db`。
+- 不修改 `requirements.txt`。
+
+验收：
+
+- Repository 不依赖 `db_manager`、UI 或 `src.data.database` 的结论明确。
+- `src/repositories/__init__.py` 轻量导出结论明确。
+- `ScheduleRepository`、`CategoryRepository`、`src.repositories`、`db_manager` 可 import。
+- 已委托读写路径关键验证通过。
+- GUI smoke test 通过，或记录限制并执行 `import main` 兜底。
+- `src/ui` 无 diff。
+- `schedule.db` 无 tracked diff。
+- `git diff --name-only` 只包含允许的日志/提示词文件。
+
+### Work_Log.md 记录要求
+
+每个 C 小工单都必须记录：
+
+- 本轮任务名称，例如：第二轮 C-1（Repository 静态依赖审查）。
+- 实际修改文件。
+- Repository 当前依赖关系结论。
+- 是否仍存在从 repository 到 `db_manager`、UI 或 `src.data.database` 的依赖。
+- 是否保留构造函数注入能力。
+- 验证命令和结果。
+- diff 范围检查结果。
+- 未完成事项。
+- 风险或疑点。
+
+---
