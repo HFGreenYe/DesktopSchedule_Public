@@ -60,3 +60,55 @@
   - 等待顾问窗口复核并下发 D-2 工单。
 - 风险或疑点：
   - 本轮仅做静态与 import 复核，未做任何源码修复；未发现边界异常或数据库 tracked diff。
+
+## 2026-05-15 第二轮 D-2（Data 层读路径回归验收）
+
+- 本轮任务名称：第二轮 D-2（Data 层读路径回归验收）。
+- 开工前是否已有管理文档 diff：
+  - 有。开工前已有 `manage_instruction/Work_Task_Prompts.md`（顾问窗口维护的 D-2 提示词锚点）diff，不视为本轮源码改动。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+- `get_all_schedules` 验证结果：
+  - 命令输出：`all schedules 75 list`
+  - 断言：返回类型为 `list`，通过。
+- `get_schedules_for_date` 验证结果：
+  - 命令输出：`today schedules 8 list`
+  - 断言：返回类型为 `list`，通过。
+- `get_active_categories` 验证结果：
+  - 命令输出：`active categories 7 list`
+  - 断言：返回类型为 `list`，通过。
+- `get_category_map` 验证结果：
+  - 命令输出：`category map 7 dict`
+  - 断言：返回类型为 `dict`，通过。
+- 分类样本读取与 `check_category_status` 验证结果：
+  - 命令输出：
+    - `category sample count 7`
+    - `get_category sample 测试`
+    - `category matched True`
+    - `category status historical`
+  - 断言：有样本时 `get_category` 匹配通过，`check_category_status` 返回值在允许集合 `{empty, active, historical}` 内，通过。
+- 日程样本基础字段读取验证结果：
+  - 命令输出：
+    - `schedule sample count 75`
+    - `sample id 72`
+    - `sample title 测试`
+    - `sample item_type schedule`
+    - `sample status 0`
+  - 断言：样本对象可访问 `id/title/item_type/status` 字段，通过。
+- 是否确认本轮未执行任何写入方法：
+  - 是。仅执行读路径相关命令，未调用任何写入方法（包括分类与日程增删改相关方法）。
+- schedule.db 是否无 tracked diff：
+  - `git diff --name-only -- schedule.db` -> 无输出。
+- diff 范围检查结果：
+  - `git diff --name-only -- src/data` -> 无输出。
+  - `git diff --name-only -- src/repositories` -> 无输出。
+  - `git diff --name-only -- src/ui` -> 无输出。
+  - `git diff --name-only -- main.py` -> 无输出。
+  - `git diff --name-only -- requirements.txt` -> 无输出。
+  - `git diff --name-only -- schedule.db` -> 无输出。
+  - `git diff --name-only` -> 验证时为 `manage_instruction/Work_Task_Prompts.md`；写入本日志后另含 `manage_instruction/Work_Log.md`。
+  - `git status --short --branch` -> 验证时为 `M manage_instruction/Work_Task_Prompts.md`；写入本日志后另含 `M manage_instruction/Work_Log.md`。
+- 未完成事项：
+  - 等待顾问窗口复核并下发 D-3 工单。
+- 风险或疑点：
+  - 本轮仅读路径验证，未触发写入；未发现 `schedule.db` tracked diff 或源码范围异常。
