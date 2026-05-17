@@ -561,3 +561,73 @@
   - 等待顾问窗口复核并下发下一小工单。
 - 风险或疑点：
   - 未知状态目前统一拦截（BLOCK）是保守策略；若后续引入新状态，需要同步更新策略映射与产品文案。
+
+## 2026-05-17 第三轮 3-5（四象限纯逻辑评估与最小服务准备）
+
+- 本轮任务名称：第三轮 3-5（四象限纯逻辑评估与最小服务准备）。
+- 开工前是否已有管理文档 diff：
+  - 有。开工前已有 `manage_instruction/Work_Task_Prompts.md`（顾问窗口维护的 3-5 提示词锚点）diff，不视为本轮源码改动。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+- 已读取的关键文件：
+  - `manage_instruction/Work_Instruction.md`
+  - `manage_instruction/Work_Log.md`
+  - `src/data/models.py`
+  - `src/ui/dashboard.py`
+  - `src/ui/week_window.py`
+  - `src/ui/month_window.py`
+  - `src/ui/main_window.py`
+  - `src/ui/todo_board.py`
+  - `src/services/` 文件清单与全局 `matrix/quadrant/四象限` 搜索结果
+- 当前四象限入口位置：
+  - `src/ui/dashboard.py:76`：视图按钮 `"priority": "四象限"`。
+  - `src/ui/week_window.py:437`：视图按钮 `"priority": "四象限"`。
+  - `src/ui/month_window.py:472`：视图按钮 `"priority": "象限"`。
+  - `src/ui/main_window.py:632-634`：`view_name == "priority"` 时仅 toast `准备切换至：四象限视图`。
+- 当前四象限相关文案：
+  - 仅见入口名称/提示文案（“四象限/象限/准备切换至四象限视图”）。
+  - 未发现可执行的象限判定规则文案（例如“重要且紧急”四象限分层规则）。
+- 当前 `priority` 使用位置和语义判断：
+  - `src/data/models.py:33` 字段注释为 `紧急性`。
+  - `src/ui/todo_board.py:1094-1097`、`1166` 文案为 `低/中/高重要性`。
+  - `src/ui/todo_board.py:1764-1785` 存在“一键按重要性排序”，以 `priority` 高到低排序后写回 `sort_order`。
+  - `src/ui/dashboard.py:330`、`src/ui/week_window.py:81` 用 `priority` 显示红黄绿点，不体现“四象限分类”。
+  - 结论：`priority` 在模型与 UI 文案间存在“紧急性/重要性”语义不一致，当前更像单轴优先级，不是稳定四象限双轴规则。
+- 当前字段可用性：
+  - `priority`：存在（`Schedule.priority`），取值用于颜色与排序；语义不一致（紧急性 vs 重要性）。
+  - `start_time`：存在；用于日期范围过滤与展示，不是稳定“紧急性”定义。
+  - `end_time`：存在；用于日期过滤/过期判断，不等价于“紧急性”阈值规则。
+  - `status`：存在；用于完成/删除状态过滤，不代表重要或紧急。
+  - `created_at`：存在；用于同优先级下排序辅助，不代表象限维度。
+  - `sort_order`：存在；用于展示顺序权重及拖拽/重排结果，不代表象限维度。
+- 是否存在稳定四象限分类规则：
+  - 不存在。
+  - 原因：
+    - 未发现“重要/不重要”与“紧急/不紧急”双轴判定标准。
+    - `priority` 仅单轴，且语义在不同位置不一致。
+    - `start_time/end_time` 当前用于日期过滤，不足以单独稳定定义“紧急性”。
+    - 现有 UI 仅入口占位与提示，未形成可复用业务规则。
+- 结论与执行决策：
+  - 不创建 `src/services/matrix_classification_service.py`。
+  - 不接四象限 UI。
+  - 不实现新功能。
+  - 规则缺口留待后续轮次先明确产品/业务规则后再实现。
+- diff 范围检查结果：
+  - `git diff --name-only -- src/ui` -> 无输出。
+  - `git diff --name-only -- src/data` -> 无输出。
+  - `git diff --name-only -- src/repositories` -> 无输出。
+  - `git diff --name-only -- src/services/schedule_query_service.py` -> 无输出。
+  - `git diff --name-only -- src/services/schedule_sort_service.py` -> 无输出。
+  - `git diff --name-only -- src/services/category_policy_service.py` -> 无输出。
+  - `git diff --name-only -- src/services/weather_service.py` -> 无输出。
+  - `git diff --name-only -- src/services/__init__.py` -> 无输出。
+  - `git diff --name-only -- main.py` -> 无输出。
+  - `git diff --name-only -- requirements.txt` -> 无输出。
+  - `git diff --name-only -- schedule.db` -> 无输出。
+  - `git diff --name-only` -> `manage_instruction/Work_Task_Prompts.md`（写入本日志后另含 `manage_instruction/Work_Log.md`）。
+  - `git status --short --branch` -> `M manage_instruction/Work_Task_Prompts.md`（写入本日志后另含 `M manage_instruction/Work_Log.md`）。
+- 未完成事项：
+  - 需要顾问/决策窗口先给出四象限稳定规则合同（双轴定义、阈值、边界样例）后再进入实现工单。
+- 风险或疑点：
+  - 在未统一 `priority` 语义前直接实现四象限服务，会把当前语义冲突固化为错误行为。
+  - 目前 `end_time` 主要用于日期过滤与过期判断，若直接映射“紧急性”可能导致大量误分。
