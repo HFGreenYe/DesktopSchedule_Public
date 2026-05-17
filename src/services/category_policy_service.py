@@ -6,6 +6,7 @@ Concrete policy migration is deferred to 3-4.
 
 from __future__ import annotations
 
+import datetime
 from enum import Enum
 from typing import Iterable, TypeVar
 
@@ -29,9 +30,23 @@ class CategoryPolicyService:
     """Pure category policy service boundary."""
 
     @staticmethod
-    def evaluate_status(items: Iterable[T]) -> CategoryStatus:
+    def evaluate_status(items: Iterable[T], now=None) -> CategoryStatus:
         """Evaluate category status with legacy-compatible semantics."""
-        raise NotImplementedError("Implemented in round 3-4.")
+        schedules = list(items)
+        if not schedules:
+            return CategoryStatus.EMPTY
+
+        if now is None:
+            now = datetime.datetime.now()
+
+        for schedule in schedules:
+            status = getattr(schedule, "status", 0)
+            end_time = getattr(schedule, "end_time", None)
+            is_completed = status == 1
+            is_expired = bool(end_time and end_time < now and not is_completed)
+            if not is_completed and not is_expired:
+                return CategoryStatus.ACTIVE
+        return CategoryStatus.HISTORICAL
 
     @staticmethod
     def choose_delete_action(status: CategoryStatus) -> CategoryDeleteAction:

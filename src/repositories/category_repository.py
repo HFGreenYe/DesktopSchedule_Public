@@ -1,4 +1,4 @@
-import datetime
+from src.services.category_policy_service import CategoryPolicyService
 
 
 class CategoryRepository:
@@ -49,16 +49,8 @@ class CategoryRepository:
 
     def check_category_status(self, cat_id):
         schedules = list(self._schedule_model.select().where(self._schedule_model.category_id == cat_id))
-        if not schedules:
-            return "empty"
-
-        now = datetime.datetime.now()
-        for schedule in schedules:
-            is_completed = schedule.status == 1
-            is_expired = bool(schedule.end_time and schedule.end_time < now and not is_completed)
-            if not is_completed and not is_expired:
-                return "active"
-        return "historical"
+        status = CategoryPolicyService.evaluate_status(schedules)
+        return status.value if hasattr(status, "value") else str(status)
 
     def soft_delete_category(self, cat_id):
         try:

@@ -435,3 +435,63 @@
   - 等待顾问窗口复核并下发 3-4 工单。
 - 风险或疑点：
   - 本轮只抽主看板渲染排序；`_sort_by_priority` 与拖拽写回逻辑仍为历史实现，后续若要统一需单独工单。
+
+## 2026-05-17 第三轮 3-4a（CategoryPolicyService 分类状态判断抽取）
+
+- 本轮任务名称：第三轮 3-4a（CategoryPolicyService 分类状态判断抽取）。
+- 开工前是否已有管理文档 diff：
+  - 有。开工前已有 `manage_instruction/Work_Task_Prompts.md`（顾问窗口维护的 3-4a 提示词锚点）diff，不视为本轮源码改动。
+- 实际修改文件：
+  - `src/services/category_policy_service.py`
+  - `src/repositories/category_repository.py`
+  - `manage_instruction/Work_Log.md`
+- 开工前分类状态基线输出摘要：
+  - `baseline categories [(7,'测试','historical'), (1,'尚书令','active'), (2,'中书监','active'), (4,'司徒','active'), (6,'太尉','active'), (5,'司空','active'), (3,'散骑常侍','empty')]`
+  - `baseline missing empty`
+- 实现的 `CategoryPolicyService.evaluate_status` 逻辑：
+  - 输入 iterable 先转 list；空列表返回 `CategoryStatus.EMPTY`。
+  - `now` 默认 `datetime.datetime.now()`，允许外部传入。
+  - 遍历每条 schedule：
+    - `is_completed = (status == 1)`（`getattr` 读取 `status`）。
+    - `is_expired = bool(end_time and end_time < now and not is_completed)`（`getattr` 读取 `end_time`）。
+    - 命中 `not is_completed and not is_expired` 立即返回 `CategoryStatus.ACTIVE`。
+  - 遍历结束返回 `CategoryStatus.HISTORICAL`。
+- `CategoryRepository.check_category_status` 委托方式：
+  - Repository 仍执行数据库查询：`self._schedule_model.select().where(...)`。
+  - 将查询结果 list 传入 `CategoryPolicyService.evaluate_status(schedules)`。
+  - 对外返回旧字符串语义：`status.value`（兼容分支保留 `str(status)` 兜底）。
+- 明确记录：Repository 仍负责数据库查询。
+- 明确记录：service 不访问数据库。
+- 明确记录：未修改 `soft_delete_category` / `hard_delete_category`。
+- 明确记录：未修改 UI 删除分支。
+- 修改后分类状态是否与基线一致：
+  - `after categories` 与 baseline 一致；`after missing empty`。
+- 不存在 id 返回语义是否仍为 `"empty"`：
+  - 通过，`db_manager.check_category_status(-999999) == 'empty'`。
+- service direct call 验证结果：
+  - `rows` 返回 `CategoryStatus` 枚举值，且均在 `EMPTY/ACTIVE/HISTORICAL` 允许集合内。
+- `db_manager.check_category_status` 返回字符串验证结果：
+  - 输出示例：`['historical', 'active', 'active', 'active', 'active', 'empty']`。
+  - 全部为 `str`，且仅在 `{empty, active, historical}` 集合内。
+- 样本覆盖情况：active / historical / empty / missing
+  - `status coverage {'historical':[7], 'active':[1,2,4,6,5], 'empty':[3], 'missing':[-999999]}`
+- 静态依赖检查结果：
+  - 命令：`rg -n "QWidget|PyQt|PySide|src\.ui|db_manager|src\.repositories|CategoryRepository|ScheduleRepository" src/services/category_policy_service.py`
+  - 结果：无输出（退出码 1，符合预期）。
+- py_compile 结果：
+  - `python -m py_compile src/services/category_policy_service.py src/repositories/category_repository.py` 通过（无输出）。
+- diff 范围检查结果：
+  - `git diff --name-only -- src/ui` -> 无输出。
+  - `git diff --name-only -- src/data` -> 无输出。
+  - `git diff --name-only -- main.py` -> 无输出。
+  - `git diff --name-only -- requirements.txt` -> 无输出。
+  - `git diff --name-only -- schedule.db` -> 无输出。
+  - `git diff --name-only -- src/services/schedule_query_service.py` -> 无输出。
+  - `git diff --name-only -- src/services/schedule_sort_service.py` -> 无输出。
+  - `git diff --name-only -- src/services/weather_service.py` -> 无输出。
+  - `git diff --name-only` -> `manage_instruction/Work_Task_Prompts.md`、`src/repositories/category_repository.py`、`src/services/category_policy_service.py`（写入本日志后另含 `manage_instruction/Work_Log.md`）。
+  - `git status --short --branch` -> `M manage_instruction/Work_Task_Prompts.md`、`M src/repositories/category_repository.py`、`M src/services/category_policy_service.py`（写入本日志后另含 `M manage_instruction/Work_Log.md`）。
+- 未完成事项：
+  - 等待顾问窗口复核，并下发 3-4b（删除策略抽取）工单。
+- 风险或疑点：
+  - 当前数据样本已覆盖 `active/historical/empty/missing`，但并未人为构造边界时间样本；`end_time == now` 的语义沿用旧逻辑（不视为过期）。

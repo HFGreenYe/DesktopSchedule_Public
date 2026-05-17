@@ -1,46 +1,40 @@
-请执行第三轮 3-3b：todo_board 主看板渲染排序抽取。本轮只处理 `src/ui/todo_board.py` 主渲染路径中的看板排序，不处理“一键按重要性排序”。
+请执行第三轮 3-4a：CategoryPolicyService 分类状态判断抽取。本轮只抽取 `CategoryRepository.check_category_status(cat_id)` 中 `empty / active / historical` 的纯判定逻辑，不处理删除策略。
 
 ## 1. 本轮目标
 
-基于 3-0 到 3-3a 结论，在 `ScheduleSortService` 中实现 `sort_for_todo_board(items)`，并对 `todo_board.py` 主看板渲染路径做最小调用替换。
+基于 3-0 到 3-3b 结论，在 `CategoryPolicyService` 中实现分类状态判断纯逻辑，并让 `CategoryRepository.check_category_status(cat_id)` 委托该 service 完成状态判定。
 
-本轮只处理当前主看板渲染排序：
+本轮目标：
 
-- 旧逻辑位置：`src/ui/todo_board.py` 中生成 `todos` 后的本地 `sort_key`。
-- 旧排序语义：
-  - 置顶优先：`rank_pin = 0 if is_pinned else 1`
-  - `sort_order` 越大越靠前：`sort_val = -sort_order`
-  - sort key 为 `(rank_pin, sort_val)`
-
-本轮不处理：
-
-- `_sort_by_priority`
-- priority 排序
-- priority 排序后的 `sort_order` 写回
-- 拖拽排序写库逻辑
-- dashboard/week/todo 三处排序
-- 查询/过滤/分类策略
+- 实现 `CategoryPolicyService.evaluate_status(items, now=None)`。
+- Repository 仍负责数据库查询。
+- service 只接收查询结果列表/iterable，不访问数据库。
+- service 不依赖 UI、db_manager、Repository。
+- 保持 `db_manager.check_category_status(cat_id)` 对外返回语义不变：
+  - 无日程：`"empty"`
+  - 存在未完成且未过期日程：`"active"`
+  - 否则：`"historical"`
+- 不处理 `soft_delete_category` / `hard_delete_category`。
+- 不修改 UI 删除分支。
+- 不写 `schedule.db`。
 
 ## 2. 允许/禁止
 
 本轮允许修改：
 
-- `src/services/schedule_sort_service.py`
-- `src/ui/todo_board.py`
+- `src/services/category_policy_service.py`
+- `src/repositories/category_repository.py`
 - `manage_instruction/Work_Log.md`
 - `manage_instruction/Work_Task_Prompts.md`（仅在需要维护本轮复核锚点时）
 
 本轮禁止修改：
 
-- `src/ui/dashboard.py`
-- `src/ui/week_window.py`
-- `src/ui/todo.py`
+- `src/ui/`
+- `src/data/`
 - `src/services/schedule_query_service.py`
-- `src/services/category_policy_service.py`
+- `src/services/schedule_sort_service.py`
 - `src/services/weather_service.py`
 - `src/services/matrix_classification_service.py`
-- `src/repositories/`
-- `src/data/`
 - `main.py`
 - `requirements.txt`
 - `schedule.db`
@@ -49,17 +43,15 @@
 
 禁止事项：
 
-- 不修改 `_sort_by_priority`。
-- 不修改 priority 排序规则。
-- 不修改任何 `sort_order` 写回逻辑。
-- 不修改拖拽排序写库逻辑。
-- 不修改 dashboard/week/todo。
-- 不修改 `ScheduleQueryService`。
-- 不修改 Repository 或 Data 层。
-- 不处理分类策略。
+- 不处理 `soft_delete_category`。
+- 不处理 `hard_delete_category`。
+- 不修改 UI 删除分支。
+- 不实现删除动作选择，`choose_delete_action` 留给 3-4b。
+- 不修改排序逻辑。
+- 不修改查询/过滤逻辑。
 - 不创建 matrix 服务。
-- 不改 UI 布局、视觉样式、交互流程。
-- 不改变 `db_manager` 对外 API。
+- 不修改数据库字段、迁移逻辑或写入逻辑。
+- 不改变 `db_manager.check_category_status(cat_id)` 返回字符串语义。
 - 不保留 `schedule.db` 变更。
 
 若开工前已有管理文档 diff，需在 `Work_Log.md` 中单独记录，不视为本轮源码改动。
@@ -67,82 +59,76 @@
 ## 3. 具体任务
 
 1. 读取 `manage_instruction/Work_Instruction.md` 第三轮合同。
-2. 读取 `manage_instruction/Work_Log.md` 中 3-0 到 3-3a 结论。
-3. 读取 `src/ui/todo_board.py` 当前主看板渲染排序位置。
-4. 在 `src/services/schedule_sort_service.py` 中实现：
-   - `ScheduleSortService.sort_for_todo_board(items)`
-   - 返回排序后的新 list。
-   - 不原地修改传入 list。
-   - 使用 `sorted(list(items), key=...)`。
-   - 使用 `getattr` 读取 `is_pinned`、`sort_order`，保持旧默认值。
-5. 在 `src/ui/todo_board.py` 中：
-   - 引入 `ScheduleSortService`。
-   - 只把主渲染路径中的本地 `sort_key` 和 `todos.sort(key=sort_key)` 替换为 `todos = ScheduleSortService.sort_for_todo_board(todos)`。
-   - 不修改 `all_active_todos` 生成逻辑。
-   - 不修改文件夹过滤逻辑。
-   - 不修改 `self.current_todos = todos` 之后的逻辑。
-6. 不修改 `_sort_by_priority` 方法。
-7. 不修改任何数据库写入逻辑。
+2. 读取 `manage_instruction/Work_Log.md` 中 3-0 到 3-3b 结论。
+3. 读取 `src/repositories/category_repository.py` 当前 `check_category_status(cat_id)` 实现。
+4. 在 `src/services/category_policy_service.py` 中实现：
+   - `CategoryPolicyService.evaluate_status(items, now=None)`
+   - 输入为某分类下的 schedule iterable。
+   - 输出使用现有 `CategoryStatus` 枚举，或其字符串值；但 Repository 对外必须返回旧字符串。
+   - 旧逻辑必须保持：
+     - items 为空：`CategoryStatus.EMPTY`
+     - 遍历每个 schedule：
+       - `is_completed = schedule.status == 1`
+       - `is_expired = bool(schedule.end_time and schedule.end_time < now and not is_completed)`
+       - 如果 `not is_completed and not is_expired`，返回 `CategoryStatus.ACTIVE`
+     - 遍历后无 active，返回 `CategoryStatus.HISTORICAL`
+   - `now` 默认为 `datetime.datetime.now()`，允许测试传入固定时间。
+   - 使用 `getattr` 读取 `status`、`end_time`，但语义必须等价旧逻辑。
+   - 不访问数据库。
+   - 不导入 UI / db_manager / Repository。
+5. 修改 `CategoryRepository.check_category_status(cat_id)`：
+   - 保持 Repository 查询 `self._schedule_model.select().where(...)`。
+   - 将查询结果转为 list 后传给 `CategoryPolicyService.evaluate_status(...)`。
+   - 返回值必须是旧字符串：`"empty"` / `"active"` / `"historical"`。
+6. 不修改 `soft_delete_category` / `hard_delete_category`。
+7. 不修改 UI。
 8. 更新 `Work_Log.md`。
 
 ## 4. 验收命令
 
 开工前基线命令，修改代码前先执行并记录输出：
 
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; from src.services.schedule_query_service import ScheduleQueryService; all_items=db_manager.get_all_schedules(); all_active=[s for s in all_items if getattr(s,'status',0)!=2 and ScheduleQueryService.is_todo(s) and getattr(s,'status',0)==0]; old_sorted=sorted(list(all_active), key=lambda item: (0 if getattr(item,'is_pinned',False) else 1, -getattr(item,'sort_order',0.0))); print('baseline todo_board', [s.id for s in old_sorted])"
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; cats=db_manager.get_active_categories(); sample=[(c.id,c.name,db_manager.check_category_status(c.id)) for c in cats[:10]]; print('baseline categories', sample); print('baseline missing', db_manager.check_category_status(-999999))"
 
-修改后使用 `ScheduleSortService.sort_for_todo_board` 复跑，并确认 id 顺序与基线一致：
+修改后复跑，确认分类状态与基线一致：
 
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; from src.services.schedule_query_service import ScheduleQueryService; from src.services.schedule_sort_service import ScheduleSortService; all_items=db_manager.get_all_schedules(); all_active=[s for s in all_items if getattr(s,'status',0)!=2 and ScheduleQueryService.is_todo(s) and getattr(s,'status',0)==0]; sorted_items=ScheduleSortService.sort_for_todo_board(all_active); print('after todo_board', [s.id for s in sorted_items])"
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; cats=db_manager.get_active_categories(); sample=[(c.id,c.name,db_manager.check_category_status(c.id)) for c in cats[:10]]; print('after categories', sample); print('after missing', db_manager.check_category_status(-999999)); assert db_manager.check_category_status(-999999) == 'empty'"
 
-验证 `sort_for_todo_board` 返回新 list，且不原地修改输入：
+验证 service 可直接调用，且返回状态值合法：
 
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; from src.services.schedule_sort_service import ScheduleSortService; items=list(db_manager.get_all_schedules()[:8]); original=[s.id for s in items]; result=ScheduleSortService.sort_for_todo_board(items); print('returns list', isinstance(result, list)); print('new object', result is not items); print('input unchanged', [s.id for s in items] == original); print('result ids', [s.id for s in result]); assert isinstance(result, list); assert result is not items; assert [s.id for s in items] == original"
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; from src.services.category_policy_service import CategoryPolicyService, CategoryStatus; cats=db_manager.get_active_categories(); allowed={CategoryStatus.EMPTY, CategoryStatus.ACTIVE, CategoryStatus.HISTORICAL}; print('allowed', [s.value for s in allowed]); rows=[]; [rows.append((c.id, c.name, CategoryPolicyService.evaluate_status([s for s in db_manager.get_all_schedules() if getattr(s,'category_id',None)==c.id]))) for c in cats[:5]]; print('rows', [(cid,name,status,getattr(status,'value',status)) for cid,name,status in rows]); assert all(status in allowed for _,_,status in rows)"
 
-验证 service 可 import 且 day/week/todo 旧方法仍可用：
+验证至少覆盖 active / historical / empty / missing 语义；如果当前数据没有某类样本，日志中说明缺失，不临时写库：
 
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; from src.services.schedule_sort_service import ScheduleSortService; items=db_manager.get_all_schedules()[:5]; print('day', isinstance(ScheduleSortService.sort_for_day_view(items), list)); print('week', isinstance(ScheduleSortService.sort_for_week_view(items), list)); print('todo', isinstance(ScheduleSortService.sort_for_todo_list(items), list)); print('board', isinstance(ScheduleSortService.sort_for_todo_board(items), list))"
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; cats=db_manager.get_active_categories(); statuses={}; [statuses.setdefault(db_manager.check_category_status(c.id), []).append(c.id) for c in cats]; statuses.setdefault('missing', []).append(-999999); print('status coverage', statuses)"
 
-验证旧 `db_manager.get_schedules_for_date` 仍可用：
+验证旧 `db_manager.check_category_status` 返回字符串：
 
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from datetime import date; from src.data.database import db_manager; schedules=db_manager.get_schedules_for_date(date.today()); print('db_manager path ok', isinstance(schedules, list), len(schedules))"
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; cats=db_manager.get_active_categories(); ids=[c.id for c in cats[:5]]+[-999999]; vals=[db_manager.check_category_status(i) for i in ids]; print('values', vals); assert all(isinstance(v, str) for v in vals); assert all(v in {'empty','active','historical'} for v in vals)"
 
-静态依赖检查，确认 `schedule_sort_service.py` 不依赖 UI / db_manager / Repository / QWidget：
+静态依赖检查，确认 `category_policy_service.py` 不依赖 UI / db_manager / Repository / QWidget：
 
-rg -n "QWidget|PyQt|PySide|src\.ui|db_manager|src\.repositories|ScheduleRepository|CategoryRepository" src/services/schedule_sort_service.py
+rg -n "QWidget|PyQt|PySide|src\.ui|db_manager|src\.repositories|CategoryRepository|ScheduleRepository" src/services/category_policy_service.py
 
-检查 `todo_board.py` 引用范围：
+确认未处理删除策略：
 
-rg -n "ScheduleSortService|schedule_sort_service|CategoryPolicyService|src\.repositories" src/ui/todo_board.py
+git diff -- src/repositories/category_repository.py
 
-预期：
+复核 diff 时必须确认 `soft_delete_category` 和 `hard_delete_category` 未被修改。
 
-- `todo_board.py` 允许命中 `ScheduleSortService` / `schedule_sort_service`。
-- 不应命中 `CategoryPolicyService`。
-- 不应命中 `src.repositories`。
+检查本轮未误动其他 service / UI：
 
-确认 `_sort_by_priority` 未被修改或替换：
-
-rg -n "def _sort_by_priority|priority|sort_order|update_schedule_fields" src/ui/todo_board.py
-
-注意：该命令会命中既有逻辑。日志中需说明 `_sort_by_priority` 未参与本轮改动，priority 排序和写回逻辑保持原样。
-
-检查本轮未误动其他 UI / service：
-
-git diff --name-only -- src/ui/dashboard.py
-git diff --name-only -- src/ui/week_window.py
-git diff --name-only -- src/ui/todo.py
+git diff --name-only -- src/ui
 git diff --name-only -- src/services/schedule_query_service.py
-git diff --name-only -- src/services/category_policy_service.py
+git diff --name-only -- src/services/schedule_sort_service.py
 git diff --name-only -- src/services/weather_service.py
 
 语法检查：
 
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src\services\schedule_sort_service.py src\ui\todo_board.py
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src\services\category_policy_service.py src\repositories\category_repository.py
 
 范围检查：
 
-git diff --name-only -- src/repositories
 git diff --name-only -- src/data
 git diff --name-only -- main.py
 git diff --name-only -- requirements.txt
@@ -152,20 +138,17 @@ git status --short --branch
 
 预期：
 
-- `src/repositories` 无 diff。
+- `src/ui` 无 diff。
 - `src/data` 无 diff。
-- `dashboard.py` 无 diff。
-- `week_window.py` 无 diff。
-- `todo.py` 无 diff。
 - `main.py` 无 diff。
 - `requirements.txt` 无 diff。
 - `schedule.db` 无 tracked diff。
 - `schedule_query_service.py` 无 diff。
-- `category_policy_service.py` 无 diff。
+- `schedule_sort_service.py` 无 diff。
 - `weather_service.py` 无 diff。
 - 最终只允许：
-  - `src/services/schedule_sort_service.py`
-  - `src/ui/todo_board.py`
+  - `src/services/category_policy_service.py`
+  - `src/repositories/category_repository.py`
   - `manage_instruction/Work_Log.md`
   - 必要时 `manage_instruction/Work_Task_Prompts.md`
 
@@ -173,22 +156,22 @@ git status --short --branch
 
 更新 `manage_instruction/Work_Log.md`，至少记录：
 
-- 本轮任务名称：第三轮 3-3b（todo_board 主看板渲染排序抽取）
+- 本轮任务名称：第三轮 3-4a（CategoryPolicyService 分类状态判断抽取）
 - 开工前是否已有管理文档 diff
 - 实际修改文件
-- 开工前 todo_board 主排序 id 基线输出摘要
-- 实现的 `ScheduleSortService.sort_for_todo_board` 方法
-- `todo_board.py` 替换了哪一处排序
-- 明确记录：未修改 `_sort_by_priority`
-- 明确记录：未修改 priority 排序和 `sort_order` 写回逻辑
-- 明确记录：未修改 dashboard/week/todo
-- 明确记录：未修改 `ScheduleQueryService`
-- 修改后 todo_board 主排序 id 是否与基线一致
-- `sort_for_todo_board` 是否返回新 list 且不原地修改输入
-- service import / direct call 验证结果
-- 旧 `db_manager.get_schedules_for_date` 验证结果
+- 开工前分类状态基线输出摘要
+- 实现的 `CategoryPolicyService.evaluate_status` 逻辑
+- `CategoryRepository.check_category_status` 委托方式
+- 明确记录：Repository 仍负责数据库查询
+- 明确记录：service 不访问数据库
+- 明确记录：未修改 `soft_delete_category` / `hard_delete_category`
+- 明确记录：未修改 UI 删除分支
+- 修改后分类状态是否与基线一致
+- 不存在 id 返回语义是否仍为 `"empty"`
+- service direct call 验证结果
+- `db_manager.check_category_status` 返回字符串验证结果
+- 样本覆盖情况：active / historical / empty / missing
 - 静态依赖检查结果
-- `todo_board.py` 引用检查结果
 - py_compile 结果
 - diff 范围检查结果
 - 未完成事项
