@@ -4,29 +4,28 @@
 
 ## 当前小工单
 
-第二轮 D-4：日程写路径临时验收。
+第二轮 D-5：GUI smoke 与第二轮整体验收收口。
 
-状态：顾问窗口已审查并微调，提示词与 `Work_Instruction.md` 中 D-4 边界一致，可转执行窗口。
+状态：顾问窗口已审查并补充进度估算要求，提示词与 `Work_Instruction.md` 中 D-5 边界一致，可转执行窗口。
 
 提示词：
 
 ~~~~markdown
-请执行第二轮 D-4：日程写路径临时验收。本轮只验证日程写路径，不改源码。
+请执行第二轮 D-5：GUI smoke 与第二轮整体验收收口。本轮只做最终验收与日志记录，不改源码。
 
 ## 1. 本轮目标
 
-允许为了验收临时写入日程数据，验证日程写路径可用，并确保所有改动恢复或清理干净。
+汇总 D-1 ~ D-4 的验收结果，确认第二轮 Data 层整理可以归档，并为进入第三轮规划做准备。
 
-重点验证：
-- 有安全样本时，update_schedule_status 写入测试值后恢复原值。
-- 有安全样本时，toggle_pin_status 切换后恢复原值。
-- 有安全样本时，update_schedule_fields 写入测试 title 后恢复原 title。
-- add_schedule 创建 repeat_rule='none' 的唯一临时日程。
-- delete_schedule 删除临时日程。
-- 删除后 get_all_schedules() 找不到该临时 id。
-- 最终 schedule.db 无 tracked diff。
-
-如果没有可安全恢复的已有日程样本，记录跳过样本写回验证原因，不要强行修改真实数据。
+重点确认：
+- D-1 静态边界与 import 复核已通过。
+- D-2 读路径回归验收已通过。
+- D-3 分类写路径临时验收已通过并清理。
+- D-4 日程写路径临时验收已通过并恢复/清理。
+- GUI smoke test 可通过，或失败时有 import main 兜底。
+- src/data、src/repositories、src/ui、main.py、requirements.txt、schedule.db 无 diff。
+- 第二轮可归档，后续可进入第三轮规划。
+- 估算当前进度占总规划进度的百分比。
 
 ## 2. 允许/禁止
 
@@ -38,53 +37,59 @@
 - src/
 - main.py
 - requirements.txt
+- schedule.db
 - Work_Snapshot.md
 - Work_Formulation.md
 
-本轮允许临时写入 schedule.db，但必须恢复/清理，并确认：
-
-git diff --name-only -- schedule.db
-
-无输出。
-
-禁止改源码、禁止改业务逻辑、禁止改 Repository 方法名/参数/返回语义。
+禁止修改任何源码文件、数据库文件、业务逻辑、UI 文件。
 
 若开工前已有管理文档 diff，需在 Work_Log.md 中单独记录，不视为本轮源码改动。
 
 ## 3. 具体任务
 
-1. 尝试获取一个已有日程样本。
-2. 如存在样本：
-   - 记录原 status。
-   - 用 update_schedule_status 写入一个测试值，再恢复原 status。
-   - 记录原 is_pinned。
-   - 用 toggle_pin_status 切换一次，再切换回原值。
-   - 记录原 title。
-   - 用 update_schedule_fields 写入临时 title，再恢复原 title。
-3. 如不存在可安全恢复样本：
-   - 记录跳过原因。
-   - 不强行修改真实数据。
-4. 创建唯一临时日程，repeat_rule='none'。
-5. 删除该临时日程。
-6. 确认删除后 get_all_schedules() 找不到该临时 id。
-7. 确认 schedule.db 无 tracked diff。
-8. 不做任何源码修改。
+1. 读取 Work_Log.md 中 D-1 ~ D-4 的记录。
+2. 汇总每轮结论：
+   - D-1：静态边界与 import
+   - D-2：读路径
+   - D-3：分类写路径
+   - D-4：日程写路径
+3. 复跑最小 import 验证。
+4. 复跑最小读路径验证。
+5. 执行 GUI smoke test；如失败，记录原因并执行 import main 兜底。
+6. 检查源码、UI、数据库无 diff。
+7. 记录是否可以归档第二轮并进入第三轮规划。
+8. 记录当前进度估算：
+   - 按 `Work_Formulation.md` 的至少 8 轮架构迁移口径，D-5 通过后约为 25%。
+   - 若把第九轮及后续新功能轮也算入总目标，当前约为 22%，且后续功能范围未完全定稿。
+9. 不做任何代码修复。
 
 ## 4. 验收命令
 
-1. 既有样本状态/置顶/title 写回恢复验证：
+1. 最小 import 验证：
 
 ```cmd
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; import time, sys; schedules=db_manager.get_all_schedules(); print('sample count', len(schedules)); sample=schedules[0] if schedules else None; print('sample id', getattr(sample,'id',None)); sys.exit(0) if not sample else None; sid=sample.id; old_status=sample.status; old_pin=sample.is_pinned; old_title=sample.title; print('old status', old_status); print('old pin', old_pin); print('old title', old_title); status_test=0 if old_status != 0 else 1; temp_title=str(old_title)+'__d4_tmp_'+str(int(time.time())); ok1=db_manager.update_schedule_status(sid, status_test); ok2=db_manager.update_schedule_status(sid, old_status); ok3=db_manager.toggle_pin_status(sid, old_pin); ok4=db_manager.toggle_pin_status(sid, (not old_pin)); ok5=db_manager.update_schedule_fields(sid, title=temp_title); mid=[s for s in db_manager.get_all_schedules() if s.id==sid][0]; print('temp title set', mid.title == temp_title); ok6=db_manager.update_schedule_fields(sid, title=old_title); refreshed=[s for s in db_manager.get_all_schedules() if s.id==sid][0]; print('status write/restore', ok1, ok2); print('pin toggle/restore', ok3, ok4); print('title temp/restore', ok5, ok6); print('restored status', refreshed.status); print('restored pin', refreshed.is_pinned); print('restored title', refreshed.title); assert ok1 and ok2 and ok3 and ok4 and ok5 and ok6; assert mid.title == temp_title; assert refreshed.status == old_status; assert refreshed.is_pinned == old_pin; assert refreshed.title == old_title"
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.connection import db as db1, DB_PATH as p1; from src.data.database import db as db2, DB_PATH as p2, db_manager; from src.data.models import Category, Schedule; from src.repositories import ScheduleRepository, CategoryRepository; print('imports ok'); print('same db object:', db1 is db2); print('same DB_PATH:', p1 == p2); print('repos ok:', ScheduleRepository is not None, CategoryRepository is not None); print('db_manager ok:', db_manager is not None)"
 ```
 
-2. 临时日程创建/删除验证：
+2. 最小读路径验证：
 
 ```cmd
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; import time; name='__tmp_d4_schedule_'+str(int(time.time())); data={'title':name,'item_type':'schedule','priority':0,'repeat_rule':'none','description':'temporary d4 validation','category_id':None}; created=db_manager.add_schedule(data); print('created schedule', created); assert created is True; matches=[s for s in db_manager.get_all_schedules() if s.title==name]; print('matches', len(matches)); assert len(matches)==1; sid=matches[0].id; deleted=db_manager.delete_schedule(sid); print('deleted schedule', deleted); assert deleted is True; remaining=[s for s in db_manager.get_all_schedules() if s.id==sid]; print('remaining', len(remaining)); assert len(remaining)==0"
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from datetime import date; from src.data.database import db_manager; all_schedules=db_manager.get_all_schedules(); today=db_manager.get_schedules_for_date(date.today()); cats=db_manager.get_active_categories(); cmap=db_manager.get_category_map(); print('all schedules', len(all_schedules)); print('today schedules', len(today)); print('active categories', len(cats)); print('category map', len(cmap)); assert isinstance(all_schedules, list); assert isinstance(today, list); assert isinstance(cats, list); assert isinstance(cmap, dict)"
 ```
 
-3. diff 范围检查：
+3. GUI smoke test：
+
+```cmd
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from PyQt6.QtWidgets import QApplication; from src.ui.main_window import MainWindow; app=QApplication([]); w=MainWindow(); print('gui smoke ok'); w.close(); app.quit()"
+```
+
+如果 GUI smoke 因环境限制失败，记录原因并执行兜底：
+
+```cmd
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import main; print('main import ok')"
+```
+
+4. diff 范围检查：
 
 ```cmd
 git diff --name-only -- src/data
@@ -110,19 +115,19 @@ git status --short --branch
 
 更新 manage_instruction/Work_Log.md，至少记录：
 
-- 本轮任务名称：第二轮 D-4（日程写路径临时验收）
+- 本轮任务名称：第二轮 D-5（GUI smoke 与第二轮整体验收收口）
 - 开工前是否已有管理文档 diff
 - 实际修改文件
-- 是否存在可安全恢复的日程样本
-- update_schedule_status 写入/恢复验证结果，或跳过原因
-- toggle_pin_status 切换/恢复验证结果，或跳过原因
-- update_schedule_fields 临时 title 写入/恢复验证结果，或跳过原因
-- 临时日程名称与 id
-- add_schedule 验证结果
-- delete_schedule 验证结果
-- 删除后是否查询不到临时 id
-- schedule.db 是否无 tracked diff
-- diff 范围检查结果
+- D-1 验收结论摘要
+- D-2 验收结论摘要
+- D-3 验收结论摘要
+- D-4 验收结论摘要
+- 最小 import 验证结果
+- 最小读路径验证结果
+- GUI smoke test 结果或 import main 兜底结果
+- src/data、src/repositories、src/ui、main.py、requirements.txt、schedule.db diff 检查结果
+- 是否可以归档第二轮并进入第三轮规划
+- 当前进度估算及估算口径
 - 未完成事项
 - 风险或疑点
 
@@ -133,9 +138,8 @@ git status --short --branch
 
 ## 复核锚点
 
-- D-4 允许为了验收临时写入 `schedule.db`，但必须恢复真实样本改动并清理临时日程。
-- 复核时重点确认 `update_schedule_status` 写入测试值后恢复原值。
-- 复核时重点确认 `toggle_pin_status` 切换后恢复原值。
-- 复核时重点确认 `update_schedule_fields` 写入临时 title 后恢复原 title。
-- 复核时重点确认临时日程创建后删除，删除后查询不到临时 id。
+- D-5 只做最终验收与日志记录，不允许源码、数据库或业务逻辑改动。
+- 复核时重点确认 D-1 ~ D-4 结论被准确汇总。
+- 复核时重点确认 GUI smoke 通过，或失败时有 `import main` 兜底。
 - 复核时重点检查 `schedule.db`、`src/data`、`src/repositories`、`src/ui`、`main.py`、`requirements.txt` 均无 diff。
+- 复核时确认进度估算口径：8 轮架构迁移口径 D-5 后约 25%；含第九轮及后续功能轮约 22%，且功能轮范围未完全定稿。

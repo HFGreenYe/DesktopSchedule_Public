@@ -213,3 +213,46 @@
   - 等待顾问窗口复核并下发后续 D 工单。
 - 风险或疑点：
   - 本轮只做验收写路径与恢复/清理，未做源码改动；未发现 `schedule.db` tracked diff 异常。
+
+## 2026-05-15 第二轮 D-5（GUI smoke 与第二轮整体验收收口）
+
+- 本轮任务名称：第二轮 D-5（GUI smoke 与第二轮整体验收收口）。
+- 开工前是否已有管理文档 diff：
+  - 有。开工前已有 `manage_instruction/Work_Task_Prompts.md`（顾问窗口维护的 D-5 提示词锚点）diff，不视为本轮源码改动。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+- D-1 结论汇总（静态边界与 import）：
+  - 通过。`connection/models/database/repositories/db_manager` 可 import，`db` 对象与 `DB_PATH` 一致；repository 边界无 `db_manager/UI/src.data.database` 残留依赖。
+- D-2 结论汇总（读路径回归）：
+  - 通过。`get_all_schedules/get_schedules_for_date/get_active_categories/get_category_map` 返回类型正确；分类与日程样本读取可用。
+- D-3 结论汇总（分类写路径临时验收）：
+  - 通过。`add/get/update/soft_delete/hard_delete` 路径可用，删除后 `get_category(cat_id)` 返回 `None`，临时数据已清理。
+- D-4 结论汇总（日程写路径临时验收）：
+  - 通过。样本 `status/is_pinned/title` 写回并恢复成功；临时日程创建删除成功且删除后查询不到，临时数据已清理。
+- 最小 import 复跑结果：
+  - 输出：`imports ok` / `same db object: True` / `same DB_PATH: True` / `repos ok: True True` / `db_manager ok: True`
+  - 结论：通过。
+- 最小读路径复跑结果：
+  - 输出：`all 75 list` / `today 8 list` / `cats 7 list` / `cmap 7 dict`
+  - 断言：四条读路径返回类型验证通过。
+- GUI smoke test 结果：
+  - 输出：`gui smoke ok`
+  - 备注：出现 `libpng warning: tRNS: invalid with alpha channel`，不影响 smoke 通过；无需 `import main` 兜底。
+- diff 范围检查结果：
+  - `git diff --name-only -- src/data` -> 无输出。
+  - `git diff --name-only -- src/repositories` -> 无输出。
+  - `git diff --name-only -- src/ui` -> 无输出。
+  - `git diff --name-only -- main.py` -> 无输出。
+  - `git diff --name-only -- requirements.txt` -> 无输出。
+  - `git diff --name-only -- schedule.db` -> 无输出。
+  - `git diff --name-only` -> 验证时为 `manage_instruction/Work_Task_Prompts.md`；写入本日志后另含 `manage_instruction/Work_Log.md`。
+  - `git status --short --branch` -> 验证时为 `M manage_instruction/Work_Task_Prompts.md`；写入本日志后另含 `M manage_instruction/Work_Log.md`。
+- 是否可以归档第二轮并进入第三轮规划：
+  - 可以。第二轮 D（D-1~D-5）验收收口通过，且第二轮整体可归档，可进入第三轮规划。
+- 当前进度估算：
+  - 按 `Work_Formulation.md` 至少 8 轮架构迁移口径：D-5 通过后约 `25%`。
+  - 若把第九轮及后续新功能轮纳入总目标：当前约 `22%`，且后续功能范围未完全定稿。
+- 未完成事项：
+  - 等待顾问窗口复核，确认归档动作与第三轮任务下发。
+- 风险或疑点：
+  - 当前仅管理文档有 diff；源码与 `schedule.db` 范围保持干净。
