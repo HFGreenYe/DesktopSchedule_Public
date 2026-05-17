@@ -1,191 +1,117 @@
-# Work Task Prompts
-
-用途：记录“当前待执行小工单”的提示词锚点与简要复核状态。
-
-## 当前小工单
-
-第三轮 3-0：静态审查与旧逻辑定位。
-
-状态：顾问窗口已审查，提示词与 `Work_Instruction.md` 中 3-0 边界一致，可转执行窗口。
-
-提示词：
-
-~~~~markdown
-请执行第三轮 3-0：静态审查与旧逻辑定位。本轮只做代码阅读、静态搜索和日志记录，不修改源码。
+请执行第三轮 3-1：服务骨架与边界确认。本轮只确认并建立第三轮必要的最小 service 边界，不迁移复杂逻辑，不接 UI。
 
 ## 1. 本轮目标
 
-基于 manage_instruction/Work_Instruction.md 中的第三轮阶段合同，定位当前项目中“查询、过滤、排序、分类策略、四象限相关逻辑”的现有位置，为后续服务抽取做边界准备。
+基于 `manage_instruction/Work_Instruction.md` 第三轮阶段合同，以及 `manage_instruction/Work_Log.md` 中 3-0 静态审查结论，确认第三轮后续服务抽取需要哪些最小 service 文件。
 
-本轮只回答这些问题：
+本轮重点：
 
-- 日期过滤与日程/待办区分逻辑在哪里？
-- 日视图排序逻辑在哪里？
-- 周视图排序逻辑在哪里？
-- 待办列表排序逻辑在哪里？
-- 待办看板排序逻辑在哪里？
-- 分类状态判断和分类删除策略在哪里？
-- 四象限相关逻辑是否已有？如果没有，现有字段是否足够支撑纯逻辑服务？
-- 哪些逻辑适合第三轮抽取？
-- 哪些逻辑应留到后续轮次？
+- 确认查询过滤服务边界。
+- 确认排序策略服务边界。
+- 确认分类策略服务边界。
+- 谨慎评估四象限服务是否现在需要创建。
+- 新 service 必须可 import。
+- 新 service 不得依赖 QWidget / PyQt UI。
+- 旧 `db_manager` / repository / UI 调用路径保持不变。
 
-本轮不做任何代码修复，不创建 service 文件，不替换 UI 调用。
+本轮不迁移日期过滤、排序、分类状态、删除策略等具体业务逻辑；这些留给后续 3-2、3-3、3-4。
 
 ## 2. 允许/禁止
 
 本轮允许修改：
 
-- manage_instruction/Work_Log.md
-- manage_instruction/Work_Task_Prompts.md（仅在需要维护本轮复核锚点时）
+- `src/services/schedule_query_service.py`（仅在确认 3-2 会立即承接时）
+- `src/services/schedule_sort_service.py`（仅在确认 3-3 会立即承接时）
+- `src/services/category_policy_service.py`（仅在确认 3-4 会立即承接时）
+- `src/services/__init__.py`（仅做轻量导出，且必须无副作用）
+- `manage_instruction/Work_Log.md`
+- `manage_instruction/Work_Task_Prompts.md`（仅在需要维护本轮复核锚点时）
+
+本轮原则上不创建：
+
+- `src/services/matrix_classification_service.py`
+
+除非你能基于 3-0 结论明确说明它会在下一小工单立即承接稳定纯逻辑；否则只在日志中记录“四象限服务暂不创建，规则缺口留待 3-5”。
 
 本轮禁止修改：
 
-- src/
-- main.py
-- requirements.txt
-- schedule.db
-- Work_Snapshot.md
-- Work_Formulation.md
+- `src/services/weather_service.py`
+- `src/data/`
+- `src/repositories/`
+- `src/ui/`
+- `main.py`
+- `requirements.txt`
+- `schedule.db`
+- `Work_Snapshot.md`
+- `Work_Formulation.md`
 
 禁止事项：
 
-- 不修改源码。
-- 不修改 UI。
-- 不修改数据库。
-- 不运行写入型验证。
-- 不创建 service 文件。
-- 不抽取逻辑。
-- 不调整 import。
-- 不接四象限 UI。
-- 不改变任何业务行为。
+- 不接 UI。
+- 不替换旧调用路径。
+- 不修改 `db_manager` 对外 API。
+- 不修改 Repository 方法名、参数、返回语义。
+- 不迁移具体排序/过滤/分类策略逻辑。
+- 不创建无明确后续承接目标的空壳文件。
+- 不新增数据库字段。
+- 不修改迁移逻辑。
+- 不实现新功能。
 
-若开工前已有管理文档 diff，需在 Work_Log.md 中单独记录，不视为本轮源码改动。
+若开工前已有管理文档 diff，需在 `Work_Log.md` 中单独记录，不视为本轮源码改动。
 
 ## 3. 具体任务
 
-1. 读取 manage_instruction/Work_Instruction.md 的第三轮阶段合同。
-2. 使用静态搜索定位日期过滤逻辑。
-3. 使用静态搜索定位日程/待办区分逻辑。
-4. 使用静态搜索定位排序逻辑：
-   - 日视图
-   - 周视图
-   - 待办列表
-   - 待办看板
-5. 使用静态搜索定位分类状态判断和分类删除策略。
-6. 使用静态搜索定位四象限相关逻辑或确认缺口。
-7. 按来源归类：
-   - src/data/database.py
-   - src/repositories/
-   - src/ui/
-   - src/services/
-   - 其他文件
-8. 给出第三轮可抽取项清单。
-9. 给出应留到后续轮次的项清单。
-10. 判断 3-2、3-3、3-4 是否需要继续拆成更小工单。
-11. 记录所有结论到 Work_Log.md。
+1. 读取 `manage_instruction/Work_Instruction.md` 第三轮阶段合同。
+2. 读取 `manage_instruction/Work_Log.md` 中第三轮 3-0 结论。
+3. 基于 3-0 结论确认以下候选服务是否需要在本轮创建：
+   - `schedule_query_service.py`
+   - `schedule_sort_service.py`
+   - `category_policy_service.py`
+   - `matrix_classification_service.py`
+4. 对确认需要创建的 service 文件，只建立最小可 import 边界：
+   - 不导入 PyQt / QWidget。
+   - 不导入 UI。
+   - 不导入 `db_manager`。
+   - 不导入 Repository。
+   - 不写数据库。
+   - 不实现复杂业务迁移。
+5. 如果更新 `src/services/__init__.py`，只能做轻量导出，不得触发数据库、UI 或网络副作用。
+6. 不修改 `weather_service.py`；最多在日志里记录它与第三轮无关。
+7. 更新 `Work_Log.md`，说明：
+   - 哪些 service 创建了。
+   - 哪些 service 暂不创建。
+   - 每个创建/不创建的依据。
+   - 后续 3-2、3-3、3-4、3-5 分别承接什么。
 
-## 4. 建议静态搜索命令
+## 4. 验收命令
 
-先读取第三轮合同：
+读取合同和 3-0 结论：
 
-```cmd
 Get-Content -Path manage_instruction\Work_Instruction.md -Encoding UTF8
-```
+Get-Content -Path manage_instruction\Work_Log.md -Encoding UTF8
 
-定位日期过滤、时间字段、日程/待办区分：
+检查 services 文件：
 
-```cmd
-rg -n "get_schedules_for_date|target_date|start_time|end_time|item_type|todo|schedule|date\(|today|selected_date" src
-```
-
-定位排序逻辑：
-
-```cmd
-rg -n "sort|sorted|sort_key|order_by|priority|is_pinned|status|created_at|sort_order|end_time|start_time" src
-```
-
-重点检查 UI 排序位置：
-
-```cmd
-rg -n "sort|sorted|sort_key|priority|is_pinned|status|created_at|sort_order|end_time|start_time" src/ui
-```
-
-重点检查 repository / data 排序位置：
-
-```cmd
-rg -n "sort|sorted|sort_key|order_by|priority|is_pinned|status|created_at|sort_order|end_time|start_time" src/data src/repositories
-```
-
-定位分类状态、删除策略：
-
-```cmd
-rg -n "check_category_status|soft_delete_category|hard_delete_category|category|categories|is_deleted|list_type|historical|active|empty" src
-```
-
-定位四象限相关逻辑或命名：
-
-```cmd
-rg -n "matrix|quadrant|四象限|重要|紧急|urgent|important|priority" src
-```
-
-定位已有 service 情况，确认不要误动无关 service：
-
-```cmd
 rg --files src/services
 Get-Content -Path src\services\*.py -Encoding UTF8
-```
 
-查看候选核心文件时，可按需读取：
+import 验证：
 
-```cmd
-Get-Content -Path src\data\database.py -Encoding UTF8
-Get-Content -Path src\repositories\schedule_repository.py -Encoding UTF8
-Get-Content -Path src\repositories\category_repository.py -Encoding UTF8
-```
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import importlib; mods=['src.services.schedule_query_service','src.services.schedule_sort_service','src.services.category_policy_service']; existing=[]; missing=[]; [existing.append(m) if importlib.util.find_spec(m) else missing.append(m) for m in mods]; [importlib.import_module(m) for m in existing]; print('existing service imports ok:', existing); print('missing service modules:', missing)"
 
-如搜索结果指向 UI 文件，只读相关文件，不修改：
+验证旧路径仍可用：
 
-```cmd
-Get-Content -Path src\ui\dashboard.py -Encoding UTF8
-Get-Content -Path src\ui\week_window.py -Encoding UTF8
-Get-Content -Path src\ui\todo.py -Encoding UTF8
-Get-Content -Path src\ui\todo_board.py -Encoding UTF8
-```
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; print('db_manager import ok'); print('schedules', len(db_manager.get_all_schedules())); print('categories', len(db_manager.get_active_categories()))"
 
-如果某些文件不存在，记录“不存在/无需读取”，不要创建文件。
+静态依赖检查，确认新 service 不依赖 UI / QWidget / db_manager / repository：
 
-## 5. 验收与日志要求
+rg -n "QWidget|PyQt|PySide|src\.ui|db_manager|src\.repositories|ScheduleRepository|CategoryRepository" src/services
 
-完成后更新 manage_instruction/Work_Log.md，至少记录：
+如果该命令只命中 `weather_service.py` 或无关既有内容，请在日志中说明；新建第三轮 service 文件不得命中上述依赖。
 
-- 本轮任务名称：第三轮 3-0（静态审查与旧逻辑定位）
-- 开工前是否已有管理文档 diff
-- 实际修改文件
-- 已读取的关键文件
-- 日期过滤逻辑位置清单
-- 日程/待办区分逻辑位置清单
-- 日视图排序逻辑位置清单
-- 周视图排序逻辑位置清单
-- 待办列表排序逻辑位置清单
-- 待办看板排序逻辑位置清单
-- 分类状态判断逻辑位置清单
-- 分类删除策略位置清单
-- 四象限相关现有逻辑或缺口
-- 按来源归类的逻辑分布：
-  - database.py
-  - repositories
-  - UI
-  - services
-  - 其他
-- 第三轮适合抽取的逻辑清单
-- 应留到后续轮次的逻辑清单
-- 是否建议拆分 3-2、3-3、3-4
-- 未完成事项
-- 风险或疑点
+diff 范围检查：
 
-范围检查必须执行：
-
-```cmd
+git diff --name-only -- src/services/weather_service.py
 git diff --name-only -- src/data
 git diff --name-only -- src/repositories
 git diff --name-only -- src/ui
@@ -194,24 +120,36 @@ git diff --name-only -- requirements.txt
 git diff --name-only -- schedule.db
 git diff --name-only
 git status --short --branch
-```
 
 预期：
 
-- src/data 无 diff。
-- src/repositories 无 diff。
-- src/ui 无 diff。
-- main.py 无 diff。
-- requirements.txt 无 diff。
-- schedule.db 无 tracked diff。
-- 最终只允许 manage_instruction/Work_Log.md，以及必要时的 manage_instruction/Work_Task_Prompts.md。
+- `src/services/weather_service.py` 无 diff。
+- `src/data` 无 diff。
+- `src/repositories` 无 diff。
+- `src/ui` 无 diff。
+- `main.py` 无 diff。
+- `requirements.txt` 无 diff。
+- `schedule.db` 无 tracked diff。
+- 最终只允许必要的 `src/services/` 新增/轻量导出文件，以及 `manage_instruction/Work_Log.md`，必要时包含 `manage_instruction/Work_Task_Prompts.md`。
+
+## 5. 日志要求
+
+更新 `manage_instruction/Work_Log.md`，至少记录：
+
+- 本轮任务名称：第三轮 3-1（服务骨架与边界确认）
+- 开工前是否已有管理文档 diff
+- 实际修改文件
+- 读取的依据文件
+- 基于 3-0 结论创建了哪些 service 文件
+- 哪些候选 service 暂不创建及原因
+- 是否修改 `src/services/__init__.py`
+- 是否确认 `weather_service.py` 未改动
+- service import 验证结果
+- 旧 `db_manager` 路径验证结果
+- 静态依赖检查结果
+- diff 范围检查结果
+- 后续 3-2 / 3-3 / 3-4 / 3-5 的承接建议
+- 未完成事项
+- 风险或疑点
 
 完成后不要提交 Git，等待顾问窗口复核。
-~~~~
-
-## 复核锚点
-
-- 3-0 只做静态审查与旧逻辑定位，不允许修改源码、数据库或 UI。
-- 复核时重点确认定位结果覆盖日期过滤、日/周/待办排序、分类状态/删除策略、四象限缺口。
-- 复核时重点确认是否给出第三轮可抽取项、后续轮次保留项，以及 3-2/3-3/3-4 是否需要继续拆分。
-- 复核时重点检查 `src/data`、`src/repositories`、`src/ui`、`main.py`、`requirements.txt`、`schedule.db` 均无 diff。

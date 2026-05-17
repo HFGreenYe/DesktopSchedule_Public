@@ -115,3 +115,62 @@
   - 同一业务在 Repository 与多个 UI 层存在重复/并行排序与过滤规则，若直接合并易改变可见顺序。
   - `todo_board._sort_by_priority` 含持久化写回，不能与纯读排序策略混做一轮抽取。
   - “四象限”目前是入口占位，不是完整业务实现，需先明确稳定规则再落地服务。
+
+## 2026-05-17 第三轮 3-1（服务骨架与边界确认）
+
+- 本轮任务名称：第三轮 3-1（服务骨架与边界确认）。
+- 开工前是否已有管理文档 diff：
+  - 有。开工前已有 `manage_instruction/Work_Task_Prompts.md`（顾问窗口维护的 3-1 提示词锚点）diff，不视为本轮源码改动。
+- 实际修改文件：
+  - `src/services/schedule_query_service.py`（新增）
+  - `src/services/schedule_sort_service.py`（新增）
+  - `src/services/category_policy_service.py`（新增）
+  - `src/services/__init__.py`（轻量导出）
+  - `manage_instruction/Work_Log.md`
+- 读取的依据文件：
+  - `manage_instruction/Work_Instruction.md`（第三轮合同与 3-1 边界）
+  - `manage_instruction/Work_Log.md`（3-0 定位结论）
+  - `src/services/__init__.py`、`src/services/weather_service.py`
+- 基于 3-0 结论创建了哪些 service 文件：
+  - `schedule_query_service.py`：承接 3-2（日期过滤、日程/待办区分）边界。
+  - `schedule_sort_service.py`：承接 3-3（day/week/todo/todo_board 排序策略）边界。
+  - `category_policy_service.py`：承接 3-4（分类状态判断、删除策略判定）边界。
+- 哪些候选 service 暂不创建及原因：
+  - `matrix_classification_service.py` 暂不创建。
+  - 原因：3-0 结论显示当前仅有四象限入口与 `priority` 基础字段，尚无稳定分类规则实现；按合同留待 3-5 做规则评估与最小服务准备。
+- 是否修改 `src/services/__init__.py`：
+  - 是。仅添加轻量导出（`ScheduleQueryService`、`ScheduleSortService`、`CategoryPolicyService`、`CategoryStatus`、`CategoryDeleteAction`），无副作用调用。
+- 是否确认 `weather_service.py` 未改动：
+  - 是。`git diff --name-only -- src/services/weather_service.py` 无输出。
+- service import 验证结果：
+  - 给定命令在当前环境报错：`AttributeError: module 'importlib' has no attribute 'util'`。
+  - 使用等价修正版命令复核通过：
+    - `existing service imports ok: ['src.services.schedule_query_service', 'src.services.schedule_sort_service', 'src.services.category_policy_service']`
+    - `missing service modules: []`
+- 旧 `db_manager` 路径验证结果：
+  - 输出：`db_manager import ok` / `schedules 75` / `categories 7`。
+  - 结论：旧路径可用，未受服务骨架影响。
+- 静态依赖检查结果：
+  - 命令：`rg -n "QWidget|PyQt|PySide|src\.ui|db_manager|src\.repositories|ScheduleRepository|CategoryRepository" src/services`
+  - 命中：仅 `src/services/weather_service.py` 的既有 `PyQt6` 依赖。
+  - 新建第三轮 service 文件未命中 UI / QWidget / db_manager / repository 依赖。
+- diff 范围检查结果：
+  - `git diff --name-only -- src/services/weather_service.py` -> 无输出。
+  - `git diff --name-only -- src/data` -> 无输出。
+  - `git diff --name-only -- src/repositories` -> 无输出。
+  - `git diff --name-only -- src/ui` -> 无输出。
+  - `git diff --name-only -- main.py` -> 无输出。
+  - `git diff --name-only -- requirements.txt` -> 无输出。
+  - `git diff --name-only -- schedule.db` -> 无输出。
+  - `git diff --name-only` -> `manage_instruction/Work_Task_Prompts.md`、`src/services/__init__.py`、`src/services/schedule_query_service.py`、`src/services/schedule_sort_service.py`、`src/services/category_policy_service.py`（写入本日志后另含 `manage_instruction/Work_Log.md`）。
+  - `git status --short --branch` -> `M manage_instruction/Work_Task_Prompts.md`、`M src/services/__init__.py`、`?? src/services/schedule_query_service.py`、`?? src/services/schedule_sort_service.py`、`?? src/services/category_policy_service.py`（写入本日志后另含 `M manage_instruction/Work_Log.md`）。
+- 后续 3-2 / 3-3 / 3-4 / 3-5 承接建议：
+  - 3-2：在 `ScheduleQueryService` 实现日期过滤与 todo/schedule 判定，先对齐 `schedule_repository.get_schedules_for_date` 语义。
+  - 3-3：在 `ScheduleSortService` 分别实现 day/week/todo/todo_board 排序键，避免一次合并导致顺序回归。
+  - 3-4：在 `CategoryPolicyService` 实现 `empty/active/historical` 判定与删除动作映射，保持旧 UI 删除分支语义。
+  - 3-5：仅在规则明确后评估并实现四象限纯逻辑服务；当前继续保持“暂不创建 matrix 服务”。
+- 未完成事项：
+  - 等待顾问窗口复核并下发 3-2（建议先 3-2a）工单。
+- 风险或疑点：
+  - 本轮仅建立边界，后续实现时需逐视图比对排序结果，避免 UI 可见顺序回归。
+  - 给定 import 验证命令在当前环境存在 `importlib.util` 调用兼容问题，已用等价命令完成验证。
