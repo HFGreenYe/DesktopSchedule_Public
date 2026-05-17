@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QTimer, QMimeData
 from PyQt6.QtGui import QDrag
 from ..data.database import db_manager
+from ..services.schedule_query_service import ScheduleQueryService
 from .schedule_detail_pop import ScheduleDetailPop
 
 # 复用主界面的组件
@@ -442,11 +443,7 @@ class TodoView(QWidget):
             if getattr(s, 'status', 0) == 2:
                 continue
                 
-            is_todo = False
-            if hasattr(s, 'item_type') and s.item_type == 'todo': is_todo = True
-            if hasattr(s, 'type') and getattr(s, 'type', 0) == 1: is_todo = True
-            
-            if is_todo:
+            if ScheduleQueryService.is_todo(s):
                 dashboard_todos.append(s)
 
 

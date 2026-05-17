@@ -7,6 +7,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QTimer
 from PyQt6.QtGui import (QColor,QFont, QFontMetrics)
 
 from ..data.database import db_manager
+from ..services.schedule_query_service import ScheduleQueryService
 from .schedule_detail_pop import ScheduleDetailPop
 
 class DraggableWidget(QWidget):
@@ -503,10 +504,7 @@ class DashboardView(QWidget):
             if getattr(s, 'status', 0) == 2:
                 continue
                 
-            is_todo = False
-            if hasattr(s, 'item_type') and s.item_type == 'todo': is_todo = True
-            if hasattr(s, 'type') and s.type == 1: is_todo = True
-            if not is_todo:
+            if not ScheduleQueryService.is_todo(s):
                 dashboard_schedules.append(s)
 
         def sort_key(item):

@@ -19,6 +19,7 @@ from .time_picker_week import TimePickerViewWeek
 from .alarm_picker_week import AlarmPickerViewWeek
 from .list_picker import ListPickerView
 from ..data.database import db_manager
+from ..services.schedule_query_service import ScheduleQueryService
 from .header import ToolTipFilter
 from .dashboard import AdaptiveLabel 
 from .components import CountdownToolTipFilter, get_colored_icon
@@ -1029,7 +1030,7 @@ class WeekWindow(FramelessMainWindow):
         for day_index in range(7):
             target_date = self.current_monday.addDays(day_index).toPyDate()
             daily_schedules = db_manager.get_schedules_for_date(target_date)
-            valid_schedules =[s for s in daily_schedules if s.item_type == 'schedule' and getattr(s, 'status', 0) != 2]
+            valid_schedules =[s for s in daily_schedules if ScheduleQueryService.is_schedule(s) and getattr(s, 'status', 0) != 2]
 
             if valid_schedules:
                 has_any_schedule = True

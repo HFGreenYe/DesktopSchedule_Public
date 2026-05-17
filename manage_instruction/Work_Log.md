@@ -232,3 +232,71 @@
 - 风险或疑点：
   - 本轮仅迁移过滤，不迁移排序；后续 3-3 需确保排序抽取后顺序不变。
   - `item_type` 仍按旧语义直接读取对象属性，保持与原 Repository 行为一致。
+
+## 2026-05-17 第三轮 3-2b（日程/待办区分纯逻辑抽取）
+
+- 本轮任务名称：第三轮 3-2b（日程/待办区分纯逻辑抽取）。
+- 开工前是否已有管理文档 diff：
+  - 有。开工前已有 `manage_instruction/Work_Task_Prompts.md`（顾问窗口维护的 3-2b 提示词锚点）diff，不视为本轮源码改动。
+- 实际修改文件：
+  - `src/services/schedule_query_service.py`
+  - `src/ui/dashboard.py`
+  - `src/ui/week_window.py`
+  - `src/ui/todo.py`
+  - `src/ui/todo_board.py`
+  - `manage_instruction/Work_Log.md`
+- 开工前四组候选集合基线输出摘要：
+  - `baseline dashboard []`
+  - `baseline week []`
+  - `baseline todo [15, 14, 13, 12, 11, 10, 9, 8]`
+  - `baseline board [15, 14, 13, 12, 11, 10, 9, 8]`
+- 实现的 service 方法：
+  - `ScheduleQueryService.is_todo(item)`：
+    - `getattr(item, 'item_type', None) == 'todo'` 或 `getattr(item, 'type', 0) == 1` 返回 `True`。
+  - `ScheduleQueryService.is_schedule(item)`：
+    - 严格按周视图旧语义：`getattr(item, 'item_type', None) == 'schedule'`。
+  - `ScheduleQueryService.split_schedule_and_todo(items)`：
+    - 返回 `(schedules, todos)`；`todos` 用 `is_todo`，`schedules` 用 `not is_todo`。
+- 每个 UI 文件替换了哪一处判断：
+  - `src/ui/dashboard.py`：将内联 `is_todo` 判定替换为 `ScheduleQueryService.is_todo(s)`。
+  - `src/ui/week_window.py`：将 `s.item_type == 'schedule'` 替换为 `ScheduleQueryService.is_schedule(s)`。
+  - `src/ui/todo.py`：将内联 `is_todo` 判定替换为 `ScheduleQueryService.is_todo(s)`。
+  - `src/ui/todo_board.py`：将 `is_todo = (item_type=='todo' or type==1)` 替换为 `is_todo = ScheduleQueryService.is_todo(s)`。
+- 明确记录：未修改排序逻辑。
+  - 各文件排序 key 与排序顺序保持原样，未迁移到 `schedule_sort_service.py`。
+- 明确记录：未修改 Repository 日期过滤。
+  - 本轮未修改 `src/repositories/`，3-2a 中的日期过滤委托保持不变。
+- 修改后四组候选集合 id 是否与基线一致：
+  - `after dashboard []`（一致）
+  - `after week []`（一致）
+  - `after todo [15, 14, 13, 12, 11, 10, 9, 8]`（一致）
+  - `after board [15, 14, 13, 12, 11, 10, 9, 8]`（一致）
+- `split_schedule_and_todo` 验证结果：
+  - `split ok True True 67 8`
+  - `sample flags [(72, False, True), (73, False, True), (74, False, True), (75, False, True), (76, False, True)]`
+- 旧 `db_manager.get_schedules_for_date` 验证结果：
+  - `db_manager path ok True 8`
+- 静态依赖检查结果：
+  - 命令：`rg -n "QWidget|PyQt|PySide|src\.ui|db_manager|src\.repositories|ScheduleRepository|CategoryRepository" src/services/schedule_query_service.py`
+  - 结果：无输出（退出码 1，符合预期）。
+- UI 引用检查结果：
+  - 命令：`rg -n "ScheduleQueryService|schedule_query_service|ScheduleSortService|CategoryPolicyService|src\.repositories|db_manager" ...`
+  - 结果：四个 UI 文件已引入并使用 `ScheduleQueryService`；未引入 `ScheduleSortService`/`CategoryPolicyService`/`src.repositories`。
+  - `db_manager` 命中均为既有取数与写回路径，未新增调用路径。
+- 本轮未误动其他 service 检查：
+  - `git diff --name-only -- src/services/schedule_sort_service.py` -> 无输出。
+  - `git diff --name-only -- src/services/category_policy_service.py` -> 无输出。
+  - `git diff --name-only -- src/services/weather_service.py` -> 无输出。
+- diff 范围检查结果：
+  - `git diff --name-only -- src/repositories` -> 无输出。
+  - `git diff --name-only -- src/data` -> 无输出。
+  - `git diff --name-only -- main.py` -> 无输出。
+  - `git diff --name-only -- requirements.txt` -> 无输出。
+  - `git diff --name-only -- schedule.db` -> 无输出。
+  - `git diff --name-only` -> `manage_instruction/Work_Task_Prompts.md`、`src/services/schedule_query_service.py`、`src/ui/dashboard.py`、`src/ui/week_window.py`、`src/ui/todo.py`、`src/ui/todo_board.py`（写入本日志后另含 `manage_instruction/Work_Log.md`）。
+  - `git status --short --branch` -> `M manage_instruction/Work_Task_Prompts.md`、`M src/services/schedule_query_service.py`、`M src/ui/dashboard.py`、`M src/ui/week_window.py`、`M src/ui/todo.py`、`M src/ui/todo_board.py`（写入本日志后另含 `M manage_instruction/Work_Log.md`）。
+- 未完成事项：
+  - 等待顾问窗口复核并下发 3-3 小工单。
+- 风险或疑点：
+  - `is_schedule` 严格保持 `item_type == 'schedule'` 语义，未扩展到 `not is_todo`，避免周视图行为变更。
+  - 目前仅抽取判定逻辑；排序仍分散在 UI，后续 3-3 需逐视图对齐迁移。

@@ -46,8 +46,24 @@ class ScheduleQueryService:
 
     @staticmethod
     def split_schedule_and_todo(items: Sequence[T]) -> tuple[List[T], List[T]]:
-        """Split into (schedules, todos) with legacy-compatible rules.
+        """Split into (schedules, todos) with legacy-compatible rules."""
+        schedules: List[T] = []
+        todos: List[T] = []
+        for item in items:
+            if ScheduleQueryService.is_todo(item):
+                todos.append(item)
+            else:
+                schedules.append(item)
+        return schedules, todos
 
-        Implementation is intentionally deferred to round 3-2.
-        """
-        raise NotImplementedError("Implemented in round 3-2.")
+    @staticmethod
+    def is_todo(item: T) -> bool:
+        """Legacy todo predicate used by dashboard/todo/todo_board."""
+        item_type = getattr(item, "item_type", None)
+        legacy_type = getattr(item, "type", 0)
+        return item_type == "todo" or legacy_type == 1
+
+    @staticmethod
+    def is_schedule(item: T) -> bool:
+        """Legacy schedule predicate aligned with current week view semantics."""
+        return getattr(item, "item_type", None) == "schedule"

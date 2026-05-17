@@ -8,6 +8,7 @@ from PyQt6.QtSvg import QSvgRenderer
 
 from ..config import AppConfig
 from ..data.database import db_manager 
+from ..services.schedule_query_service import ScheduleQueryService
 from .list_picker import ListPickerView
 # ==========================================
 # SVG 高清渲染与染色 
@@ -1295,7 +1296,7 @@ class TodoBoardWindow(QWidget):
             if getattr(s, 'status', 0) == 2:
                 continue
                 
-            is_todo = (getattr(s, 'item_type', '') == 'todo' or getattr(s, 'type', 0) == 1)
+            is_todo = ScheduleQueryService.is_todo(s)
             is_active = (getattr(s, 'status', 0) == 0) 
             
             if is_todo and is_active:
@@ -2051,4 +2052,3 @@ class TodoBoardWindow(QWidget):
             self.refresh_data()
             self.notify_main_window_refresh()
 
-    
