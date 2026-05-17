@@ -1583,3 +1583,196 @@
   - 等待顾问窗口复核并下发第二轮 D 工单。
 - 风险或疑点：
   - 本轮未做源码改动；`schedule.db` 无 tracked diff。当前仅管理文档存在变更。
+
+---
+
+## 2026-05-17 第二轮 D - Data 层整体技术验收（已完成归档）
+
+归档状态：已完成。
+
+对应提交：
+
+- `51bf837 docs: record round d1 data import boundary review`
+- `56dab09 docs: record round d2 data read path regression`
+- `f4f7a11 docs: record round d3 category write path validation`
+- `005df9b docs: record round d4 schedule write path validation`
+- `10c4fbc docs: close round d data layer validation`
+
+归档结论：
+
+- D-1 静态边界与 import 复核通过。
+- D-2 Data 层读路径回归验收通过。
+- D-3 分类写路径临时验收通过，临时分类已清理。
+- D-4 日程写路径临时验收通过，真实样本已恢复，临时日程已清理。
+- D-5 GUI smoke 与第二轮整体验收收口通过。
+- `src/data`、`src/repositories`、`src/ui`、`main.py`、`requirements.txt`、`schedule.db` 最终均无 tracked diff。
+- 第二轮 Data 层整理与模型拆分可归档，可进入第三轮规划。
+- 进度估算：按至少 8 轮架构迁移口径约 25%；若纳入第九轮及后续功能轮约 22%，后续功能范围未完全定稿。
+
+### 2026-05-15 第二轮 D-1（Data 层静态边界与 import 复核）
+
+- 本轮任务名称：第二轮 D-1（Data 层静态边界与 import 复核）。
+- 开工前是否已有管理文档 diff：
+  - 有。开工前 `git status --short --branch` 显示：`M manage_instruction/Work_Task_Prompts.md`（顾问窗口维护变更，不视为本轮源码改动）。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+- import 验证结果：
+  - 输出：`imports ok` / `same db object: True` / `same DB_PATH: True` / `repositories ok: True True True` / `db_manager ok: True`
+- db 对象一致性验证结果：
+  - `src.data.connection.db is src.data.database.db` -> `True`
+- DB_PATH 一致性验证结果：
+  - `src.data.connection.DB_PATH == src.data.database.DB_PATH` -> `True`
+- Repository 依赖静态检查结果：
+  - `rg -n "db_manager|src\.ui|from .*data\.database|src\.data\.database|from .*database import" src/repositories`
+  - 结果：无输出（退出码 1，符合预期）。
+- repositories/__init__.py 轻量导出检查结果：
+  - `src/repositories/__init__.py` 只导出 `CategoryRepository`、`ScheduleRepository` 和 `__all__`。
+  - 重型导入静态检查无输出。
+- Repository 模型来源与构造函数注入能力检查结果：
+  - `ScheduleRepository` 保留 `schedule_model=None` 注入参数，并从 `src.data.models` 延迟导入 `Schedule`。
+  - `CategoryRepository` 保留 `category_model=None, schedule_model=None` 注入参数，并从 `src.data.models` 延迟导入 `Category, Schedule`。
+- schedule.db 是否无 tracked diff：
+  - `git diff --name-only -- schedule.db` -> 无输出。
+- diff 范围检查结果：
+  - `src/data`、`src/repositories`、`src/ui`、`main.py`、`requirements.txt`、`schedule.db` 均无 diff。
+  - 最终仅管理文档有 diff。
+- 未完成事项：
+  - D-2 待继续。
+- 风险或疑点：
+  - 未发现边界异常或数据库 tracked diff。
+
+### 2026-05-15 第二轮 D-2（Data 层读路径回归验收）
+
+- 本轮任务名称：第二轮 D-2（Data 层读路径回归验收）。
+- 开工前是否已有管理文档 diff：
+  - 有。开工前已有 `manage_instruction/Work_Task_Prompts.md`（顾问窗口维护的 D-2 提示词锚点）diff，不视为本轮源码改动。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+- `get_all_schedules` 验证结果：
+  - `all schedules 75 list`，返回类型为 `list`，通过。
+- `get_schedules_for_date` 验证结果：
+  - `today schedules 8 list`，返回类型为 `list`，通过。
+- `get_active_categories` 验证结果：
+  - `active categories 7 list`，返回类型为 `list`，通过。
+- `get_category_map` 验证结果：
+  - `category map 7 dict`，返回类型为 `dict`，通过。
+- 分类样本读取与 `check_category_status` 验证结果：
+  - 样本数 `7`，`get_category` 匹配通过，`check_category_status` 返回 `historical`，在允许集合 `{empty, active, historical}` 内。
+- 日程样本基础字段读取验证结果：
+  - 样本数 `75`，样本 id `72`，`title/item_type/status` 字段可访问。
+- 是否确认本轮未执行任何写入方法：
+  - 是。仅执行读路径相关命令。
+- schedule.db 是否无 tracked diff：
+  - `git diff --name-only -- schedule.db` -> 无输出。
+- diff 范围检查结果：
+  - `src/data`、`src/repositories`、`src/ui`、`main.py`、`requirements.txt`、`schedule.db` 均无 diff。
+  - 最终仅管理文档有 diff。
+- 未完成事项：
+  - D-3 待继续。
+- 风险或疑点：
+  - 未触发写入；未发现 `schedule.db` tracked diff 或源码范围异常。
+
+### 2026-05-15 第二轮 D-3（分类写路径临时验收）
+
+- 本轮任务名称：第二轮 D-3（分类写路径临时验收）。
+- 开工前是否已有管理文档 diff：
+  - 有。开工前已有 `manage_instruction/Work_Task_Prompts.md`（顾问窗口维护的 D-3 提示词锚点）diff，不视为本轮源码改动。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+- 临时分类名称与 id：
+  - 名称：`__tmp_d3_category_1778843489`
+  - id：`8`
+- `add_category` 验证结果：
+  - `created category 8`，通过。
+- `get_category` 验证结果：
+  - `category exists True`，通过。
+- `update_category_fields` 验证结果：
+  - `updated True`，通过。
+- `soft_delete_category` 验证结果：
+  - `soft deleted True`，通过。
+- `hard_delete_category` 验证结果：
+  - `hard deleted True`，通过。
+- 清理后 `get_category(cat_id)` 是否返回 `None`：
+  - `after delete None`，通过。
+- 是否确认本轮未修改源码：
+  - 是。本轮仅执行验收写路径命令与日志记录。
+- schedule.db 是否无 tracked diff：
+  - `git diff --name-only -- schedule.db` -> 无输出。
+- diff 范围检查结果：
+  - `src/data`、`src/repositories`、`src/ui`、`main.py`、`requirements.txt`、`schedule.db` 均无 diff。
+  - 最终仅管理文档有 diff。
+- 未完成事项：
+  - D-4 待继续。
+- 风险或疑点：
+  - 分类临时数据已清理；未发现 `schedule.db` tracked diff。
+
+### 2026-05-15 第二轮 D-4（日程写路径临时验收）
+
+- 本轮任务名称：第二轮 D-4（日程写路径临时验收）。
+- 开工前是否已有管理文档 diff：
+  - 有。开工前已有 `manage_instruction/Work_Task_Prompts.md`（顾问窗口维护的 D-4 提示词锚点）diff，不视为本轮源码改动。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+- 是否存在可安全恢复的日程样本：
+  - 是。样本数量 `75`，样本 id `72`。
+- `update_schedule_status` 写入/恢复验证结果：
+  - 原值 `status=0`，测试写入值 `1`，输出 `status write/restore True True`，恢复结果 `restored status 0`，通过。
+- `toggle_pin_status` 切换/恢复验证结果：
+  - 原值 `is_pinned=False`，输出 `pin toggle/restore True True`，恢复结果 `restored pin False`，通过。
+- `update_schedule_fields` 临时 title 写入/恢复验证结果：
+  - 原值 `title=测试`，临时值 `测试__d4_tmp_1778843910`，输出 `temp title set True`、`title temp/restore True True`，恢复结果 `restored title 测试`，通过。
+- 临时日程名称与 id：
+  - 名称：`__tmp_d4_schedule_1778843910`
+  - id：`83`
+- `add_schedule` 验证结果：
+  - `created schedule True`、`matches 1`，通过。
+- `delete_schedule` 验证结果：
+  - `deleted schedule True`，通过。
+- 删除后是否查询不到临时 id：
+  - `remaining 0`，删除后查询不到该临时 id。
+- schedule.db 是否无 tracked diff：
+  - `git diff --name-only -- schedule.db` -> 无输出。
+- diff 范围检查结果：
+  - `src/data`、`src/repositories`、`src/ui`、`main.py`、`requirements.txt`、`schedule.db` 均无 diff。
+  - 最终仅管理文档有 diff。
+- 未完成事项：
+  - D-5 待继续。
+- 风险或疑点：
+  - 真实样本已恢复，临时日程已清理；未发现 `schedule.db` tracked diff。
+
+### 2026-05-15 第二轮 D-5（GUI smoke 与第二轮整体验收收口）
+
+- 本轮任务名称：第二轮 D-5（GUI smoke 与第二轮整体验收收口）。
+- 开工前是否已有管理文档 diff：
+  - 有。开工前已有 `manage_instruction/Work_Task_Prompts.md`（顾问窗口维护的 D-5 提示词锚点）diff，不视为本轮源码改动。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+- D-1 结论汇总（静态边界与 import）：
+  - 通过。`connection/models/database/repositories/db_manager` 可 import，`db` 对象与 `DB_PATH` 一致；repository 边界无 `db_manager/UI/src.data.database` 残留依赖。
+- D-2 结论汇总（读路径回归）：
+  - 通过。`get_all_schedules/get_schedules_for_date/get_active_categories/get_category_map` 返回类型正确；分类与日程样本读取可用。
+- D-3 结论汇总（分类写路径临时验收）：
+  - 通过。`add/get/update/soft_delete/hard_delete` 路径可用，删除后 `get_category(cat_id)` 返回 `None`，临时数据已清理。
+- D-4 结论汇总（日程写路径临时验收）：
+  - 通过。样本 `status/is_pinned/title` 写回并恢复成功；临时日程创建删除成功且删除后查询不到，临时数据已清理。
+- 最小 import 复跑结果：
+  - 输出：`imports ok` / `same db object: True` / `same DB_PATH: True` / `repos ok: True True` / `db_manager ok: True`
+  - 结论：通过。
+- 最小读路径复跑结果：
+  - 输出：`all 75 list` / `today 8 list` / `cats 7 list` / `cmap 7 dict`
+  - 断言：四条读路径返回类型验证通过。
+- GUI smoke test 结果：
+  - 输出：`gui smoke ok`
+  - 备注：出现 `libpng warning: tRNS: invalid with alpha channel`，不影响 smoke 通过；无需 `import main` 兜底。
+- diff 范围检查结果：
+  - `src/data`、`src/repositories`、`src/ui`、`main.py`、`requirements.txt`、`schedule.db` 均无 diff。
+  - 最终仅管理文档有 diff。
+- 是否可以归档第二轮并进入第三轮规划：
+  - 可以。第二轮 D（D-1~D-5）验收收口通过，且第二轮整体可归档，可进入第三轮规划。
+- 当前进度估算：
+  - 按 `Work_Formulation.md` 至少 8 轮架构迁移口径：D-5 通过后约 `25%`。
+  - 若把第九轮及后续新功能轮纳入总目标：当前约 `22%`，且后续功能范围未完全定稿。
+- 未完成事项：
+  - 第二轮归档后等待第三轮规划。
+- 风险或疑点：
+  - 归档前最终总检查通过；源码与 `schedule.db` 范围保持干净。
