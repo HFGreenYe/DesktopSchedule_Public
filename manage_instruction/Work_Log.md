@@ -174,3 +174,61 @@
 - 风险或疑点：
   - 本轮仅建立边界，后续实现时需逐视图比对排序结果，避免 UI 可见顺序回归。
   - 给定 import 验证命令在当前环境存在 `importlib.util` 调用兼容问题，已用等价命令完成验证。
+
+## 2026-05-17 第三轮 3-2a（ScheduleQueryService 日期过滤纯逻辑抽取）
+
+- 本轮任务名称：第三轮 3-2a（ScheduleQueryService 日期过滤纯逻辑抽取）。
+- 开工前是否已有管理文档 diff：
+  - 有。开工前已有 `manage_instruction/Work_Task_Prompts.md`（顾问窗口维护的 3-2a 提示词锚点）diff，不视为本轮源码改动。
+- 实际修改文件：
+  - `src/services/schedule_query_service.py`
+  - `src/repositories/schedule_repository.py`
+  - `manage_instruction/Work_Log.md`
+- 开工前基线命令和输出摘要：
+  - 命令：`python -c "... db_manager.get_schedules_for_date(d) ..."`（昨天/今天/明天）
+  - 输出：
+    - `2026-05-16 [8, 9, 10, 11, 12, 13, 14, 15]`
+    - `2026-05-17 [8, 9, 10, 11, 12, 13, 14, 15]`
+    - `2026-05-18 [8, 9, 10, 11, 12, 13, 14, 15]`
+- 实现的 service 方法：
+  - 在 `ScheduleQueryService.filter_for_date(items, target_date)` 中实现了旧 Repository 日期过滤规则：
+    - `item_type == "todo"` 且无 `end_time` 保留。
+    - 同时有 `start_time/end_time` 时，`start_date <= target_date <= end_date` 保留。
+    - 仅有 `end_time` 时，`end_date == target_date` 保留。
+    - 其余（无 `end_time`）保留。
+  - 方法输入 iterable，输出 list；不访问数据库，不依赖 UI/db_manager/Repository。
+- Repository 委托方式：
+  - `ScheduleRepository.get_schedules_for_date(target_date)` 仍先执行 `self._schedule_model.select()`，再调用 `ScheduleQueryService.filter_for_date(all_data, target_date)` 生成 `filtered`。
+- 排序逻辑迁移说明：
+  - 本轮未迁移排序逻辑，`get_schedules_for_date` 内现有排序逻辑保持在 Repository。
+- `split_schedule_and_todo` 状态说明：
+  - 未实现，保持 3-1 的占位状态，留给后续 3-2b。
+- 修改后同一日期 id 顺序是否与基线一致：
+  - 一致。改后输出：
+    - `2026-05-16 [8, 9, 10, 11, 12, 13, 14, 15]`
+    - `2026-05-17 [8, 9, 10, 11, 12, 13, 14, 15]`
+    - `2026-05-18 [8, 9, 10, 11, 12, 13, 14, 15]`
+- service import / direct call 验证结果：
+  - `service filter ok True 8`（返回 list，长度 8）。
+- 旧 `db_manager.get_schedules_for_date` 验证结果：
+  - `db_manager path ok True 8`（返回 list，长度 8）。
+- 静态依赖检查结果：
+  - 命令：`rg -n "QWidget|PyQt|PySide|src\.ui|db_manager|src\.repositories|ScheduleRepository|CategoryRepository" src/services/schedule_query_service.py`
+  - 结果：无输出（退出码 1，符合预期）。
+- 本轮未误动其他 service 检查：
+  - `git diff --name-only -- src/services/schedule_sort_service.py` -> 无输出。
+  - `git diff --name-only -- src/services/category_policy_service.py` -> 无输出。
+  - `git diff --name-only -- src/services/weather_service.py` -> 无输出。
+- diff 范围检查结果：
+  - `git diff --name-only -- src/data` -> 无输出。
+  - `git diff --name-only -- src/ui` -> 无输出。
+  - `git diff --name-only -- main.py` -> 无输出。
+  - `git diff --name-only -- requirements.txt` -> 无输出。
+  - `git diff --name-only -- schedule.db` -> 无输出。
+  - `git diff --name-only` -> 验证时为 `manage_instruction/Work_Task_Prompts.md`、`src/repositories/schedule_repository.py`、`src/services/schedule_query_service.py`；写入本日志后另含 `manage_instruction/Work_Log.md`。
+  - `git status --short --branch` -> 验证时为 `M manage_instruction/Work_Task_Prompts.md`、`M src/repositories/schedule_repository.py`、`M src/services/schedule_query_service.py`；写入本日志后另含 `M manage_instruction/Work_Log.md`。
+- 未完成事项：
+  - 等待顾问窗口复核并下发 3-2b 或 3-3 工单。
+- 风险或疑点：
+  - 本轮仅迁移过滤，不迁移排序；后续 3-3 需确保排序抽取后顺序不变。
+  - `item_type` 仍按旧语义直接读取对象属性，保持与原 Repository 行为一致。
