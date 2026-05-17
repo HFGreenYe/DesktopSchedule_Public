@@ -495,3 +495,69 @@
   - 等待顾问窗口复核，并下发 3-4b（删除策略抽取）工单。
 - 风险或疑点：
   - 当前数据样本已覆盖 `active/historical/empty/missing`，但并未人为构造边界时间样本；`end_time == now` 的语义沿用旧逻辑（不视为过期）。
+
+## 2026-05-17 第三轮 3-4b（CategoryPolicyService 分类删除动作决策抽取）
+
+- 本轮任务名称：第三轮 3-4b（CategoryPolicyService 分类删除动作决策抽取）。
+- 开工前是否已有管理文档 diff：
+  - 有。开工前已有 `manage_instruction/Work_Task_Prompts.md`（顾问窗口维护的 3-4b 提示词锚点）diff，不视为本轮源码改动。
+- 实际修改文件：
+  - `src/services/category_policy_service.py`
+  - `src/ui/list_picker.py`
+  - `src/ui/todo_board.py`
+  - `manage_instruction/Work_Log.md`
+- 开工前动作映射基线：
+  - `baseline actions {'active': 'block', 'historical': 'soft_delete', 'empty': 'hard_delete'}`
+- 实现的 `CategoryPolicyService.choose_delete_action` 逻辑：
+  - 输入支持 `CategoryStatus` 或旧字符串状态。
+  - 映射：
+    - `active` -> `CategoryDeleteAction.BLOCK`
+    - `historical` -> `CategoryDeleteAction.SOFT_DELETE`
+    - `empty` -> `CategoryDeleteAction.HARD_DELETE`
+- 未知状态兜底策略：
+  - 返回 `CategoryDeleteAction.BLOCK`，避免异常中断 UI 删除流程。
+- `list_picker.py` 替换了哪一处分支判断：
+  - `_delete_category_logic` 中 `status == 'active'/'historical'/else` 改为 `action == CategoryDeleteAction.BLOCK/SOFT_DELETE/else(HARD_DELETE)`。
+- `todo_board.py` 替换了哪两处分支判断：
+  - `_delete_category`：状态字符串分支替换为 `CategoryDeleteAction` 分支。
+  - `_handle_folder_delete`：状态字符串分支替换为 `CategoryDeleteAction` 分支。
+- 明确记录：未修改 Repository。
+- 明确记录：未修改 `soft_delete_category` / `hard_delete_category`。
+- 明确记录：未修改 `db_manager` API。
+- 明确记录：未改 UI 文案、布局、交互流程。
+- 修改后 active / historical / empty 动作映射是否与基线一致：
+  - 一致。
+  - `actual {'active': 'block', 'historical': 'soft_delete', 'empty': 'hard_delete'}`
+  - `enum_actual {'active': 'block', 'historical': 'soft_delete', 'empty': 'hard_delete'}`
+- 当前分类状态到动作映射验证结果：
+  - `rows [(7,'测试','historical','soft_delete'), (1,'尚书令','active','block'), (2,'中书监','active','block'), (4,'司徒','active','block'), (6,'太尉','active','block'), (5,'司空','active','block'), (3,'散骑常侍','empty','hard_delete'), (-999999,'missing','empty','hard_delete')]`
+- `db_manager.check_category_status` 返回字符串验证结果：
+  - 输出 `values ['historical', 'active', 'active', 'active', 'active', 'empty']`。
+  - 全部为 `str`，且均在 `{'empty','active','historical'}`。
+- 静态依赖检查结果：
+  - 命令：`rg -n "QWidget|PyQt|PySide|src\.ui|db_manager|src\.repositories|CategoryRepository|ScheduleRepository" src/services/category_policy_service.py`
+  - 结果：无输出（退出码 1，符合预期）。
+- UI 引用检查结果：
+  - `list_picker.py`、`todo_board.py` 命中 `CategoryPolicyService` / `CategoryDeleteAction`（符合预期）。
+  - 未命中 `src.repositories`。
+  - 未新增 `CategoryStatus` UI 直接依赖。
+- py_compile 结果：
+  - `python -m py_compile src/services/category_policy_service.py src/ui/list_picker.py src/ui/todo_board.py` 通过（无输出）。
+- diff 范围检查结果：
+  - `git diff --name-only -- src/repositories` -> 无输出。
+  - `git diff --name-only -- src/data` -> 无输出。
+  - `git diff --name-only -- src/ui/dashboard.py` -> 无输出。
+  - `git diff --name-only -- src/ui/week_window.py` -> 无输出。
+  - `git diff --name-only -- src/ui/todo.py` -> 无输出。
+  - `git diff --name-only -- src/services/schedule_query_service.py` -> 无输出。
+  - `git diff --name-only -- src/services/schedule_sort_service.py` -> 无输出。
+  - `git diff --name-only -- src/services/weather_service.py` -> 无输出。
+  - `git diff --name-only -- main.py` -> 无输出。
+  - `git diff --name-only -- requirements.txt` -> 无输出。
+  - `git diff --name-only -- schedule.db` -> 无输出。
+  - `git diff --name-only` -> `manage_instruction/Work_Task_Prompts.md`、`src/services/category_policy_service.py`、`src/ui/list_picker.py`、`src/ui/todo_board.py`（写入本日志后另含 `manage_instruction/Work_Log.md`）。
+  - `git status --short --branch` -> `M manage_instruction/Work_Task_Prompts.md`、`M src/services/category_policy_service.py`、`M src/ui/list_picker.py`、`M src/ui/todo_board.py`（写入本日志后另含 `M manage_instruction/Work_Log.md`）。
+- 未完成事项：
+  - 等待顾问窗口复核并下发下一小工单。
+- 风险或疑点：
+  - 未知状态目前统一拦截（BLOCK）是保守策略；若后续引入新状态，需要同步更新策略映射与产品文案。

@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QTimer, QSize
 from PyQt6.QtGui import QColor, QAction, QCursor, QPainter, QPen, QIcon
 from ..data.database import db_manager
+from ..services.category_policy_service import CategoryDeleteAction, CategoryPolicyService
 from ..utils.styles import StyleManager
 
 # 复用气泡提示
@@ -355,12 +356,13 @@ class ListPickerView(QWidget):
     # 删除状态拦截逻辑
     def _delete_category_logic(self, cat_id, cat_name):
         status = db_manager.check_category_status(cat_id)
+        action = CategoryPolicyService.choose_delete_action(status)
         
-        if status == 'active':
+        if action == CategoryDeleteAction.BLOCK:
             # 存在有效日程，报错拦截
             self._show_tooltip("🚫 该清单存在有效日程，无法删除！", is_error=True)
             
-        elif status == 'historical':
+        elif action == CategoryDeleteAction.SOFT_DELETE:
             # 存在历史日程，二次确认
             reply = QMessageBox.question(
                 self, '确认删除', 

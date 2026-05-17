@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import datetime
 from enum import Enum
-from typing import Iterable, TypeVar
+from typing import Iterable, TypeVar, Union
 
 
 T = TypeVar("T")
@@ -49,6 +49,17 @@ class CategoryPolicyService:
         return CategoryStatus.HISTORICAL
 
     @staticmethod
-    def choose_delete_action(status: CategoryStatus) -> CategoryDeleteAction:
+    def choose_delete_action(status: Union[CategoryStatus, str]) -> CategoryDeleteAction:
         """Map status to delete action with legacy-compatible semantics."""
-        raise NotImplementedError("Implemented in round 3-4.")
+        if isinstance(status, CategoryStatus):
+            normalized = status.value
+        else:
+            normalized = str(status)
+
+        if normalized == CategoryStatus.ACTIVE.value:
+            return CategoryDeleteAction.BLOCK
+        if normalized == CategoryStatus.HISTORICAL.value:
+            return CategoryDeleteAction.SOFT_DELETE
+        if normalized == CategoryStatus.EMPTY.value:
+            return CategoryDeleteAction.HARD_DELETE
+        return CategoryDeleteAction.BLOCK

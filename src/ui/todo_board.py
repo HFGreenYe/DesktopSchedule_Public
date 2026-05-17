@@ -8,6 +8,7 @@ from PyQt6.QtSvg import QSvgRenderer
 
 from ..config import AppConfig
 from ..data.database import db_manager 
+from ..services.category_policy_service import CategoryDeleteAction, CategoryPolicyService
 from ..services.schedule_query_service import ScheduleQueryService
 from ..services.schedule_sort_service import ScheduleSortService
 from .list_picker import ListPickerView
@@ -976,9 +977,10 @@ class ManageListView(QWidget):
     def _delete_category(self, cat_id, cat_name):
         from PyQt6.QtWidgets import QMessageBox
         status = db_manager.check_category_status(cat_id)
-        if status == 'active':
+        action = CategoryPolicyService.choose_delete_action(status)
+        if action == CategoryDeleteAction.BLOCK:
             if hasattr(self.window(), 'show_toast'): self.window().show_toast("🚫 该清单存在有效待办，无法删除！")
-        elif status == 'historical':
+        elif action == CategoryDeleteAction.SOFT_DELETE:
             reply = QMessageBox.question(self, '确认删除', f"清单【{cat_name}】包含历史待办。\n是否继续？", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             if reply == QMessageBox.StandardButton.Yes:
                 db_manager.soft_delete_category(cat_id)
@@ -2023,11 +2025,12 @@ class TodoBoardWindow(QWidget):
         
         # 查询该文件夹的状态 (active=有未完成待办, historical=有已完成/过期待办, empty=完全空)
         status = db_manager.check_category_status(cat_id)
+        action = CategoryPolicyService.choose_delete_action(status)
         
-        if status == 'active':
+        if action == CategoryDeleteAction.BLOCK:
             # 非灰色（有待办）拦截
             self.show_toast("🚫 该文件夹存在有效待办，无法直接删除！")
-        elif status == 'historical':
+        elif action == CategoryDeleteAction.SOFT_DELETE:
             # 包含历史记录
             reply = QMessageBox.question(
                 self, '确认删除', 
