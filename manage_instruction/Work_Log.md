@@ -372,3 +372,66 @@
   - 等待顾问窗口复核并下发 3-3b（todo_board 专项）工单。
 - 风险或疑点：
   - 本轮仅抽取 day/week/todo 同构排序；`todo_board` 的差异化排序与写回仍待 3-3b 单独处理。
+
+## 2026-05-17 第三轮 3-3b（todo_board 主看板渲染排序抽取）
+
+- 本轮任务名称：第三轮 3-3b（todo_board 主看板渲染排序抽取）。
+- 开工前是否已有管理文档 diff：
+  - 有。开工前已有 `manage_instruction/Work_Task_Prompts.md`（顾问窗口维护的 3-3b 提示词锚点）diff，不视为本轮源码改动。
+- 实际修改文件：
+  - `src/services/schedule_sort_service.py`
+  - `src/ui/todo_board.py`
+  - `manage_instruction/Work_Log.md`
+- 开工前 todo_board 主排序 id 基线输出摘要：
+  - `baseline todo_board [8, 10, 14, 15, 11, 12, 9, 13]`
+- 实现的 `ScheduleSortService.sort_for_todo_board` 方法：
+  - 返回 `sorted(list(items), key=(rank_pin, sort_val))` 新 list。
+  - key 语义保持旧逻辑：
+    - `rank_pin = 0 if is_pinned else 1`
+    - `sort_val = -sort_order`
+- `todo_board.py` 替换了哪一处排序：
+  - 主渲染路径中 `todos` 生成后原内联 `sort_key + todos.sort(key=sort_key)` 替换为：
+  - `todos = ScheduleSortService.sort_for_todo_board(todos)`
+- 明确记录：未修改 `_sort_by_priority`。
+- 明确记录：未修改 priority 排序和 `sort_order` 写回逻辑。
+- 明确记录：未修改 dashboard/week/todo。
+- 明确记录：未修改 `ScheduleQueryService`。
+- 修改后 todo_board 主排序 id 是否与基线一致：
+  - `after todo_board [8, 10, 14, 15, 11, 12, 9, 13]`（一致）。
+- `sort_for_todo_board` 是否返回新 list 且不原地修改输入：
+  - `returns list True`
+  - `new object True`
+  - `input unchanged True`
+- service import / direct call 验证结果：
+  - `day True` / `week True` / `todo True` / `board True`
+- 旧 `db_manager.get_schedules_for_date` 验证结果：
+  - `db_manager path ok True 8`
+- 静态依赖检查结果：
+  - 命令：`rg -n "QWidget|PyQt|PySide|src\.ui|db_manager|src\.repositories|ScheduleRepository|CategoryRepository" src/services/schedule_sort_service.py`
+  - 结果：无输出（退出码 1，符合预期）。
+- `todo_board.py` 引用检查结果：
+  - 命中 `ScheduleSortService`：`src/ui/todo_board.py:12`、`1318`。
+  - 未命中 `CategoryPolicyService` 与 `src.repositories`。
+- `_sort_by_priority` 检查结果：
+  - `def _sort_by_priority` 及其 priority 排序、`update_schedule_fields(sort_order=...)` 仍在原位置，未参与本轮改动。
+- 本轮未误动其他 UI / service：
+  - `git diff --name-only -- src/ui/dashboard.py` -> 无输出。
+  - `git diff --name-only -- src/ui/week_window.py` -> 无输出。
+  - `git diff --name-only -- src/ui/todo.py` -> 无输出。
+  - `git diff --name-only -- src/services/schedule_query_service.py` -> 无输出。
+  - `git diff --name-only -- src/services/category_policy_service.py` -> 无输出。
+  - `git diff --name-only -- src/services/weather_service.py` -> 无输出。
+- py_compile 结果：
+  - `python -m py_compile src/services/schedule_sort_service.py src/ui/todo_board.py` 通过（无输出）。
+- diff 范围检查结果：
+  - `git diff --name-only -- src/repositories` -> 无输出。
+  - `git diff --name-only -- src/data` -> 无输出。
+  - `git diff --name-only -- main.py` -> 无输出。
+  - `git diff --name-only -- requirements.txt` -> 无输出。
+  - `git diff --name-only -- schedule.db` -> 无输出。
+  - `git diff --name-only` -> `manage_instruction/Work_Task_Prompts.md`、`src/services/schedule_sort_service.py`、`src/ui/todo_board.py`（写入本日志后另含 `manage_instruction/Work_Log.md`）。
+  - `git status --short --branch` -> `M manage_instruction/Work_Task_Prompts.md`、`M src/services/schedule_sort_service.py`、`M src/ui/todo_board.py`（写入本日志后另含 `M manage_instruction/Work_Log.md`）。
+- 未完成事项：
+  - 等待顾问窗口复核并下发 3-4 工单。
+- 风险或疑点：
+  - 本轮只抽主看板渲染排序；`_sort_by_priority` 与拖拽写回逻辑仍为历史实现，后续若要统一需单独工单。

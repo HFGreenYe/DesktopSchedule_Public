@@ -40,4 +40,10 @@ class ScheduleSortService:
     @staticmethod
     def sort_for_todo_board(items: Iterable[T]) -> List[T]:
         """Sort rule for todo board read path (legacy-compatible)."""
-        raise NotImplementedError("Implemented in round 3-3.")
+        return sorted(
+            list(items),
+            key=lambda item: (
+                0 if getattr(item, "is_pinned", False) else 1,
+                -getattr(item, "sort_order", 0.0),
+            ),
+        )

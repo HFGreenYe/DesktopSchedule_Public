@@ -9,6 +9,7 @@ from PyQt6.QtSvg import QSvgRenderer
 from ..config import AppConfig
 from ..data.database import db_manager 
 from ..services.schedule_query_service import ScheduleQueryService
+from ..services.schedule_sort_service import ScheduleSortService
 from .list_picker import ListPickerView
 # ==========================================
 # SVG 高清渲染与染色 
@@ -1314,12 +1315,7 @@ class TodoBoardWindow(QWidget):
                     continue # 过滤掉非当前文件夹的待办
             todos.append(s)
                 
-        def sort_key(item):
-            rank_pin = 0 if getattr(item, 'is_pinned', False) else 1
-            sort_val = -getattr(item, 'sort_order', 0.0) 
-            return (rank_pin, sort_val)
-
-        todos.sort(key=sort_key)
+        todos = ScheduleSortService.sort_for_todo_board(todos)
         self.current_todos = todos
 
         # 处理所有“清单(文件夹)”数据
