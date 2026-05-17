@@ -631,3 +631,79 @@
 - 风险或疑点：
   - 在未统一 `priority` 语义前直接实现四象限服务，会把当前语义冲突固化为错误行为。
   - 目前 `end_time` 主要用于日期过滤与过期判断，若直接映射“紧急性”可能导致大量误分。
+
+## 2026-05-17 第三轮 3-6（第三轮整体验收与归档准备）
+
+- 本轮任务名称：第三轮 3-6（第三轮整体验收与归档准备）。
+- 开工前是否已有管理文档 diff：
+  - 有。开工前已有 `manage_instruction/Work_Task_Prompts.md`（顾问窗口维护的 3-6 提示词锚点）diff，不视为本轮源码改动。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+- 第三轮完成项汇总：
+  - `3-0`：静态审查与旧逻辑定位完成。
+  - `3-1`：`ScheduleQueryService`/`ScheduleSortService`/`CategoryPolicyService` 服务边界建立完成。
+  - `3-2a`：日期过滤逻辑抽取到 `ScheduleQueryService.filter_for_date` 完成。
+  - `3-2b`：日程/待办判定与 `split_schedule_and_todo` 抽取完成。
+  - `3-3a`：day/week/todo 同构排序抽取完成。
+  - `3-3b`：todo_board 主看板渲染排序抽取完成（不含 `_sort_by_priority`）。
+  - `3-4a`：分类状态判断抽取完成。
+  - `3-4b`：分类删除动作决策抽取完成。
+  - `3-5`：四象限规则评估完成，确认暂不创建 matrix service。
+- service import 验证结果：
+  - 命令：`from src.services.schedule_query_service import ScheduleQueryService; from src.services.schedule_sort_service import ScheduleSortService; from src.services.category_policy_service import CategoryPolicyService, CategoryStatus, CategoryDeleteAction`
+  - 输出：`service imports ok`。
+- service 静态依赖检查结果：
+  - 命令：`rg -n "QWidget|PyQt|PySide|src\.ui|db_manager|src\.repositories|ScheduleRepository|CategoryRepository" src/services/schedule_query_service.py src/services/schedule_sort_service.py src/services/category_policy_service.py`
+  - 结果：无输出（退出码 1，符合预期，视为通过）。
+- 旧 `db_manager` 路径验证结果：
+  - `all schedules 75`
+  - `today schedules 8`
+  - `active categories 7`
+  - `missing category status empty`
+  - 返回类型断言通过（list/list/list + 状态字符串集合）。
+- UI import 验证结果：
+  - 命令：`importlib.import_module` 导入 `src.ui.dashboard/week_window/todo/todo_board/list_picker`。
+  - 输出：`ui imports ok ['src.ui.dashboard', 'src.ui.week_window', 'src.ui.todo', 'src.ui.todo_board', 'src.ui.list_picker']`。
+- 日期过滤验证结果：
+  - 输出：`date filter rows [('2026-05-16',[8,9,10,11,12,13,14,15]), ('2026-05-17',[8,9,10,11,12,13,14,15]), ('2026-05-18',[8,9,10,11,12,13,14,15])]`。
+  - 结论：路径可用，返回结构正确。
+- 日程/待办判定验证结果：
+  - 输出：`split 67 8`。
+  - 输出样例：`sample [(72, False, True), (73, False, True), (74, False, True), (75, False, True), (76, False, True)]`。
+  - 结论：`is_todo/is_schedule/split_schedule_and_todo` 可用。
+- 排序关键结果验证：
+  - `dashboard sorted []`
+  - `week sorted []`
+  - `todo sorted [8, 10, 14, 15, 11, 12, 9, 13]`
+  - `board sorted [8, 10, 14, 15, 11, 12, 9, 13]`
+  - 结论：与第三轮既有日志基线一致。
+- 排序方法是否返回新 list 且不原地修改输入：
+  - `sort list behavior [('sort_for_day_view', True, True, True), ('sort_for_week_view', True, True, True), ('sort_for_todo_list', True, True, True), ('sort_for_todo_board', True, True, True)]`
+  - 结论：四个排序方法均返回新 list，且不改输入列表。
+- 分类状态和删除动作映射验证结果：
+  - 输出：`category rows [(7,'测试','historical','soft_delete'), (1,'尚书令','active','block'), (2,'中书监','active','block'), (4,'司徒','active','block'), (6,'太尉','active','block'), (5,'司空','active','block'), (3,'散骑常侍','empty','hard_delete'), (-999999,'missing','empty','hard_delete')]`。
+  - 结论：`active->block`、`historical->soft_delete`、`empty->hard_delete` 映射正确。
+- `db_manager.check_category_status` 返回字符串验证结果：
+  - 输出：`category status values ['historical', 'active', 'active', 'active', 'active', 'empty']`。
+  - 结论：仍为字符串且仅在 `{empty, active, historical}`。
+- `matrix_classification_service.py` 是否未创建：
+  - `Test-Path src\services\matrix_classification_service.py` -> `False`。
+  - `rg -n "matrix_classification_service|MatrixClassificationService" src manage_instruction` 仅命中管理文档，不命中 `src/` 实际实现。
+- 四象限规则缺口是否已记录：
+  - 已记录于 3-5：规则不足，暂不创建 service，不接 UI，不实现新功能。
+- py_compile 结果：
+  - `python -m py_compile src/services/schedule_query_service.py src/services/schedule_sort_service.py src/services/category_policy_service.py src/repositories/schedule_repository.py src/repositories/category_repository.py src/ui/dashboard.py src/ui/week_window.py src/ui/todo.py src/ui/todo_board.py src/ui/list_picker.py` 通过（无输出）。
+- diff 范围检查结果：
+  - `git diff --name-only -- src` -> 无输出。
+  - `git diff --name-only -- main.py` -> 无输出。
+  - `git diff --name-only -- requirements.txt` -> 无输出。
+  - `git diff --name-only -- schedule.db` -> 无输出。
+  - `git diff --name-only` -> `manage_instruction/Work_Task_Prompts.md`（写入本日志后另含 `manage_instruction/Work_Log.md`）。
+  - `git status --short --branch` -> `M manage_instruction/Work_Task_Prompts.md`（写入本日志后另含 `M manage_instruction/Work_Log.md`）。
+- 第三轮是否可归档：
+  - 可归档。
+  - 依据：第三轮 3-0~3-5 目标均完成，3-6 复核通过，且本轮确认 `src`、`main.py`、`requirements.txt`、`schedule.db` 无 diff。
+- 未完成事项：
+  - 等待顾问窗口复核 3-6 记录并给出归档/下轮（第四轮）指令。
+- 风险或疑点：
+  - 四象限功能仍无稳定规则合同，下一轮若推进实现，需先统一 `priority` 语义与“重要/紧急”双轴判定标准。

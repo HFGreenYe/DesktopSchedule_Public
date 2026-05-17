@@ -1,40 +1,32 @@
-请执行第三轮 3-5：四象限纯逻辑评估与最小服务准备。本轮以评估为主，默认不创建 service；只有确认存在稳定规则时，才允许创建最小纯逻辑 service。
+请执行第三轮 3-6：第三轮整体验收与归档准备。本轮只做整体验收和日志记录，不修改源码，不写数据库。
 
 ## 1. 本轮目标
 
-基于 `manage_instruction/Work_Instruction.md` 第三轮合同，以及 `Work_Log.md` 中 3-0 到 3-4b 的结论，重新审查当前项目里的四象限相关入口、文案、字段和 priority 使用方式，判断是否具备实现 `matrix_classification_service.py` 的稳定规则基础。
+汇总并验证第三轮 3-0 到 3-5 的全部结果，确认第三轮“纯业务查询与排序服务”可以归档。
 
-本轮核心问题：
+本轮验收范围：
 
-- 当前是否已有稳定四象限分类规则？
-- 现有字段是否足够支撑稳定规则？
-- `priority` 当前语义是“紧急性/重要性/优先级”中的哪一种，是否一致？
-- 是否应该在本轮创建 `matrix_classification_service.py`？
-- 如果规则不足，应明确记录“不创建，不实现，缺口留待后续轮次”。
+- `ScheduleQueryService`
+- `ScheduleSortService`
+- `CategoryPolicyService`
+- 旧 `db_manager` 调用路径
+- 已替换的 UI import 路径
+- 查询、过滤、排序、分类状态、删除动作映射关键结果
+- 四象限评估结论
+- diff 范围
 
-本轮不接四象限 UI，不实现新功能，不写数据库。
+本轮不实现新功能，不修改源码，不写 `schedule.db`。
 
 ## 2. 允许/禁止
 
-本轮默认允许修改：
+本轮允许修改：
 
 - `manage_instruction/Work_Log.md`
 - `manage_instruction/Work_Task_Prompts.md`（仅在需要维护本轮复核锚点时）
 
-仅当确认存在稳定四象限纯逻辑规则时，额外允许新增：
-
-- `src/services/matrix_classification_service.py`
-
 本轮禁止修改：
 
-- `src/ui/`
-- `src/data/`
-- `src/repositories/`
-- `src/services/schedule_query_service.py`
-- `src/services/schedule_sort_service.py`
-- `src/services/category_policy_service.py`
-- `src/services/weather_service.py`
-- `src/services/__init__.py`（除非创建 matrix service 且确有轻量导出必要；默认不改）
+- `src/`
 - `main.py`
 - `requirements.txt`
 - `schedule.db`
@@ -43,104 +35,117 @@
 
 禁止事项：
 
+- 不修改任何 Python 源码。
+- 不修改 UI。
+- 不修改 Data / Repository / Service 代码。
+- 不创建 `matrix_classification_service.py`。
 - 不接四象限 UI。
-- 不修改任何 UI 文件。
-- 不新增数据库字段。
-- 不修改 `priority` 语义。
-- 不修改现有排序、查询、过滤、分类策略。
-- 不修改 Repository 或 Data 层。
-- 不修改 `db_manager` API。
-- 不写 `schedule.db`。
-- 不伪实现四象限功能。
-- 不为了创建文件而创建空壳 service。
-- 不改变现有用户可见行为。
+- 不写数据库。
+- 不提交 Git。
+- 不改变任何业务行为。
 
 若开工前已有管理文档 diff，需在 `Work_Log.md` 中单独记录，不视为本轮源码改动。
 
 ## 3. 具体任务
 
 1. 读取 `manage_instruction/Work_Instruction.md` 第三轮合同。
-2. 读取 `manage_instruction/Work_Log.md` 中 3-0 到 3-4b 结论。
-3. 静态审查以下文件中的四象限入口、文案、字段和 priority 使用：
-   - `src/ui/dashboard.py`
-   - `src/ui/week_window.py`
-   - `src/ui/month_window.py`
-   - `src/ui/main_window.py`
-   - `src/ui/todo_board.py`
-   - `src/data/models.py`
-4. 必须记录以下字段当前是否存在、当前含义是否明确：
-   - `priority`
-   - `start_time`
-   - `end_time`
-   - `status`
-   - `created_at`
-   - `sort_order`
-5. 判断当前是否存在稳定四象限规则，例如：
-   - 是否明确区分“重要/不重要”？
-   - 是否明确区分“紧急/不紧急”？
-   - `priority` 是否足以单独代表“重要性”？
-   - `start_time/end_time` 是否足以稳定代表“紧急性”？
-   - 当前 UI 文案是否已经表达完整规则？
-6. 如果规则不足：
-   - 不创建 `matrix_classification_service.py`。
-   - 只在 `Work_Log.md` 记录结论：暂不实现，缺口留待后续轮次。
-7. 如果确实发现已有稳定规则：
-   - 先在 `Work_Log.md` 说明依据。
-   - 最多创建 `src/services/matrix_classification_service.py`。
-   - 该 service 必须是纯逻辑，不依赖 UI、db_manager、Repository。
-   - 不接 UI，不写数据库，不新增字段。
-8. 更新 `Work_Log.md`。
+2. 读取 `manage_instruction/Work_Log.md` 中 3-0 到 3-5 结论。
+3. 汇总第三轮实际完成内容：
+   - 3-0 静态审查与旧逻辑定位。
+   - 3-1 service 边界建立。
+   - 3-2a 日期过滤抽取。
+   - 3-2b 日程/待办判定抽取。
+   - 3-3a day/week/todo 排序抽取。
+   - 3-3b todo_board 主排序抽取。
+   - 3-4a 分类状态判断抽取。
+   - 3-4b 分类删除动作决策抽取。
+   - 3-5 四象限规则评估，暂不创建 matrix service。
+4. 验证新增/修改 service 可 import。
+5. 验证 service 不依赖 UI / db_manager / Repository。
+6. 验证旧 `db_manager` 路径仍可用。
+7. 验证 UI import 可通过。
+8. 验证关键过滤、排序、分类状态、删除动作映射结果符合第三轮日志。
+9. 确认 `matrix_classification_service.py` 未创建。
+10. 确认 `src`、`main.py`、`requirements.txt`、`schedule.db` 无 diff。
+11. 在 `Work_Log.md` 记录第三轮是否可归档。
 
-## 4. 建议静态审查命令
+## 4. 验收命令
 
-读取第三轮合同和近期日志：
+读取合同和日志：
 
 Get-Content -Path manage_instruction\Work_Instruction.md -Encoding UTF8
 Get-Content -Path manage_instruction\Work_Log.md -Encoding UTF8
 
-定位四象限入口、文案和 priority 使用：
+验证 service import：
 
-rg -n "四象限|象限|priority|urgent|important|matrix|quadrant|重要|紧急" src/ui/dashboard.py src/ui/week_window.py src/ui/month_window.py src/ui/main_window.py src/ui/todo_board.py src/data/models.py
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.services.schedule_query_service import ScheduleQueryService; from src.services.schedule_sort_service import ScheduleSortService; from src.services.category_policy_service import CategoryPolicyService, CategoryStatus, CategoryDeleteAction; print('service imports ok')"
 
-读取重点文件相关内容：
+验证 service 不依赖 UI / db_manager / Repository：
 
-Get-Content -Path src\data\models.py -Encoding UTF8
-Get-Content -Path src\ui\dashboard.py -Encoding UTF8
-Get-Content -Path src\ui\week_window.py -Encoding UTF8
-Get-Content -Path src\ui\month_window.py -Encoding UTF8
-Get-Content -Path src\ui\main_window.py -Encoding UTF8
-Get-Content -Path src\ui\todo_board.py -Encoding UTF8
+rg -n "QWidget|PyQt|PySide|src\.ui|db_manager|src\.repositories|ScheduleRepository|CategoryRepository" src/services/schedule_query_service.py src/services/schedule_sort_service.py src/services/category_policy_service.py
 
-检查是否已有 matrix service：
+预期：无输出。若 `rg` 返回退出码 1 但无输出，视为通过。
 
-rg --files src/services
-rg -n "matrix|quadrant|四象限|象限" src/services src
+验证旧 `db_manager` 路径仍可用：
 
-## 5. 验收命令
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from datetime import date; from src.data.database import db_manager; print('all schedules', len(db_manager.get_all_schedules())); print('today schedules', len(db_manager.get_schedules_for_date(date.today()))); print('active categories', len(db_manager.get_active_categories())); print('missing category status', db_manager.check_category_status(-999999)); assert isinstance(db_manager.get_all_schedules(), list); assert isinstance(db_manager.get_schedules_for_date(date.today()), list); assert isinstance(db_manager.get_active_categories(), list); assert db_manager.check_category_status(-999999) in {'empty','active','historical'}"
 
-默认情况下，本轮不应创建源码文件。执行范围检查：
+验证 UI import 可通过：
 
-git diff --name-only -- src/ui
-git diff --name-only -- src/data
-git diff --name-only -- src/repositories
-git diff --name-only -- src/services/schedule_query_service.py
-git diff --name-only -- src/services/schedule_sort_service.py
-git diff --name-only -- src/services/category_policy_service.py
-git diff --name-only -- src/services/weather_service.py
-git diff --name-only -- src/services/__init__.py
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import importlib; mods=['src.ui.dashboard','src.ui.week_window','src.ui.todo','src.ui.todo_board','src.ui.list_picker']; [importlib.import_module(m) for m in mods]; print('ui imports ok', mods)"
+
+如果 UI import 因 Qt/GUI 环境限制失败，记录完整错误摘要，并继续执行后续 `py_compile` 作为语法兜底；不要修改源码规避环境问题。
+
+验证日期过滤路径仍可用：
+
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from datetime import date, timedelta; from src.data.database import db_manager; days=[date.today()+timedelta(days=i) for i in (-1,0,1)]; rows=[(d.isoformat(), [s.id for s in db_manager.get_schedules_for_date(d)]) for d in days]; print('date filter rows', rows); assert all(isinstance(ids, list) for _, ids in rows)"
+
+验证日程/待办判定与 split：
+
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; from src.services.schedule_query_service import ScheduleQueryService; items=db_manager.get_all_schedules(); schedules,todos=ScheduleQueryService.split_schedule_and_todo(items); print('split', len(schedules), len(todos)); print('sample', [(s.id, ScheduleQueryService.is_todo(s), ScheduleQueryService.is_schedule(s)) for s in items[:5]]); assert isinstance(schedules, list); assert isinstance(todos, list)"
+
+验证排序关键结果：
+
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from datetime import date; from src.data.database import db_manager; from src.services.schedule_query_service import ScheduleQueryService; from src.services.schedule_sort_service import ScheduleSortService; today=db_manager.get_schedules_for_date(date.today()); all_items=db_manager.get_all_schedules(); dashboard=[s for s in today if getattr(s,'status',0)!=2 and not ScheduleQueryService.is_todo(s)]; week=[s for s in today if ScheduleQueryService.is_schedule(s) and getattr(s,'status',0)!=2]; todo=[s for s in all_items if getattr(s,'status',0)!=2 and ScheduleQueryService.is_todo(s)]; board=[s for s in all_items if getattr(s,'status',0)!=2 and ScheduleQueryService.is_todo(s) and getattr(s,'status',0)==0]; print('dashboard sorted', [s.id for s in ScheduleSortService.sort_for_day_view(dashboard)]); print('week sorted', [s.id for s in ScheduleSortService.sort_for_week_view(week)]); print('todo sorted', [s.id for s in ScheduleSortService.sort_for_todo_list(todo)]); print('board sorted', [s.id for s in ScheduleSortService.sort_for_todo_board(board)])"
+
+验证排序方法返回新 list，不原地修改输入：
+
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; from src.services.schedule_sort_service import ScheduleSortService; items=list(db_manager.get_all_schedules()[:8]); original=[s.id for s in items]; funcs=[ScheduleSortService.sort_for_day_view, ScheduleSortService.sort_for_week_view, ScheduleSortService.sort_for_todo_list, ScheduleSortService.sort_for_todo_board]; results=[]; [results.append((f.__name__, isinstance(f(items), list), f(items) is not items, [s.id for s in items]==original)) for f in funcs]; print('sort list behavior', results); assert all(a and b and c for _,a,b,c in results)"
+
+验证分类状态和删除动作映射：
+
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; from src.services.category_policy_service import CategoryPolicyService, CategoryDeleteAction; cats=db_manager.get_active_categories(); rows=[(c.id,c.name,db_manager.check_category_status(c.id),CategoryPolicyService.choose_delete_action(db_manager.check_category_status(c.id)).value) for c in cats]; rows.append((-999999,'missing',db_manager.check_category_status(-999999),CategoryPolicyService.choose_delete_action(db_manager.check_category_status(-999999)).value)); print('category rows', rows); expected={'active':'block','historical':'soft_delete','empty':'hard_delete'}; assert all(status in expected for _,_,status,_ in rows); assert all(action==expected[status] for _,_,status,action in rows)"
+
+验证 `db_manager.check_category_status` 仍返回字符串：
+
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; cats=db_manager.get_active_categories(); ids=[c.id for c in cats[:5]]+[-999999]; vals=[db_manager.check_category_status(i) for i in ids]; print('category status values', vals); assert all(isinstance(v, str) for v in vals); assert all(v in {'empty','active','historical'} for v in vals)"
+
+确认 matrix service 未创建：
+
+Test-Path src\services\matrix_classification_service.py
+rg -n "matrix_classification_service|MatrixClassificationService" src manage_instruction
+
+预期：
+
+- `Test-Path` 输出 `False`。
+- `rg` 只能在管理文档/日志中命中“未创建/暂不实现”等记录，不应在 `src/` 中命中实际 service。
+
+语法检查：
+
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src\services\schedule_query_service.py src\services\schedule_sort_service.py src\services\category_policy_service.py src\repositories\schedule_repository.py src\repositories\category_repository.py src\ui\dashboard.py src\ui\week_window.py src\ui\todo.py src\ui\todo_board.py src\ui\list_picker.py
+
+范围检查：
+
+git diff --name-only -- src
 git diff --name-only -- main.py
 git diff --name-only -- requirements.txt
 git diff --name-only -- schedule.db
 git diff --name-only
 git status --short --branch
 
-默认预期：
+预期：
 
-- `src/ui` 无 diff。
-- `src/data` 无 diff。
-- `src/repositories` 无 diff。
-- 既有 service 无 diff。
-- `src/services/__init__.py` 无 diff。
+- `src` 无 diff。
 - `main.py` 无 diff。
 - `requirements.txt` 无 diff。
 - `schedule.db` 无 tracked diff。
@@ -148,51 +153,29 @@ git status --short --branch
   - `manage_instruction/Work_Log.md`
   - 必要时 `manage_instruction/Work_Task_Prompts.md`
 
-如果创建了 `src/services/matrix_classification_service.py`，必须额外执行：
-
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.services.matrix_classification_service import MatrixClassificationService; print('matrix service import ok', MatrixClassificationService)"
-
-rg -n "QWidget|PyQt|PySide|src\.ui|db_manager|src\.repositories|ScheduleRepository|CategoryRepository" src/services/matrix_classification_service.py
-
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src\services\matrix_classification_service.py
-
-并且 diff 范围最多允许：
-
-- `src/services/matrix_classification_service.py`
-- `manage_instruction/Work_Log.md`
-- 必要时 `manage_instruction/Work_Task_Prompts.md`
-
-## 6. 日志要求
+## 5. 日志要求
 
 更新 `manage_instruction/Work_Log.md`，至少记录：
 
-- 本轮任务名称：第三轮 3-5（四象限纯逻辑评估与最小服务准备）
+- 本轮任务名称：第三轮 3-6（第三轮整体验收与归档准备）
 - 开工前是否已有管理文档 diff
 - 实际修改文件
-- 已读取的关键文件
-- 当前四象限入口位置
-- 当前四象限相关文案
-- 当前 `priority` 使用位置和语义判断
-- 当前字段可用性：
-  - `priority`
-  - `start_time`
-  - `end_time`
-  - `status`
-  - `created_at`
-  - `sort_order`
-- 是否存在稳定四象限分类规则
-- 如果规则不足，明确记录：
-  - 不创建 `matrix_classification_service.py`
-  - 不接四象限 UI
-  - 不实现新功能
-  - 缺口留待后续轮次
-- 如果创建了 matrix service，记录：
-  - 创建依据
-  - service 输入/输出
-  - import 验证结果
-  - 静态依赖检查结果
-  - py_compile 结果
+- 第三轮完成项汇总
+- service import 验证结果
+- service 静态依赖检查结果
+- 旧 `db_manager` 路径验证结果
+- UI import 验证结果
+- 日期过滤验证结果
+- 日程/待办判定验证结果
+- 排序关键结果验证
+- 排序方法是否返回新 list 且不原地修改输入
+- 分类状态和删除动作映射验证结果
+- `db_manager.check_category_status` 返回字符串验证结果
+- `matrix_classification_service.py` 是否未创建
+- 四象限规则缺口是否已记录
+- py_compile 结果
 - diff 范围检查结果
+- 第三轮是否可归档
 - 未完成事项
 - 风险或疑点
 
