@@ -300,3 +300,75 @@
 - 风险或疑点：
   - `is_schedule` 严格保持 `item_type == 'schedule'` 语义，未扩展到 `not is_todo`，避免周视图行为变更。
   - 目前仅抽取判定逻辑；排序仍分散在 UI，后续 3-3 需逐视图对齐迁移。
+
+## 2026-05-17 第三轮 3-3a（day/week/todo 三处同构排序 key 抽取）
+
+- 本轮任务名称：第三轮 3-3a（day/week/todo 三处同构排序 key 抽取）。
+- 开工前是否已有管理文档 diff：
+  - 有。开工前已有 `manage_instruction/Work_Task_Prompts.md`（顾问窗口维护的 3-3a 提示词锚点）diff，不视为本轮源码改动。
+- 实际修改文件：
+  - `src/services/schedule_sort_service.py`
+  - `src/ui/dashboard.py`
+  - `src/ui/week_window.py`
+  - `src/ui/todo.py`
+  - `manage_instruction/Work_Log.md`
+- 开工前三组排序 id 基线输出摘要：
+  - `baseline dashboard []`
+  - `baseline week []`
+  - `baseline todo [8, 10, 14, 15, 11, 12, 9, 13]`
+- 实现的 `ScheduleSortService` 方法：
+  - 实现内部同构 key：
+    - `rank_pin = 0 if is_pinned else 1`
+    - `rank_status = 3 if status == 1 else 1`
+    - `sort_val = -sort_order`
+    - key = `(rank_pin, rank_status, sort_val)`
+  - 实现：
+    - `sort_for_day_view(items)`
+    - `sort_for_week_view(items)`
+    - `sort_for_todo_list(items)`
+  - 三个方法均返回新 list（`sorted(list(items), key=...)`）。
+- 每个 UI 文件替换了哪一处排序：
+  - `src/ui/dashboard.py`：用 `ScheduleSortService.sort_for_day_view(dashboard_schedules)` 替换本地 `sort_key + list.sort(...)`。
+  - `src/ui/week_window.py`：用 `ScheduleSortService.sort_for_week_view(valid_schedules)` 替换本地 `sort_key + list.sort(...)`。
+  - `src/ui/todo.py`：用 `ScheduleSortService.sort_for_todo_list(dashboard_todos)` 替换本地 `sort_key + list.sort(...)`。
+- 明确记录：未修改 `todo_board.py`。
+- 明确记录：未修改 `ScheduleQueryService`。
+- 明确记录：未修改 Repository 日期过滤。
+- 修改后三组排序 id 是否与基线一致：
+  - `after dashboard []`（一致）
+  - `after week []`（一致）
+  - `after todo [8, 10, 14, 15, 11, 12, 9, 13]`（一致）
+- service import / direct call 验证结果：
+  - `sort day ok True`
+  - `sort week ok True`
+  - `sort todo ok True`
+- 旧 `db_manager.get_schedules_for_date` 验证结果：
+  - `db_manager path ok True 8`
+- 静态依赖检查结果：
+  - 命令：`rg -n "QWidget|PyQt|PySide|src\.ui|db_manager|src\.repositories|ScheduleRepository|CategoryRepository" src/services/schedule_sort_service.py`
+  - 结果：无输出（退出码 1，符合预期）。
+- UI 引用检查结果：
+  - `dashboard.py`、`week_window.py`、`todo.py` 命中 `ScheduleSortService`（符合预期）。
+  - `todo_board.py` 未新增 `ScheduleSortService` 命中。
+  - 未命中 `CategoryPolicyService`、`src.repositories`。
+  - `ScheduleQueryService` 命中为既有 3-2b 逻辑，保持不变。
+- `todo_board.py` 未改确认：
+  - `git diff --name-only -- src/ui/todo_board.py` -> 无输出。
+- 本轮未误动其他 service 检查：
+  - `git diff --name-only -- src/services/schedule_query_service.py` -> 无输出。
+  - `git diff --name-only -- src/services/category_policy_service.py` -> 无输出。
+  - `git diff --name-only -- src/services/weather_service.py` -> 无输出。
+- py_compile 结果：
+  - `python -m py_compile src/services/schedule_sort_service.py src/ui/dashboard.py src/ui/week_window.py src/ui/todo.py` 通过（无输出）。
+- diff 范围检查结果：
+  - `git diff --name-only -- src/repositories` -> 无输出。
+  - `git diff --name-only -- src/data` -> 无输出。
+  - `git diff --name-only -- main.py` -> 无输出。
+  - `git diff --name-only -- requirements.txt` -> 无输出。
+  - `git diff --name-only -- schedule.db` -> 无输出。
+  - `git diff --name-only` -> `manage_instruction/Work_Task_Prompts.md`、`src/services/schedule_sort_service.py`、`src/ui/dashboard.py`、`src/ui/week_window.py`、`src/ui/todo.py`（写入本日志后另含 `manage_instruction/Work_Log.md`）。
+  - `git status --short --branch` -> `M manage_instruction/Work_Task_Prompts.md`、`M src/services/schedule_sort_service.py`、`M src/ui/dashboard.py`、`M src/ui/week_window.py`、`M src/ui/todo.py`（写入本日志后另含 `M manage_instruction/Work_Log.md`）。
+- 未完成事项：
+  - 等待顾问窗口复核并下发 3-3b（todo_board 专项）工单。
+- 风险或疑点：
+  - 本轮仅抽取 day/week/todo 同构排序；`todo_board` 的差异化排序与写回仍待 3-3b 单独处理。

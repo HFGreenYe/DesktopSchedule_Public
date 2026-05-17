@@ -6,6 +6,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QTimer, QMimeData
 from PyQt6.QtGui import QDrag
 from ..data.database import db_manager
 from ..services.schedule_query_service import ScheduleQueryService
+from ..services.schedule_sort_service import ScheduleSortService
 from .schedule_detail_pop import ScheduleDetailPop
 
 # 复用主界面的组件
@@ -447,17 +448,7 @@ class TodoView(QWidget):
                 dashboard_todos.append(s)
 
 
-        # 排序规则：置顶在前，已完成在后，没完成的按创建时间排
-        def sort_key(item):
-            rank_pin = 0 if getattr(item, 'is_pinned', False) else 1
-            is_completed = (getattr(item, 'status', 0) == 1)
-            rank_status = 3 if is_completed else 1
-            
-            sort_val = -getattr(item, 'sort_order', 0.0) 
-            
-            return (rank_pin, rank_status, sort_val)
-
-        dashboard_todos.sort(key=sort_key)
+        dashboard_todos = ScheduleSortService.sort_for_todo_list(dashboard_todos)
         self.current_todos = dashboard_todos
 
         if not dashboard_todos:

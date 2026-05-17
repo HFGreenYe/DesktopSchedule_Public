@@ -20,6 +20,7 @@ from .alarm_picker_week import AlarmPickerViewWeek
 from .list_picker import ListPickerView
 from ..data.database import db_manager
 from ..services.schedule_query_service import ScheduleQueryService
+from ..services.schedule_sort_service import ScheduleSortService
 from .header import ToolTipFilter
 from .dashboard import AdaptiveLabel 
 from .components import CountdownToolTipFilter, get_colored_icon
@@ -1036,14 +1037,7 @@ class WeekWindow(FramelessMainWindow):
                 has_any_schedule = True
                 panel_layout = self.bottom_panels[day_index].layout()
 
-                def sort_key(item):
-                    rank_pin = 0 if getattr(item, 'is_pinned', False) else 1
-                    is_completed = (getattr(item, 'status', 0) == 1)
-                    rank_status = 3 if is_completed else 1
-                    sort_val = -getattr(item, 'sort_order', 0.0) 
-                    return (rank_pin, rank_status, sort_val)
-                    
-                valid_schedules.sort(key=sort_key)
+                valid_schedules = ScheduleSortService.sort_for_week_view(valid_schedules)
                 
                 for sched_obj in valid_schedules:
                     card = WeekScheduleCard(sched_obj)

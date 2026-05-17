@@ -8,6 +8,7 @@ from PyQt6.QtGui import (QColor,QFont, QFontMetrics)
 
 from ..data.database import db_manager
 from ..services.schedule_query_service import ScheduleQueryService
+from ..services.schedule_sort_service import ScheduleSortService
 from .schedule_detail_pop import ScheduleDetailPop
 
 class DraggableWidget(QWidget):
@@ -507,14 +508,7 @@ class DashboardView(QWidget):
             if not ScheduleQueryService.is_todo(s):
                 dashboard_schedules.append(s)
 
-        def sort_key(item):
-            rank_pin = 0 if getattr(item, 'is_pinned', False) else 1
-            is_completed = (getattr(item, 'status', 0) == 1)
-            rank_status = 3 if is_completed else 1
-            sort_val = -getattr(item, 'sort_order', 0.0) 
-            return (rank_pin, rank_status, sort_val)
-
-        dashboard_schedules.sort(key=sort_key)
+        dashboard_schedules = ScheduleSortService.sort_for_day_view(dashboard_schedules)
 
         if not dashboard_schedules:
             self.lbl_empty.show()
