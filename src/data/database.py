@@ -4,6 +4,7 @@ import datetime
 import uuid 
 from src.data.connection import BASE_DIR, DB_PATH, db
 from src.data.models import Category, Schedule
+from src.services.schedule_repeat_service import ScheduleRepeatService
 
 class DatabaseManager:
     def __init__(self):
@@ -83,13 +84,7 @@ class DatabaseManager:
 
     # 辅助计算月份函数
     def _add_months(self, sourcedate, months):
-        if not sourcedate: return None
-        month = sourcedate.month - 1 + months
-        year = sourcedate.year + month // 12
-        month = month % 12 + 1
-        # 获取目标月的最大天数，防止 1月31日 加一个月变成 2月31日 报错
-        day = min(sourcedate.day, [31, 29 if year%4==0 and not year%100==0 or year%400==0 else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month-1])
-        return sourcedate.replace(year=year, month=month, day=day)
+        return ScheduleRepeatService.add_months(sourcedate, months)
 
     # ==========================================
     # 支持自动生成的日程添加法
@@ -123,21 +118,15 @@ class DatabaseManager:
         
         for i in range(1, loop_count + 1):
             new_data = data.copy()
-            
-            if rule == '每天':
-                delta = datetime.timedelta(days=i)
-                if base_start: new_data['start_time'] = base_start + delta
-                if base_end: new_data['end_time'] = base_end + delta
-                if base_reminder: new_data['reminder_time'] = base_reminder + delta
-            elif rule == '每周':
-                delta = datetime.timedelta(weeks=i)
-                if base_start: new_data['start_time'] = base_start + delta
-                if base_end: new_data['end_time'] = base_end + delta
-                if base_reminder: new_data['reminder_time'] = base_reminder + delta
-            elif rule == '每月':
-                if base_start: new_data['start_time'] = self._add_months(base_start, i)
-                if base_end: new_data['end_time'] = self._add_months(base_end, i)
-                if base_reminder: new_data['reminder_time'] = self._add_months(base_reminder, i)
+            shifted_start, shifted_end, shifted_reminder = ScheduleRepeatService.shift_triplet(
+                base_start, base_end, base_reminder, rule, i
+            )
+            if base_start:
+                new_data['start_time'] = shifted_start
+            if base_end:
+                new_data['end_time'] = shifted_end
+            if base_reminder:
+                new_data['reminder_time'] = shifted_reminder
                 
             schedules_to_insert.append(new_data)
             
@@ -229,20 +218,15 @@ class DatabaseManager:
                 
                 for i in range(1, loop_count + 1):
                     new_item = base_data.copy()
-                    if new_rule == '每天':
-                        delta = datetime.timedelta(days=i)
-                        if base_start: new_item['start_time'] = base_start + delta
-                        if base_end: new_item['end_time'] = base_end + delta
-                        if base_reminder: new_item['reminder_time'] = base_reminder + delta
-                    elif new_rule == '每周':
-                        delta = datetime.timedelta(weeks=i)
-                        if base_start: new_item['start_time'] = base_start + delta
-                        if base_end: new_item['end_time'] = base_end + delta
-                        if base_reminder: new_item['reminder_time'] = base_reminder + delta
-                    elif new_rule == '每月':
-                        if base_start: new_item['start_time'] = self._add_months(base_start, i)
-                        if base_end: new_item['end_time'] = self._add_months(base_end, i)
-                        if base_reminder: new_item['reminder_time'] = self._add_months(base_reminder, i)
+                    shifted_start, shifted_end, shifted_reminder = ScheduleRepeatService.shift_triplet(
+                        base_start, base_end, base_reminder, new_rule, i
+                    )
+                    if base_start:
+                        new_item['start_time'] = shifted_start
+                    if base_end:
+                        new_item['end_time'] = shifted_end
+                    if base_reminder:
+                        new_item['reminder_time'] = shifted_reminder
                         
                     schedules_to_insert.append(new_item)
                     

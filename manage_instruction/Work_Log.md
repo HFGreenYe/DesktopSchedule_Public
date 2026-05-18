@@ -14,11 +14,11 @@
 
 第四轮（日程写入与重复规则服务）已启动。
 
-当前已完成 4-0（静态审查与只读基线定位），等待顾问窗口复核与后续 4-1 小工单发布。
+当前已完成 4-1（重复日期计算纯逻辑抽取），等待顾问窗口复核与后续 4-2 小工单发布。
 
 ## 当前轮次注意事项
 
-- 4-0 只做静态审查和只读基线定位，不写数据库、不改源码。
+- 4-1 只抽取重复日期计算纯逻辑，不写数据库，不改变写入流程、事务边界或生成数量。
 - 后续第四轮涉及 `add_schedule`、`update_schedule_with_repeat`、重复规则日期计算等高风险写入逻辑，必须继续拆成多个小工单推进。
 - 执行窗口不得沿用第三轮 3-6 或第三轮任一提示词继续执行。
 - 执行窗口不得在未收到 4-1 正式提示词前自行开始写入路径改造。
@@ -139,3 +139,61 @@
   - 当前 `update_schedule_with_repeat` 的“更新当前 + 删除旧未来 + 重建新未来”不在同一大事务块，后续拆分时需谨慎保持失败回滚语义。
   - UI 已存在多处 `group_id` 内存态同步，后续若改数据层行为，需同步核对这些 UI 假设是否仍成立。
   - 当前无 `parent_id`；后续工单不得隐式引入“父子实例”新语义。
+
+## 2026-05-18 第四轮 4-1（重复日期计算纯逻辑抽取）
+
+- 本轮任务名称：第四轮 4-1（重复日期计算纯逻辑抽取）。
+- 开工前是否已有管理文档 diff：
+  - 有。开工前已有 `manage_instruction/Work_Task_Prompts.md`（顾问窗口维护的 4-1 提示词锚点）diff，不视为本轮源码改动。
+- 实际修改文件：
+  - `src/services/schedule_repeat_service.py`（新增）
+  - `src/data/database.py`
+  - `manage_instruction/Work_Log.md`
+- service 方法清单与输入/输出说明：
+  - `ScheduleRepeatService.add_months(sourcedate, months)`：输入 datetime/None 与整月偏移；输出偏移后的 datetime/None；保持月末与闰年兼容。
+  - `ScheduleRepeatService.shift_datetime(value, rule, step)`：输入 datetime/None、规则（仅 `每天/每周/每月`）与步长；输出偏移后的 datetime/None。
+  - `ScheduleRepeatService.shift_triplet(start_time, end_time, reminder_time, rule, step)`：输入三元时间与规则步长；输出偏移后三元组。
+- `database.py` 委托点位置：
+  - `_add_months` 改为委托 `ScheduleRepeatService.add_months`。
+  - `add_schedule` 的未来偏移段改为调用 `ScheduleRepeatService.shift_triplet(...)`。
+  - `update_schedule_with_repeat` 的未来重建偏移段改为调用 `ScheduleRepeatService.shift_triplet(...)`。
+- 明确记录：未改写入流程、未改事务边界、未改生成数量。
+  - `add_schedule` 仍保持 `loop_count: 每天365/每周52/每月12`，仍用 `with db.atomic()` + `insert_many` 分批写入。
+  - `update_schedule_with_repeat` 仍保持旧分支结构（仅当前/影响未来）、旧删除旧未来与重建未来流程，未来重建仍保持 `loop_count: 每天365/每周52/每月12`。
+  - 未改 `group_id` 语义。
+- 月末与闰年一致性验证结果：
+  - 命令（legacy 对照）通过，`month rows` 全部 `True`。
+  - 样例包含：
+    - `2023-01-31 +1月 -> 2023-02-28`
+    - `2024-01-31 +1月 -> 2024-02-29`
+    - `2024-02-29 +12月 -> 2025-02-28`
+- `start_time/end_time/reminder_time` 偏移一致性验证结果：
+  - 输出：
+    - `每天 1 -> 2026-02-01 09:00 / 10:00 / 2026-01-31 09:00`
+    - `每周 2 -> 2026-02-14 09:00 / 10:00 / 2026-02-13 09:00`
+    - `每月 1 -> 2026-02-28 09:00 / 10:00 / 2026-02-28 09:00`
+- service import 验证结果：
+  - 输出：`repeat service import ok <class 'src.services.schedule_repeat_service.ScheduleRepeatService'>`。
+- service 静态依赖检查结果：
+  - 命令：`rg -n "QWidget|PyQt|PySide|src\.ui|db_manager|src\.repositories|ScheduleRepository|CategoryRepository" src/services/schedule_repeat_service.py`
+  - 结果：无输出（退出码 1，符合预期）。
+- 未新增 `每年/yearly/daily/weekly/monthly` 行为说明：
+  - 命令：`rg -n "每年|yearly|daily|weekly|monthly" src/services/schedule_repeat_service.py src/data/database.py`
+  - 结果：无输出（退出码 1）。
+  - 结论：未引入英文规则分支，未新增 `每年/yearly` 行为。
+- py_compile 结果：
+  - `python -m py_compile src/services/schedule_repeat_service.py src/data/database.py` 通过（无输出）。
+- diff 范围检查结果：
+  - `git diff --name-only -- src/ui` -> 无输出。
+  - `git diff --name-only -- src/data/models.py` -> 无输出。
+  - `git diff --name-only -- src/repositories` -> 无输出。
+  - `git diff --name-only -- main.py` -> 无输出。
+  - `git diff --name-only -- requirements.txt` -> 无输出。
+  - `git diff --name-only -- schedule.db` -> 无输出。
+  - `git diff --name-only` -> `manage_instruction/Work_Task_Prompts.md`、`src/data/database.py`、`src/services/schedule_repeat_service.py`（写入本日志后另含 `manage_instruction/Work_Log.md`）。
+  - `git status --short --branch` -> `M manage_instruction/Work_Task_Prompts.md`、`M src/data/database.py`、`?? src/services/schedule_repeat_service.py`（写入本日志后另含 `M manage_instruction/Work_Log.md`）。
+- 未完成事项：
+  - 等待顾问窗口复核并下发 4-2（重复规则待插入数据计划服务）或其他后续小工单。
+- 风险或疑点：
+  - 当前 `shift_datetime` 对未知规则返回原值仅作防御兜底；数据库层仍只在 `每天/每周/每月` 分支调用，未改变现有规则面。
+  - `update_schedule_with_repeat` 仍保留原有“更新/删除/重建”事务边界现状，后续拆分时需继续保持行为一致。
