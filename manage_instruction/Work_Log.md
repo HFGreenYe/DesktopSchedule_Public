@@ -14,14 +14,14 @@
 
 第四轮（日程写入与重复规则服务）已启动。
 
-当前已完成 4-6（update_future=True 非组转重复路径行为验收），等待顾问窗口复核与后续 4-7 小工单发布。
+当前已完成 4-7a（已有重复组 update_future=True 未来更新路径行为基线验收），等待顾问窗口复核与后续 4-7b 或下一小工单发布。
 
 ## 当前轮次注意事项
 
-- 4-6 已完成 `update_schedule_with_repeat(update_future=True)` 非组转重复路径的行为基线验收；本轮未改源码。
+- 4-7a 已完成已有重复组 `update_schedule_with_repeat(update_future=True)` 未来更新路径的行为基线验收；本轮未改源码。
 - 后续第四轮涉及 `add_schedule`、`update_schedule_with_repeat`、重复规则日期计算等高风险写入逻辑，必须继续拆成多个小工单推进。
 - 执行窗口不得沿用第三轮 3-6 或第三轮任一提示词继续执行。
-- 执行窗口不得在未收到后续正式提示词前自行开始 4-7 或其他写入路径改造。
+- 执行窗口不得在未收到后续正式提示词前自行开始 4-7b 或其他写入路径改造。
 
 ## 2026-05-17 第四轮 4-0（静态审查与只读基线定位）
 
@@ -552,3 +552,97 @@
 - 风险或疑点：
   - 本轮只验证原本无 `group_id` 的单次日程转重复路径；已有重复组的未来更新路径、取消重复路径尚未处理。
   - 后续 4-7 涉及删除旧未来实例和重建未来实例，风险高，建议继续先做行为基线再决定是否委托改造。
+
+## 2026-05-18 第四轮 4-7a（已有重复组 update_future=True 未来更新路径行为基线）
+
+- 本轮任务名称：第四轮 4-7a（已有重复组 update_future=True 未来更新路径行为基线）。
+- 开工前是否已有管理文档 diff：
+  - 有。开工前已有 `manage_instruction/Work_Task_Prompts.md`（顾问窗口维护的 4-7a 提示词锚点）diff，不视为本轮源码改动。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+- 是否改源码：
+  - 否。本轮仅做行为基线验收。
+- 已有重复组 `update_future=True` 路径静态复核结论：
+  - 复核通过。`old_group_id` 存在时沿用旧 `group_id`。
+  - 当前条先执行 `Schedule.update(...)`。
+  - 旧未来实例删除分支存在，按 `start_time` / `end_time` / `id` 回退策略执行。
+  - 新未来项使用 `ScheduleRepeatService.build_repeat_insert_plan(..., include_base=False)` 生成，并由 `insert_many` 写入。
+- 是否保持：沿用旧 `group_id`：
+  - 是。原 `group_id` 为 `a8b84aec-e167-42ee-a452-0d73443eb8ee`，更新后当前条仍使用该值。
+- 是否保持：当前条本体先更新：
+  - 是。当前条标题更新为 `__tmp_4_7a_existing_group_1779107007041862900_monthly_updated`，规则更新为 `每月`。
+- 是否保持：当前之前旧实例保留：
+  - 是。更新前当前之前旧实例数量 `10`，更新后保留旧实例数量 `10`，标题仍为旧标题。
+- 是否保持：旧未来实例删除：
+  - 是。更新后旧未来实例残留检查 `old future left []`。
+- 是否保持：新未来实例重建：
+  - 是。新未来实例数量 `12`，标题和规则均为新值。
+- 是否保持：同组最终总数为 23：
+  - 是。更新后同组总数 `23`（旧保留 10 + 当前 1 + 新未来 12）。
+- 是否保持：新未来项时间偏移正确：
+  - 是。第一个新未来项 `2026-04-18 09:00:00`，第二个新未来项 `2026-05-18 09:00:00`。
+- 明确记录：`add_schedule` 未改。
+- 明确记录：`update_future=False` 路径未改。
+- 明确记录：非组转重复路径未改。
+- 明确记录：取消重复路径未处理。
+- 明确记录：未新增 `parent_id`。
+- 明确记录：未新增 `每年/yearly/daily/weekly/monthly` 行为。
+- 临时数据标题前缀：
+  - `__tmp_4_7a_existing_group_1779107007041862900`
+- 原 `group_id`：
+  - `a8b84aec-e167-42ee-a452-0d73443eb8ee`
+- 被选中的中间项 id：
+  - `93`
+- 被选中的中间项原 `start_time`：
+  - `2026-03-18 09:00:00`
+- 更新前当前之前旧实例数量：
+  - `10`
+- 更新前当前之后旧未来实例数量：
+  - `42`
+- 更新后当前条标题/规则/`group_id`：
+  - 标题：`__tmp_4_7a_existing_group_1779107007041862900_monthly_updated`
+  - 规则：`每月`
+  - `group_id`：`a8b84aec-e167-42ee-a452-0d73443eb8ee`
+- 更新后保留旧实例数量：
+  - `10`
+- 更新后新未来实例数量：
+  - `12`
+- 更新后旧未来实例残留检查结果：
+  - `old future left []`
+- 第一个和第二个新未来项时间：
+  - 第一个：`2026-04-18 09:00:00`
+  - 第二个：`2026-05-18 09:00:00`
+- 删除整组结果：
+  - `deleted group 23`
+- 前缀残留检查结果：
+  - 验收脚本内：`leftovers 0`。
+  - 复查命令：`tmp 4-7a leftovers 0`。
+- `schedule.db` 是否无 tracked diff：
+  - `git diff --name-only -- schedule.db` -> 无输出。
+- service import / db import 验证结果：
+  - 输出：`imports ok <class 'src.services.schedule_repeat_service.ScheduleRepeatService'> 75`。
+- service 静态依赖检查结果：
+  - `rg -n "QWidget|PyQt|PySide|src\.ui|db_manager|src\.repositories|ScheduleRepository|CategoryRepository" src/services/schedule_repeat_service.py src/services/schedule_service.py` -> 无输出（退出码 1，视为通过）。
+- 未新增不允许规则和字段检查结果：
+  - `rg -n "每年|yearly|daily|weekly|monthly|parent_id" src/data/database.py src/services/schedule_repeat_service.py src/services/schedule_service.py` -> 无输出（退出码 1）。
+- py_compile 结果：
+  - `python -m py_compile src/services/schedule_repeat_service.py src/services/schedule_service.py src/data/database.py` 通过（无输出）。
+- diff 范围检查结果：
+  - `git diff --name-only -- src/data/database.py` -> 无输出。
+  - `git diff --name-only -- src/services/schedule_service.py` -> 无输出。
+  - `git diff --name-only -- src/services/schedule_repeat_service.py` -> 无输出。
+  - `git diff --name-only -- src/ui` -> 无输出。
+  - `git diff --name-only -- src/data/models.py` -> 无输出。
+  - `git diff --name-only -- src/repositories` -> 无输出。
+  - `git diff --name-only -- main.py` -> 无输出。
+  - `git diff --name-only -- requirements.txt` -> 无输出。
+  - `git diff --name-only -- schedule.db` -> 无输出。
+  - `git diff --name-only` -> 写入本日志前仅 `manage_instruction/Work_Task_Prompts.md`；写入本日志后为 `manage_instruction/Work_Log.md`、`manage_instruction/Work_Task_Prompts.md`。
+  - `git status --short --branch` -> 写入本日志前仅 `M manage_instruction/Work_Task_Prompts.md`；写入本日志后另含 `M manage_instruction/Work_Log.md`。
+- 未完成事项：
+  - 无。等待顾问窗口复核并下发 4-7b 或下一小工单。
+- 风险或疑点：
+  - 本轮仅做 4-7a 行为基线，不做源码委托改造。
+  - 4-7b 若要改造，应严格保持“旧未来删除 + 新未来重建”的边界和事务/返回语义。
+- 是否建议进入 4-7b：
+  - 可以进入 4-7b。当前行为基线清晰，且本轮验收未发现阻塞疑点。
