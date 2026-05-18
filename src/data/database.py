@@ -4,6 +4,7 @@ import datetime
 import uuid 
 from src.data.connection import BASE_DIR, DB_PATH, db
 from src.data.models import Category, Schedule
+from src.services.schedule_service import ScheduleService
 from src.services.schedule_repeat_service import ScheduleRepeatService
 
 class DatabaseManager:
@@ -95,8 +96,7 @@ class DatabaseManager:
         # 1. 不重复，走原逻辑
         if rule in ('none', '无', '不重复', ''):
             try:
-                Schedule.create(**data)
-                return True
+                return ScheduleService.create_single_schedule(Schedule, data)
             except Exception as e:
                 print(f"❌ [DB] 保存失败: {e}")
                 return False
