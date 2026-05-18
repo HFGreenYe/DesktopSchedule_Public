@@ -14,14 +14,14 @@
 
 第四轮（日程写入与重复规则服务）已启动。
 
-当前已完成 4-8a（update_future=True 取消重复路径行为基线验收），等待顾问窗口复核与后续 4-8b 或下一小工单发布。
+当前已完成 4-8b（取消重复路径条件收口复核），等待顾问窗口复核与后续小工单发布。
 
 ## 当前轮次注意事项
 
-- 4-8a 已完成已有重复组 `update_schedule_with_repeat(update_future=True)` 取消重复路径的行为基线验收；本轮未改源码。
+- 4-8b 已完成取消重复路径条件收口复核；确认无需额外源码改造。
 - 后续第四轮涉及 `add_schedule`、`update_schedule_with_repeat`、重复规则日期计算等高风险写入逻辑，必须继续拆成多个小工单推进。
 - 执行窗口不得沿用第三轮 3-6 或第三轮任一提示词继续执行。
-- 执行窗口不得在未收到后续正式提示词前自行开始 4-8b 或其他写入路径改造。
+- 执行窗口不得在未收到后续正式提示词前自行开始后续写入路径改造。
 
 ## 2026-05-17 第四轮 4-0（静态审查与只读基线定位）
 
@@ -837,3 +837,81 @@
   - 取消重复路径与 4-7b 共用旧未来删除策略，后续 4-8b 如委托改造需保持当前“不重建未来实例”的分支边界。
 - 是否建议进入 4-8b：
   - 可以进入 4-8b。当前行为基线清晰，验收未发现阻塞疑点。
+
+## 2026-05-18 第四轮 4-8b（取消重复路径条件收口复核）
+
+- 本轮任务名称：第四轮 4-8b（取消重复路径条件收口复核）。
+- 开工前是否已有管理文档 diff：
+  - 有。开工前已有 `manage_instruction/Work_Task_Prompts.md`（顾问窗口维护的 4-8b 提示词锚点）diff，不视为本轮源码改动。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+- 是否改源码：
+  - 否。`4-8b 无需额外源码改造`。
+- 静态复核结论：取消重复路径是否已复用 `ScheduleService.delete_future_schedules_for_group(...)`：
+  - 是。`update_schedule_with_repeat(...)` 在 `if old_group_id:` 下统一调用 `ScheduleService.delete_future_schedules_for_group(...)`，取消重复路径与 4-7b 路径共用该委托。
+- 明确记录：未迁移当前条 update。
+- 明确记录：未迁移事务边界。
+- 明确记录：未迁移新未来重建。
+- 明确记录：未修改 `insert_many` / `batch_size=100`。
+- 明确记录：未修改 `add_schedule`。
+- 明确记录：未修改 `update_future=False` 路径。
+- 明确记录：未修改非组转重复路径。
+- 明确记录：未修改已有重复组改重复路径的新未来重建逻辑。
+- 明确记录：未新增 `parent_id`。
+- 明确记录：未新增 `每年/yearly/daily/weekly/monthly` 行为。
+
+### 取消重复路径回归结果
+
+- 临时数据标题前缀：
+  - `__tmp_4_8b_cancel_repeat_1779108861036718600`
+- 原 `group_id`：
+  - `43f4b4d9-98c5-49f0-ba17-bceaf5ad4b34`
+- 被选中的中间项 id：
+  - `93`
+- 更新后当前条 `group_id`：
+  - `None`
+- 更新后保留旧实例数量：
+  - `10`
+- 更新后旧未来实例残留检查结果：
+  - `old future left []`
+- 更新后新未来实例残留检查结果：
+  - `new future left 0`
+- 删除脱组当前条结果：
+  - `deleted current 1`
+- 删除剩余旧实例结果：
+  - `deleted remaining group 10`
+- 前缀残留检查结果：
+  - 验收脚本内：`leftovers 0`
+  - 复查命令：`('__tmp_4_8b_cancel_repeat_', 0)`
+
+### 4-7b 保护回归结果
+
+- 临时数据标题前缀：
+  - `__tmp_4_8b_existing_group_guard_1779109005132473600`
+- 回归结果：
+  - `existing group monthly ok True`
+  - 同组最终总数 `23`（保留 `10` + 重建 `12` + 当前 `1`）
+  - 删除整组 `23`
+  - 前缀残留 `0`
+
+- `schedule.db` 是否无 tracked diff：
+  - `git diff --name-only -- schedule.db` -> 无输出。
+- service import / db import 验证结果：
+  - 输出：`imports ok <class 'src.services.schedule_service.ScheduleService'> <class 'src.services.schedule_repeat_service.ScheduleRepeatService'> 75`
+- service 静态依赖检查结果：
+  - `rg -n "QWidget|PyQt|PySide|src\.ui|db_manager|src\.repositories|ScheduleRepository|CategoryRepository" src/services/schedule_repeat_service.py src/services/schedule_service.py` -> 无输出（退出码 1，视为通过）。
+- py_compile 结果：
+  - `python -m py_compile src/services/schedule_repeat_service.py src/services/schedule_service.py src/data/database.py` 通过（无输出）。
+- diff 范围检查结果：
+  - `git diff --name-only -- src/ui` -> 无输出。
+  - `git diff --name-only -- src/data/models.py` -> 无输出。
+  - `git diff --name-only -- src/repositories` -> 无输出。
+  - `git diff --name-only -- main.py` -> 无输出。
+  - `git diff --name-only -- requirements.txt` -> 无输出。
+  - `git diff --name-only -- schedule.db` -> 无输出。
+  - `git diff --name-only` -> 写入本日志前仅 `manage_instruction/Work_Task_Prompts.md`；写入本日志后为 `manage_instruction/Work_Log.md`、`manage_instruction/Work_Task_Prompts.md`。
+  - `git status --short --branch` -> 写入本日志前仅 `M manage_instruction/Work_Task_Prompts.md`；写入本日志后另含 `M manage_instruction/Work_Log.md`。
+- 未完成事项：
+  - 无。等待顾问窗口复核并下发下一小工单。
+- 风险或疑点：
+  - 本轮仅做条件收口复核，未扩大到源码改造；若后续要进一步抽取取消重复路径协调，应继续保持当前分支语义不变。
