@@ -14,14 +14,14 @@
 
 第四轮（日程写入与重复规则服务）已启动。
 
-当前已完成 4-5（update_future=False 仅当前修改路径行为验收），等待顾问窗口复核与后续 4-6 小工单发布。
+当前已完成 4-6（update_future=True 非组转重复路径行为验收），等待顾问窗口复核与后续 4-7 小工单发布。
 
 ## 当前轮次注意事项
 
-- 4-5 已完成 `update_schedule_with_repeat(update_future=False)` 仅当前修改路径的行为基线验收；本轮未改源码。
+- 4-6 已完成 `update_schedule_with_repeat(update_future=True)` 非组转重复路径的行为基线验收；本轮未改源码。
 - 后续第四轮涉及 `add_schedule`、`update_schedule_with_repeat`、重复规则日期计算等高风险写入逻辑，必须继续拆成多个小工单推进。
 - 执行窗口不得沿用第三轮 3-6 或第三轮任一提示词继续执行。
-- 执行窗口不得在未收到后续正式提示词前自行开始 4-6 或其他写入路径改造。
+- 执行窗口不得在未收到后续正式提示词前自行开始 4-7 或其他写入路径改造。
 
 ## 2026-05-17 第四轮 4-0（静态审查与只读基线定位）
 
@@ -476,3 +476,79 @@
   - 无。等待顾问窗口复核并下发 4-6 或下一小工单。
 - 风险或疑点：
   - 本轮未做源码委托，仅确认旧行为边界；后续如抽取 `update_future=False` 写入协调，必须继续保持当前条脱组和原组不变语义。
+
+## 2026-05-18 第四轮 4-6（update_future=True 非组转重复路径行为验收）
+
+- 本轮任务名称：第四轮 4-6（update_future=True 非组转重复路径行为验收）。
+- 开工前是否已有管理文档 diff：
+  - 有。开工前已有 `manage_instruction/Work_Task_Prompts.md`（顾问窗口维护的 4-6 提示词锚点）diff，不视为本轮源码改动。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+- 是否改源码：
+  - 否。本轮仅做行为基线验收。
+- `update_future=True` 非组转重复路径静态复核结论：
+  - 复核通过。`src/data/database.py` 中旧条无 `group_id` 且新规则不是 `none / 无 / 不重复 / ''` 时会创建新 `group_id`。
+  - 当前条会写入新 `group_id` 并先执行 `Schedule.update(...)`。
+  - 旧条无 `group_id` 时不会进入旧未来实例删除分支。
+  - 未来项使用 `ScheduleRepeatService.build_repeat_insert_plan(..., include_base=False)` 生成，并由 `insert_many` 写入。
+- 是否保持：旧条无 `group_id` 时创建新 `group_id`：
+  - 是。
+- 是否保持：当前条获得新 `group_id`：
+  - 是。验收中更新后 `group_id` 为 `d82ac276-cc54-4593-a5e3-7d8e983d8309`。
+- 是否保持：当前条本体先更新：
+  - 是。当前条标题更新为 `__tmp_4_6_single_to_repeat_1779106513128966700_repeat_weekly`，规则更新为 `每周`。
+- 是否保持：未来实例生成数量为 52 个，加当前条同组共 53 条：
+  - 是。同组总数 `53`。
+- 是否保持：同组所有项 `group_id` 一致：
+  - 是。验收断言 `all(r.group_id==gid for r in rows)` 通过。
+- 是否保持：未来项时间偏移正确：
+  - 是。第一个未来项 `2026-01-14 09:00:00`，第二个未来项 `2026-01-21 09:00:00`。
+- 明确记录：`add_schedule` 未改。
+- 明确记录：`update_future=False` 路径未改。
+- 明确记录：既有重复组未来更新路径未处理。
+- 明确记录：取消重复路径未处理。
+- 明确记录：未新增 `parent_id`。
+- 明确记录：未新增 `每年/yearly/daily/weekly/monthly` 行为。
+- 临时数据标题前缀：
+  - `__tmp_4_6_single_to_repeat_1779106513128966700`
+- 临时单次日程 id：
+  - `83`
+- 更新后 `group_id`：
+  - `d82ac276-cc54-4593-a5e3-7d8e983d8309`
+- 同组总数：
+  - `53`
+- 第一个和第二个未来项时间：
+  - 第一个未来项：`2026-01-14 09:00:00`
+  - 第二个未来项：`2026-01-21 09:00:00`
+- 删除整组结果：
+  - `deleted group 53`
+- 前缀残留检查结果：
+  - 验收脚本内：`leftovers 0`。
+  - 复查命令：`tmp 4-6 leftovers 0`。
+- `schedule.db` 是否无 tracked diff：
+  - `git diff --name-only -- schedule.db` -> 无输出。
+- service import / db import 验证结果：
+  - 输出：`imports ok <class 'src.services.schedule_repeat_service.ScheduleRepeatService'> 75`。
+- service 静态依赖检查结果：
+  - `rg -n "QWidget|PyQt|PySide|src\.ui|db_manager|src\.repositories|ScheduleRepository|CategoryRepository" src/services/schedule_repeat_service.py src/services/schedule_service.py` -> 无输出（退出码 1，视为通过）。
+- 未新增不允许规则和字段检查结果：
+  - `rg -n "每年|yearly|daily|weekly|monthly|parent_id" src/data/database.py src/services/schedule_repeat_service.py src/services/schedule_service.py` -> 无输出（退出码 1）。
+- py_compile 结果：
+  - `python -m py_compile src/services/schedule_repeat_service.py src/services/schedule_service.py src/data/database.py` 通过（无输出）。
+- diff 范围检查结果：
+  - `git diff --name-only -- src/data/database.py` -> 无输出。
+  - `git diff --name-only -- src/services/schedule_service.py` -> 无输出。
+  - `git diff --name-only -- src/services/schedule_repeat_service.py` -> 无输出。
+  - `git diff --name-only -- src/ui` -> 无输出。
+  - `git diff --name-only -- src/data/models.py` -> 无输出。
+  - `git diff --name-only -- src/repositories` -> 无输出。
+  - `git diff --name-only -- main.py` -> 无输出。
+  - `git diff --name-only -- requirements.txt` -> 无输出。
+  - `git diff --name-only -- schedule.db` -> 无输出。
+  - `git diff --name-only` -> 写入本日志前仅 `manage_instruction/Work_Task_Prompts.md`；写入本日志后为 `manage_instruction/Work_Log.md`、`manage_instruction/Work_Task_Prompts.md`。
+  - `git status --short --branch` -> 写入本日志前仅 `M manage_instruction/Work_Task_Prompts.md`；写入本日志后另含 `M manage_instruction/Work_Log.md`。
+- 未完成事项：
+  - 无。等待顾问窗口复核并下发 4-7 或下一小工单。
+- 风险或疑点：
+  - 本轮只验证原本无 `group_id` 的单次日程转重复路径；已有重复组的未来更新路径、取消重复路径尚未处理。
+  - 后续 4-7 涉及删除旧未来实例和重建未来实例，风险高，建议继续先做行为基线再决定是否委托改造。
