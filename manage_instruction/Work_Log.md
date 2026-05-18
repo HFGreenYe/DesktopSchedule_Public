@@ -329,3 +329,74 @@
 - 风险或疑点：
   - 当前 `ScheduleService.create_single_schedule` 仅覆盖最小单次创建；后续若扩展写入协调，需继续保持 `db_manager` 对外语义不变。
   - 非重复路径委托完成后，重复路径与更新路径仍在 `database.py`，后续拆分需逐步保持事务与异常行为一致。
+
+## 2026-05-18 第四轮 4-4（add_schedule 重复路径委托收口与写入验收）
+
+- 本轮任务名称：第四轮 4-4（add_schedule 重复路径委托收口与写入验收）。
+- 开工前是否已有管理文档 diff：
+  - 有。开工前已有 `manage_instruction/Work_Task_Prompts.md`（顾问窗口维护的 4-4 提示词锚点）diff，不视为本轮源码改动。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+- 是否改源码：
+  - 否。重复路径已符合 4-2 委托边界，本轮原计划仅验收。
+- `add_schedule` 重复路径委托复核结论：
+  - 复核通过。
+  - 证据：`src/data/database.py` 中 `add_schedule` 重复分支仍调用 `ScheduleRepeatService.build_repeat_insert_plan(data, rule, group_id, include_base=True)`。
+- `DatabaseManager` 职责复核：
+  - 仍负责 `group_id` 创建（`uuid4`）。
+  - 仍负责 `with db.atomic()`、`insert_many`、`batch_size=100`。
+  - 仍负责 `True/False` 返回语义。
+- 明确记录：非重复路径未改。
+- 明确记录：`update_schedule_with_repeat` 未改。
+- 明确记录：未新增 `parent_id`。
+- 明确记录：未新增 `每年/yearly/daily/weekly/monthly` 行为。
+
+### 首次验收编码异常说明（简述）
+
+- 首次验收失败原因：控制台 `gbk` 编码下打印 `✅/❌` 触发 `UnicodeEncodeError`，属于验收命令/输出编码问题，不是 4-4 业务逻辑失败。
+- 已处理：清理临时残留后，改用逐规则 `python.exe -X utf8 -c ...` 命令完成复跑。
+
+### 复跑结果（最终结论以本节为准）
+
+- 复跑前检查：
+  - `__tmp_4_4_repeat_` 前缀残留：`0`。
+  - `git diff --name-only -- schedule.db`：无输出。
+- 临时数据标题前缀：`__tmp_4_4_repeat_`（逐规则命令会追加时间戳和规则名）。
+- `每天` 验证：
+  - 创建结果：`True`；命中数量：`366`；`group_id` 集合大小：`1`。
+  - 按 `group_id` 删除数量：`366`；删除后残留：`0`。
+- `每周` 验证：
+  - 创建结果：`True`；命中数量：`53`；`group_id` 集合大小：`1`。
+  - 按 `group_id` 删除数量：`53`；删除后残留：`0`。
+- `每月` 验证：
+  - 创建结果：`True`；命中数量：`13`；`group_id` 集合大小：`1`。
+  - 按 `group_id` 删除数量：`13`；删除后残留：`0`。
+- 复跑后残留检查：
+  - `__tmp_4_4_repeat_` 前缀残留：`0`。
+- `schedule.db` 是否无 tracked diff：
+  - `git diff --name-only -- schedule.db` -> 无输出。
+
+- service import 验证结果：
+  - 通过：`from src.services.schedule_repeat_service import ScheduleRepeatService` 与 `from src.data.database import db_manager` 正常。
+- service 静态依赖检查结果：
+  - `rg -n "QWidget|PyQt|PySide|src\.ui|db_manager|src\.repositories|ScheduleRepository|CategoryRepository" src/services/schedule_repeat_service.py` 无输出（退出码 1，视为通过）。
+- 明确记录：未新增 `parent_id` / `每年` / `yearly` / `daily` / `weekly` / `monthly` 行为：
+  - `rg -n "每年|yearly|daily|weekly|monthly|parent_id" src/data/database.py src/services/schedule_repeat_service.py` 无输出（退出码 1）。
+- py_compile 结果：
+  - `python -m py_compile src/services/schedule_repeat_service.py src/data/database.py` 通过。
+
+- diff 范围检查结果：
+  - `git diff --name-only -- src/services/schedule_service.py` -> 无输出。
+  - `git diff --name-only -- src/ui` -> 无输出。
+  - `git diff --name-only -- src/data/models.py` -> 无输出。
+  - `git diff --name-only -- src/repositories` -> 无输出。
+  - `git diff --name-only -- main.py` -> 无输出。
+  - `git diff --name-only -- requirements.txt` -> 无输出。
+  - `git diff --name-only -- schedule.db` -> 无输出。
+  - `git diff --name-only` -> `manage_instruction/Work_Log.md`、`manage_instruction/Work_Task_Prompts.md`。
+  - `git status --short --branch` -> `M manage_instruction/Work_Log.md`、`M manage_instruction/Work_Task_Prompts.md`。
+
+- 未完成事项：
+  - 无（4-4 验收项已按新命令复跑完成）。
+- 风险或疑点：
+  - 需保持后续验收脚本统一使用 UTF-8 输出，避免在 `gbk` 控制台再次因 emoji 打印中断。
