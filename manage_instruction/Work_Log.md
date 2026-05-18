@@ -14,14 +14,14 @@
 
 第四轮（日程写入与重复规则服务）已启动。
 
-当前已完成 4-1（重复日期计算纯逻辑抽取），等待顾问窗口复核与后续 4-2 小工单发布。
+当前已完成 4-2（重复规则待插入数据计划服务），等待顾问窗口复核与后续 4-3 小工单发布。
 
 ## 当前轮次注意事项
 
-- 4-1 只抽取重复日期计算纯逻辑，不写数据库，不改变写入流程、事务边界或生成数量。
+- 4-2 只抽取重复规则待插入数据计划纯逻辑，不写数据库，不改变写入流程、事务边界、批量插入或返回语义。
 - 后续第四轮涉及 `add_schedule`、`update_schedule_with_repeat`、重复规则日期计算等高风险写入逻辑，必须继续拆成多个小工单推进。
 - 执行窗口不得沿用第三轮 3-6 或第三轮任一提示词继续执行。
-- 执行窗口不得在未收到 4-1 正式提示词前自行开始写入路径改造。
+- 执行窗口不得在未收到 4-3 正式提示词前自行开始写入路径改造。
 
 ## 2026-05-17 第四轮 4-0（静态审查与只读基线定位）
 
@@ -197,3 +197,78 @@
 - 风险或疑点：
   - 当前 `shift_datetime` 对未知规则返回原值仅作防御兜底；数据库层仍只在 `每天/每周/每月` 分支调用，未改变现有规则面。
   - `update_schedule_with_repeat` 仍保留原有“更新/删除/重建”事务边界现状，后续拆分时需继续保持行为一致。
+
+## 2026-05-18 第四轮 4-2（重复规则待插入数据计划服务）
+
+- 本轮任务名称：第四轮 4-2（重复规则待插入数据计划服务）。
+- 开工前是否已有管理文档 diff：
+  - 有。开工前已有 `manage_instruction/Work_Task_Prompts.md`（顾问窗口维护的 4-2 提示词锚点）diff，不视为本轮源码改动。
+- 实际修改文件：
+  - `src/services/schedule_repeat_service.py`
+  - `src/data/database.py`
+  - `manage_instruction/Work_Log.md`
+- 新增/修改的 service 方法清单：
+  - `is_non_repeat_rule(rule)`：识别 `none / 无 / 不重复 / ''`。
+  - `get_repeat_count(rule)`：返回 `每天=365`、`每周=52`、`每月=12`，其他为 `0`。
+  - `build_repeat_insert_plan(base_data, rule, group_id, include_base=True)`：生成待插入数据计划（纯逻辑）。
+  - 保留并复用 `add_months` / `shift_datetime` / `shift_triplet`。
+- `add_schedule` 委托生成计划的位置：
+  - `src/data/database.py` 在重复路径中以：
+  - `ScheduleRepeatService.build_repeat_insert_plan(data, rule, group_id, include_base=True)`
+  - 取代原手工循环组装 `schedules_to_insert`。
+- `update_schedule_with_repeat` 委托生成计划的位置：
+  - `src/data/database.py` 在“重建新的未来”路径中以：
+  - `ScheduleRepeatService.build_repeat_insert_plan(base_data, new_rule, group_id, include_base=False)`
+  - 取代原手工循环组装未来项列表。
+- 明确记录：未改事务边界。
+  - `add_schedule` 仍在 `database.py` 中 `with db.atomic()` 执行 `insert_many`。
+  - `update_schedule_with_repeat` 未来重建段仍在 `database.py` 中 `with db.atomic()` 执行 `insert_many`。
+- 明确记录：未改批量插入流程。
+  - 两处仍使用 `batch_size=100` + 分批 `insert_many`。
+- 明确记录：未改返回语义。
+  - `add_schedule` 与 `update_schedule_with_repeat` 仍保持成功 `True`、异常 `False`。
+- 明确记录：未写数据库。
+  - 本轮仅运行纯函数与静态检查命令，未调用写库路径进行行为验证。
+- `每天 / 每周 / 每月` 计划数量验证结果：
+  - `include_base=True`：`每天=366`、`每周=53`、`每月=13`。
+  - `include_base=False`：`每天=365`、`每周=52`、`每月=12`。
+- `group_id` 一致性验证结果：
+  - 两类计划中所有项的 `group_id` 均一致为传入值（`gid-test`）。
+- `start_time/end_time/reminder_time` 偏移验证结果：
+  - `每天` 首个未来项：`2026-02-01 09:00 / 10:00 / 2026-01-31 08:00`。
+  - `每周` 第二个未来项：`2026-02-14 09:00 / 10:00 / 2026-02-13 08:00`。
+  - `每月` 首个未来项：`2026-02-28 09:00 / 10:00 / 2026-02-28 08:00`。
+- 输入 base data 是否未被原地修改：
+  - 验证输出：`base unchanged True`。
+- 未新增 `每年/yearly/daily/weekly/monthly` 行为说明：
+  - 命令：`rg -n "每年|yearly|daily|weekly|monthly" src/services/schedule_repeat_service.py src/data/database.py`
+  - 结果：无输出（退出码 1）。
+  - 结论：未新增上述规则分支。
+- service import 验证结果：
+  - 输出：`repeat service import ok <class 'src.services.schedule_repeat_service.ScheduleRepeatService'>`。
+- service 静态依赖检查结果：
+  - 命令：`rg -n "QWidget|PyQt|PySide|src\.ui|db_manager|src\.repositories|ScheduleRepository|CategoryRepository" src/services/schedule_repeat_service.py`
+  - 结果：无输出（退出码 1，符合预期）。
+- `database.py` 写入边界复核结果：
+  - 命令：`rg -n "with db\.atomic|insert_many|batch_size|return True|return False|Schedule\.create|Schedule\.update|Schedule\.delete" src/data/database.py`
+  - 结论：
+    - `add_schedule` 仍由 `DatabaseManager` 执行 `Schedule.create` 或 `insert_many`。
+    - `update_schedule_with_repeat` 仍由 `DatabaseManager` 执行 `update/delete/insert_many`。
+    - 事务块和批量插入仍保留在 `database.py`。
+    - 返回语义仍是 `True/False`。
+- py_compile 结果：
+  - `python -m py_compile src/services/schedule_repeat_service.py src/data/database.py` 通过（无输出）。
+- diff 范围检查结果：
+  - `git diff --name-only -- src/ui` -> 无输出。
+  - `git diff --name-only -- src/data/models.py` -> 无输出。
+  - `git diff --name-only -- src/repositories` -> 无输出。
+  - `git diff --name-only -- main.py` -> 无输出。
+  - `git diff --name-only -- requirements.txt` -> 无输出。
+  - `git diff --name-only -- schedule.db` -> 无输出。
+  - `git diff --name-only` -> `manage_instruction/Work_Task_Prompts.md`、`src/data/database.py`、`src/services/schedule_repeat_service.py`（写入本日志后另含 `manage_instruction/Work_Log.md`）。
+  - `git status --short --branch` -> `M manage_instruction/Work_Task_Prompts.md`、`M src/data/database.py`、`M src/services/schedule_repeat_service.py`（写入本日志后另含 `M manage_instruction/Work_Log.md`）。
+- 未完成事项：
+  - 等待顾问窗口复核并下发 4-3（`add_schedule` 非重复路径委托）或下一小工单。
+- 风险或疑点：
+  - `build_repeat_insert_plan` 对“非重复/未知规则”在 `include_base=True` 下返回单条 base 计划用于兼容；当前数据库路径不会用该分支替代非重复主路径，但后续工单应继续明确该边界。
+  - 写入协调仍在 `database.py`，后续若继续抽取需重点保持异常与事务语义一致。

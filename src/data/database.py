@@ -103,32 +103,12 @@ class DatabaseManager:
         
         # 2. 重复日程，执行批量生成逻辑
         group_id = str(uuid.uuid4())
-        data['group_id'] = group_id
-        schedules_to_insert = [data.copy()]
-        
-        base_start = data.get('start_time')
-        base_end = data.get('end_time')
-        base_reminder = data.get('reminder_time')
-        
-        # 设定循环上限 (天/周铺一年，月铺12个月)
-        loop_count = 0
-        if rule == '每天': loop_count = 365
-        elif rule == '每周': loop_count = 52
-        elif rule == '每月': loop_count = 12
-        
-        for i in range(1, loop_count + 1):
-            new_data = data.copy()
-            shifted_start, shifted_end, shifted_reminder = ScheduleRepeatService.shift_triplet(
-                base_start, base_end, base_reminder, rule, i
-            )
-            if base_start:
-                new_data['start_time'] = shifted_start
-            if base_end:
-                new_data['end_time'] = shifted_end
-            if base_reminder:
-                new_data['reminder_time'] = shifted_reminder
-                
-            schedules_to_insert.append(new_data)
+        schedules_to_insert = ScheduleRepeatService.build_repeat_insert_plan(
+            data,
+            rule,
+            group_id,
+            include_base=True,
+        )
             
         try:
             # 使用原子事务批量插入，性能最高 (分批插防上限)
@@ -204,31 +184,12 @@ class DatabaseManager:
                 base_data = updated_schedule.__data__.copy()
                 base_data.pop('id', None)           
                 base_data.pop('created_at', None)   
-                base_data['group_id'] = group_id   
-                
-                schedules_to_insert = []
-                base_start = updated_schedule.start_time
-                base_end = updated_schedule.end_time
-                base_reminder = updated_schedule.reminder_time
-                
-                loop_count = 0
-                if new_rule == '每天': loop_count = 365
-                elif new_rule == '每周': loop_count = 52
-                elif new_rule == '每月': loop_count = 12
-                
-                for i in range(1, loop_count + 1):
-                    new_item = base_data.copy()
-                    shifted_start, shifted_end, shifted_reminder = ScheduleRepeatService.shift_triplet(
-                        base_start, base_end, base_reminder, new_rule, i
-                    )
-                    if base_start:
-                        new_item['start_time'] = shifted_start
-                    if base_end:
-                        new_item['end_time'] = shifted_end
-                    if base_reminder:
-                        new_item['reminder_time'] = shifted_reminder
-                        
-                    schedules_to_insert.append(new_item)
+                schedules_to_insert = ScheduleRepeatService.build_repeat_insert_plan(
+                    base_data,
+                    new_rule,
+                    group_id,
+                    include_base=False,
+                )
                     
                 if schedules_to_insert:
                     with db.atomic():
