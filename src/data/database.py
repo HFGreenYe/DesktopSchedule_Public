@@ -158,23 +158,12 @@ class DatabaseManager:
             
             # 4. 斩断旧的未来：如果原来属于某个循环组，把未来的同组日程全删了
             if old_group_id:
-                if current_schedule.start_time:
-                    Schedule.delete().where(
-                        (Schedule.group_id == old_group_id) & 
-                        (Schedule.id != schedule_id) & 
-                        (Schedule.start_time > current_schedule.start_time)
-                    ).execute()
-                elif current_schedule.end_time:
-                    Schedule.delete().where(
-                        (Schedule.group_id == old_group_id) & 
-                        (Schedule.id != schedule_id) & 
-                        (Schedule.end_time > current_schedule.end_time)
-                    ).execute()
-                else:
-                    Schedule.delete().where(
-                        (Schedule.group_id == old_group_id) & 
-                        (Schedule.id > schedule_id)
-                    ).execute()
+                ScheduleService.delete_future_schedules_for_group(
+                    Schedule,
+                    old_group_id,
+                    schedule_id,
+                    current_schedule,
+                )
 
             # 5. 重建新的未来：如果新规则是循环，就重新生成
             if new_rule not in ('none', '无', '不重复', ''):

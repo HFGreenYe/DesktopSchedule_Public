@@ -14,14 +14,14 @@
 
 第四轮（日程写入与重复规则服务）已启动。
 
-当前已完成 4-7a（已有重复组 update_future=True 未来更新路径行为基线验收），等待顾问窗口复核与后续 4-7b 或下一小工单发布。
+当前已完成 4-7b（已有重复组 update_future=True 旧未来删除策略最小委托），等待顾问窗口复核与后续小工单发布。
 
 ## 当前轮次注意事项
 
-- 4-7a 已完成已有重复组 `update_schedule_with_repeat(update_future=True)` 未来更新路径的行为基线验收；本轮未改源码。
+- 4-7b 已完成已有重复组 `update_schedule_with_repeat(update_future=True)` 旧未来删除策略的最小 service 委托。
 - 后续第四轮涉及 `add_schedule`、`update_schedule_with_repeat`、重复规则日期计算等高风险写入逻辑，必须继续拆成多个小工单推进。
 - 执行窗口不得沿用第三轮 3-6 或第三轮任一提示词继续执行。
-- 执行窗口不得在未收到后续正式提示词前自行开始 4-7b 或其他写入路径改造。
+- 执行窗口不得在未收到后续正式提示词前自行开始后续写入路径改造。
 
 ## 2026-05-17 第四轮 4-0（静态审查与只读基线定位）
 
@@ -646,3 +646,99 @@
   - 4-7b 若要改造，应严格保持“旧未来删除 + 新未来重建”的边界和事务/返回语义。
 - 是否建议进入 4-7b：
   - 可以进入 4-7b。当前行为基线清晰，且本轮验收未发现阻塞疑点。
+
+## 2026-05-18 第四轮 4-7b（已有重复组 update_future=True 旧未来删除策略最小委托）
+
+- 本轮任务名称：第四轮 4-7b（已有重复组 update_future=True 旧未来删除策略最小委托）。
+- 开工前是否已有管理文档 diff：
+  - 有。开工前已有 `manage_instruction/Work_Task_Prompts.md`（顾问窗口维护的 4-7b 提示词锚点）diff，不视为本轮源码改动。
+- 实际修改文件：
+  - `src/services/schedule_service.py`
+  - `src/data/database.py`
+  - `manage_instruction/Work_Log.md`
+- 新增/修改的 `ScheduleService` 方法名：
+  - `ScheduleService.delete_future_schedules_for_group(schedule_model, old_group_id, schedule_id, current_schedule)`
+- 委托前后边界说明：
+  - 委托前：`DatabaseManager.update_schedule_with_repeat(...)` 内联执行旧未来实例删除。
+  - 委托后：旧未来删除策略由 `ScheduleService.delete_future_schedules_for_group(...)` 执行；`DatabaseManager` 仍负责整体流程协调。
+- 明确记录：只委托旧未来删除策略。
+- 明确记录：当前条 update 未迁移。
+- 明确记录：新未来重建未迁移。
+- 明确记录：事务边界未改。
+- 明确记录：`insert_many` / `batch_size=100` 未改。
+- 明确记录：`add_schedule` 未改。
+- 明确记录：`update_future=False` 路径未改。
+- 明确记录：非组转重复路径未改。
+- 明确记录：取消重复路径未处理。
+- 明确记录：未新增 `parent_id`。
+- 明确记录：未新增 `每年/yearly/daily/weekly/monthly` 行为。
+- 静态定位修改点复核：
+  - `ScheduleService` 中保留 `start_time / end_time / id` 三段回退删除策略。
+  - `DatabaseManager.update_schedule_with_repeat` 中调用位置仍在当前条 update 之后、新未来重建之前。
+  - `ScheduleRepeatService.build_repeat_insert_plan(..., include_base=False)` 未改。
+  - `insert_many` / `db.atomic` / `batch_size=100` 仍在 `database.py`。
+
+### 4-7a 等价行为回归结果
+
+- 临时数据标题前缀：
+  - `__tmp_4_7b_existing_group_1779107566893408200`
+- 原 `group_id`：
+  - `5aedc29b-fc54-4bc1-90fa-f8a5cc28922e`
+- 被选中的中间项 id：
+  - `93`
+- 更新前当前之前旧实例数量：
+  - `10`
+- 更新前当前之后旧未来实例数量：
+  - `42`
+- 更新后保留旧实例数量：
+  - `10`
+- 更新后新未来实例数量：
+  - `12`
+- 更新后旧未来实例残留检查结果：
+  - `old future left []`
+- 同组最终总数：
+  - `23`
+- 第一个和第二个新未来项时间：
+  - 第一个：`2026-04-18 09:00:00`
+  - 第二个：`2026-05-18 09:00:00`
+- 删除整组结果：
+  - `deleted group 23`
+- 前缀残留检查结果：
+  - 验收脚本内：`leftovers 0`。
+  - 复查命令：`__tmp_4_7b_existing_group_` 残留 `0`。
+
+### 4-5 轻量回归结果
+
+- 临时数据标题前缀：
+  - `__tmp_4_7b_current_only_guard_`
+- 验证结果：
+  - `update_future=False` 返回 `True`。
+  - 当前条脱组，更新后 `group_id is None`。
+  - 原组剩余 `52` 条。
+  - 删除当前条 `1` 条，删除剩余组 `52` 条。
+  - 前缀残留 `0`。
+
+- `schedule.db` 是否无 tracked diff：
+  - `git diff --name-only -- schedule.db` -> 无输出。
+- service import / db import 验证结果：
+  - 输出：`imports ok <class 'src.services.schedule_service.ScheduleService'> <class 'src.services.schedule_repeat_service.ScheduleRepeatService'> 75`。
+- service 静态依赖检查结果：
+  - `rg -n "QWidget|PyQt|PySide|src\.ui|db_manager|src\.repositories|ScheduleRepository|CategoryRepository" src/services/schedule_repeat_service.py src/services/schedule_service.py` -> 无输出（退出码 1，视为通过）。
+- 未新增不允许规则和字段检查结果：
+  - `rg -n "每年|yearly|daily|weekly|monthly|parent_id" src/data/database.py src/services/schedule_repeat_service.py src/services/schedule_service.py` -> 无输出（退出码 1）。
+- py_compile 结果：
+  - `python -m py_compile src/services/schedule_repeat_service.py src/services/schedule_service.py src/data/database.py` 通过（无输出）。
+- diff 范围检查结果：
+  - `git diff --name-only -- src/ui` -> 无输出。
+  - `git diff --name-only -- src/data/models.py` -> 无输出。
+  - `git diff --name-only -- src/repositories` -> 无输出。
+  - `git diff --name-only -- main.py` -> 无输出。
+  - `git diff --name-only -- requirements.txt` -> 无输出。
+  - `git diff --name-only -- schedule.db` -> 无输出。
+  - `git diff --name-only` -> `manage_instruction/Work_Task_Prompts.md`、`src/data/database.py`、`src/services/schedule_service.py`（写入本日志后另含 `manage_instruction/Work_Log.md`）。
+  - `git status --short --branch` -> `M manage_instruction/Work_Task_Prompts.md`、`M src/data/database.py`、`M src/services/schedule_service.py`（写入本日志后另含 `M manage_instruction/Work_Log.md`）。
+- 未完成事项：
+  - 等待顾问窗口复核并下发下一小工单。
+- 风险或疑点：
+  - 本轮只移动旧未来删除策略；取消重复路径仍未处理。
+  - 4-7b 没有调整事务边界；旧逻辑中当前条 update、旧未来删除、新未来重建仍沿用既有流程。
