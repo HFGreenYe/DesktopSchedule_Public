@@ -14,14 +14,14 @@
 
 第四轮（日程写入与重复规则服务）已启动。
 
-当前已完成 4-3（add_schedule 非重复路径委托），等待顾问窗口复核与后续 4-4 小工单发布。
+当前已完成 4-5（update_future=False 仅当前修改路径行为验收），等待顾问窗口复核与后续 4-6 小工单发布。
 
 ## 当前轮次注意事项
 
-- 4-3 只处理 `add_schedule` 非重复新增路径委托；重复路径和 `update_schedule_with_repeat` 未改。
+- 4-5 已完成 `update_schedule_with_repeat(update_future=False)` 仅当前修改路径的行为基线验收；本轮未改源码。
 - 后续第四轮涉及 `add_schedule`、`update_schedule_with_repeat`、重复规则日期计算等高风险写入逻辑，必须继续拆成多个小工单推进。
 - 执行窗口不得沿用第三轮 3-6 或第三轮任一提示词继续执行。
-- 执行窗口不得在未收到 4-4 正式提示词前自行开始重复路径改造。
+- 执行窗口不得在未收到后续正式提示词前自行开始 4-6 或其他写入路径改造。
 
 ## 2026-05-17 第四轮 4-0（静态审查与只读基线定位）
 
@@ -400,3 +400,79 @@
   - 无（4-4 验收项已按新命令复跑完成）。
 - 风险或疑点：
   - 需保持后续验收脚本统一使用 UTF-8 输出，避免在 `gbk` 控制台再次因 emoji 打印中断。
+
+## 2026-05-18 第四轮 4-5（update_future=False 仅当前修改路径）
+
+- 本轮任务名称：第四轮 4-5（update_future=False 仅当前修改路径）。
+- 开工前是否已有管理文档 diff：
+  - 有。开工前已有 `manage_instruction/Work_Task_Prompts.md`（顾问窗口维护的 4-5 提示词锚点）diff，不视为本轮源码改动。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+- 是否改源码：
+  - 否。本轮仅做行为基线验收。
+- `update_future=False` 分支复核结论：
+  - 复核通过。`src/data/database.py` 中 `if not update_future` 分支在旧条存在 `group_id` 时设置 `new_data['group_id'] = None`，随后只对当前 `schedule_id` 执行 `Schedule.update(...)` 并返回 `True`。
+  - `Schedule.delete(...)`、`ScheduleRepeatService.build_repeat_insert_plan(...)`、`insert_many` 均不属于 `update_future=False` 分支。
+- 是否保持：只更新当前条：
+  - 是。验收中被选中条目更新成功，原组其他 52 条仍存在。
+- 是否保持：当前条脱离旧 `group_id`：
+  - 是。被选中条目更新后 `group_id` 为 `None`。
+- 是否保持：同组其他项不修改、不删除：
+  - 是。原组剩余数量为 `52`，其他组内条目未出现目标新标题。
+- 明确记录：`add_schedule` 未改。
+- 明确记录：`update_future=True` 路径未改。
+- 明确记录：未新增 `parent_id`。
+- 明确记录：未新增 `每年/yearly/daily/weekly/monthly` 行为。
+- 临时数据标题前缀：
+  - `__tmp_4_5_update_current_1779087848834408300`
+- 临时重复组创建数量和 `group_id`：
+  - 创建规则：`每周`。
+  - 创建数量：`53`。
+  - `group_id`：`e4a82c40-2e21-4222-b20d-bc1655f29531`。
+- 被选中的中间项 id：
+  - `93`（按 `start_time, id` 排序后的第 10 条，脚本使用 `rows[10]`）。
+- `update_schedule_with_repeat(..., update_future=False)` 返回结果：
+  - `True`。
+- 当前条更新结果和脱组结果：
+  - 当前条标题更新为 `__tmp_4_5_update_current_1779087848834408300_updated_current_only`。
+  - 当前条 `group_id` 为 `None`。
+- 原组剩余数量：
+  - `52`。
+- 其他组内条目是否未被修改：
+  - 是。`changed others []`。
+- 删除脱组当前条结果：
+  - `deleted current 1`。
+- 删除剩余临时组结果：
+  - `deleted group 52`。
+- 前缀残留检查结果：
+  - 验收脚本内：`leftovers 0`。
+  - 复查命令：`tmp 4-5 leftovers 0`。
+- 中断与复跑说明：
+  - 本轮验收因执行环境/网络不稳定，前两次执行中途无响应并由用户手动终止，第三次完整执行成功。
+  - 针对中断可能造成的临时数据残留，复核了 `__tmp_4_5_update_current_` 前缀残留，结果为 `0`。
+  - 顾问窗口另用独立前缀 `__tmp_4_5_consult_` 复跑同一行为验收，创建、脱组更新、删除当前条、删除剩余组、残留检查均通过。
+  - `schedule.db` 最终无 tracked diff。
+- `schedule.db` 是否无 tracked diff：
+  - `git diff --name-only -- schedule.db` -> 无输出。
+- service import / db import 验证结果：
+  - 输出：`imports ok <class 'src.services.schedule_service.ScheduleService'> 75`。
+- service 静态依赖检查结果：
+  - `rg -n "QWidget|PyQt|PySide|src\.ui|db_manager|src\.repositories|ScheduleRepository|CategoryRepository" src/services/schedule_service.py` -> 无输出（退出码 1，视为通过）。
+- 未新增不允许规则和字段检查结果：
+  - `rg -n "每年|yearly|daily|weekly|monthly|parent_id" src/data/database.py src/services/schedule_service.py` -> 无输出（退出码 1）。
+- py_compile 结果：
+  - `python -m py_compile src/services/schedule_service.py src/data/database.py` 通过（无输出）。
+- diff 范围检查结果：
+  - `git diff --name-only -- src/services/schedule_repeat_service.py` -> 无输出。
+  - `git diff --name-only -- src/ui` -> 无输出。
+  - `git diff --name-only -- src/data/models.py` -> 无输出。
+  - `git diff --name-only -- src/repositories` -> 无输出。
+  - `git diff --name-only -- main.py` -> 无输出。
+  - `git diff --name-only -- requirements.txt` -> 无输出。
+  - `git diff --name-only -- schedule.db` -> 无输出。
+  - `git diff --name-only` -> 写入本日志前仅 `manage_instruction/Work_Task_Prompts.md`；写入本日志后为 `manage_instruction/Work_Log.md`、`manage_instruction/Work_Task_Prompts.md`。
+  - `git status --short --branch` -> 写入本日志前仅 `M manage_instruction/Work_Task_Prompts.md`；写入本日志后另含 `M manage_instruction/Work_Log.md`。
+- 未完成事项：
+  - 无。等待顾问窗口复核并下发 4-6 或下一小工单。
+- 风险或疑点：
+  - 本轮未做源码委托，仅确认旧行为边界；后续如抽取 `update_future=False` 写入协调，必须继续保持当前条脱组和原组不变语义。

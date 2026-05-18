@@ -1,49 +1,40 @@
-请执行第四轮 4-4：`add_schedule` 重复路径委托收口与写入验收。本轮只处理 `DatabaseManager.add_schedule(data)` 的重复路径，不处理 `update_schedule_with_repeat`。
+请执行第四轮 4-5：`update_schedule_with_repeat(update_future=False)` 路径委托准备与行为验收。本轮只处理“仅修改当前这一条”的路径，不处理影响未来路径。
 
 ## 1. 本轮目标
 
-基于第四轮合同和 4-0 ~ 4-3 结论，确认并收口 `add_schedule` 的重复路径委托。
+基于第四轮合同和 4-0 ~ 4-4 结论，验证并准备 `DatabaseManager.update_schedule_with_repeat(schedule_id, new_data, update_future=False)` 的旧行为边界。
 
-当前重复路径已通过 `ScheduleRepeatService.build_repeat_insert_plan(...)` 生成待插入计划。本轮重点是：
+本轮重点：
 
-- 复核 `add_schedule` 重复路径是否已经正确委托生成计划。
-- 如已满足边界，默认不改源码，只做重复写入验收并记录。
-- 如发现重复路径仍有未委托或边界不符，只做最小修正。
-- 验证 `每天 / 每周 / 每月` 三类重复新增行为。
-- 验证生成数量不变：
-  - `每天`：366 条。
-  - `每周`：53 条。
-  - `每月`：13 条。
-- 验证同批生成项 `group_id` 一致。
-- 验证后必须按 `group_id` 清理临时数据。
+- 只关注 `update_future=False` 分支。
+- 该分支旧语义必须保持：
+  - 只更新当前选中的这一条。
+  - 如果当前条原本属于重复组，则当前条更新后脱离原 `group_id`，即 `group_id=None`。
+  - 同组其他日程不被修改。
+  - 同组其他日程不被删除。
+- 使用临时重复组验收。
+- 选临时重复组的中间一条做修改。
+- 验证完成后清理整组与脱组后的当前条。
 - 最终 `schedule.db` 无 tracked diff。
 
-本轮不处理：
-
-- `add_schedule` 非重复路径。
-- `update_schedule_with_repeat`。
-- UI。
-- Repository。
-- 模型字段。
-- 迁移逻辑。
+本轮默认以行为验收和边界记录为主。若代码已符合边界，优先不改源码。若确需为后续委托做极小 service 方法，也必须只覆盖 `update_future=False` 分支，不得触碰未来更新路径。
 
 ## 2. 允许/禁止
 
 本轮允许修改：
 
-- `src/data/database.py`（仅当重复路径委托边界不符合时，做最小修正）
-- `src/services/schedule_repeat_service.py`（仅当生成计划边界不符合时，做最小修正）
+- `src/services/schedule_service.py`（仅当需要抽取 `update_future=False` 的最小写入协调时）
+- `src/data/database.py`（仅限 `update_schedule_with_repeat` 的 `update_future=False` 分支）
 - `manage_instruction/Work_Log.md`
 - `manage_instruction/Work_Task_Prompts.md`（仅在需要维护本轮复核锚点时）
 
 本轮默认预期：
 
-- 不改源码。
-- 只更新 `Work_Log.md` 和必要的 `Work_Task_Prompts.md`。
+- 如果当前边界清楚且无需改造，可以不改源码，只做临时写库行为验收并记录。
 
 本轮禁止修改：
 
-- `src/services/schedule_service.py`
+- `src/services/schedule_repeat_service.py`
 - `src/ui/`
 - `src/data/models.py`
 - `src/repositories/`
@@ -54,106 +45,98 @@
 
 禁止事项：
 
-- 不修改 `add_schedule` 非重复路径。
-- 不修改 `update_schedule_with_repeat`。
+- 不修改 `add_schedule`。
+- 不修改 `update_future=True` 路径。
+- 不修改旧未来实例删除逻辑。
+- 不修改未来实例重建逻辑。
 - 不新增 `parent_id`。
 - 不新增 `每年 / yearly / daily / weekly / monthly` 行为。
-- 不改变 `每天 / 每周 / 每月` 生成数量。
-- 不改变 `group_id` 语义。
-- 不改变 `db.atomic`、`insert_many`、`batch_size=100` 的职责归属。
-- 不改变 `DatabaseManager.add_schedule(data)` 成功 `True`、失败 `False` 的返回语义。
-- 不让 service 依赖 UI / db_manager / Repository。
+- 不修改 UI 的 `group_id` 内存态同步。
+- 不修改数据库字段、迁移逻辑、表名、默认值。
+- 不改变 `db_manager.update_schedule_with_repeat(...)` 方法名、参数、返回语义。
 - 不保留临时数据。
 - 不保留 `schedule.db` tracked diff；允许为了验收临时写入，但必须清理。
 
-若任一临时重复组清理失败，立即停止后续验证，并在 `Work_Log.md` 记录失败规则、临时标题前缀、`group_id`、失败原因和需要人工清理的信息。
+若临时重复组创建、修改、清理任一环节失败，立即停止后续验证，并在 `Work_Log.md` 记录临时标题前缀、`group_id`、失败位置和需要人工清理的信息。
 
 ## 3. 具体任务
 
 1. 读取：
    - `manage_instruction/Work_Instruction.md`
-   - `manage_instruction/Work_Log.md` 中 4-0 ~ 4-3 结论
+   - `manage_instruction/Work_Log.md` 中 4-0 ~ 4-4 结论
 
 2. 复核当前代码：
-   - `src/data/database.py` 中 `add_schedule`
-   - `src/services/schedule_repeat_service.py`
-   - 确认重复路径仍通过 `ScheduleRepeatService.build_repeat_insert_plan(data, rule, group_id, include_base=True)` 生成计划。
-   - 确认 `DatabaseManager` 仍负责：
-     - 创建 `group_id`
-     - `db.atomic`
-     - `insert_many`
-     - `batch_size=100`
-     - `True / False` 返回
+   - `src/data/database.py` 中 `update_schedule_with_repeat`
+   - `src/services/schedule_service.py`
+   - 确认 `update_future=False` 分支当前行为：
+     - 有旧 `group_id` 时写入 `new_data['group_id'] = None`
+     - 只对当前 `schedule_id` 执行 `Schedule.update(...)`
+     - 成功返回 `True`
+     - 异常返回 `False`
 
 3. 判断是否需要源码修改：
-   - 若重复路径已符合上述边界：不改源码。
-   - 若不符合：只做最小修正，且不得影响非重复路径和 `update_schedule_with_repeat`。
+   - 若只是验收当前行为：不改源码。
+   - 若做最小委托：只允许把 `update_future=False` 当前条更新逻辑抽到 `ScheduleService`，并保持 `DatabaseManager` 对外 API 与异常处理语义不变。
+   - 不得改 `update_future=True` 后续分支。
 
-4. 执行三组临时重复写入验收：
-   - 标题前缀固定为：`__tmp_4_4_repeat_`
-   - 分别验证规则：
-     - `每天`
-     - `每周`
-     - `每月`
-   - 每组创建后立即确认数量、`group_id`，再按 `group_id` 清理。
-   - 任一清理失败立即停止。
+4. 使用临时重复组进行行为验收：
+   - 通过现有 `db_manager.add_schedule(...)` 创建一个 `每周` 临时重复组。
+   - 标题前缀固定为：`__tmp_4_5_update_current_`
+   - 预期生成 53 条。
+   - 选中间一条，例如按 `start_time` 排序后的第 10 条。
+   - 记录该条原 `id`、原 `group_id`、原 `title`、原 `description`。
+   - 调用 `db_manager.update_schedule_with_repeat(target_id, new_data, update_future=False)`。
+   - 验证：
+     - 返回 `True`。
+     - 当前条 title 或 description 已更新。
+     - 当前条 `group_id is None`。
+     - 原重复组剩余 52 条仍存在。
+     - 原重复组其他条目的标题未被改成目标条的新标题。
+     - 原重复组其他条目没有被删除。
+   - 清理：
+     - 删除脱组后的当前条。
+     - 按原 `group_id` 删除剩余临时组。
+     - 确认前缀无残留。
 
 5. 更新 `manage_instruction/Work_Log.md`。
 
 ## 4. 验收命令
 
-静态复核重复路径：
+静态复核 `update_future=False` 分支：
 
 ```cmd
-rg -n "def add_schedule|build_repeat_insert_plan|uuid|group_id|with db\.atomic|batch_size|insert_many|return True|return False|create_single_schedule|update_schedule_with_repeat" src/data/database.py
+rg -n "def update_schedule_with_repeat|if not update_future|group_id.*None|Schedule\.update|Schedule\.delete|build_repeat_insert_plan|insert_many|return True|return False" src/data/database.py
 ```
 
 人工复核该输出，确认：
 
-- 非重复路径仍调用 `ScheduleService.create_single_schedule(...)`。
-- 重复路径仍调用 `ScheduleRepeatService.build_repeat_insert_plan(..., include_base=True)`。
-- `group_id` 仍在 `DatabaseManager.add_schedule` 中创建。
-- `db.atomic`、`insert_many`、`batch_size=100` 仍在 `DatabaseManager.add_schedule` 中。
-- `update_schedule_with_repeat` 未被本轮修改。
+- `update_future=False` 分支只更新当前条。
+- `update_future=False` 分支中如有旧 `group_id`，当前条会脱组。
+- `Schedule.delete(...)`、`build_repeat_insert_plan(...)`、`insert_many` 不属于 `update_future=False` 分支。
+- `update_future=True` 分支未被本轮修改。
 
-service import 验证：
+service import / db import 验证：
 
 ```cmd
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.services.schedule_repeat_service import ScheduleRepeatService; from src.data.database import db_manager; print('imports ok', ScheduleRepeatService, len(db_manager.get_all_schedules()))"
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; from src.services.schedule_service import ScheduleService; print('imports ok', ScheduleService, len(db_manager.get_all_schedules()))"
 ```
 
-三组重复临时写入/清理验证。
-
-注意：使用 `-X utf8` 避免 `database.py` 中 `✅/❌` 日志在 GBK 控制台触发 `UnicodeEncodeError`；每条规则单独执行，避免 PowerShell 对多行 `python -c` 展开失败。
-
-验证 `每天`：
+临时重复组 + 仅当前修改行为验收：
 
 ```cmd
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -X utf8 -c "from src.data.database import db_manager; from src.data.models import Schedule; import datetime as dt,time,atexit; rule='每天'; expected=366; title='__tmp_4_4_repeat_'+str(time.time_ns())+'_'+rule; atexit.register(lambda: print('atexit cleanup by title', Schedule.delete().where(Schedule.title==title).execute())); data={'title':title,'item_type':'schedule','priority':0,'repeat_rule':rule,'description':'temporary 4-4 repeat validation','category_id':None,'start_time':dt.datetime(2026,1,31,9,0),'end_time':dt.datetime(2026,1,31,10,0),'reminder_time':dt.datetime(2026,1,31,8,30)}; ok=db_manager.add_schedule(data); print('created', rule, ok); assert ok is True; matches=list(Schedule.select().where(Schedule.title==title)); print('matches', len(matches)); assert len(matches)==expected; gids={m.group_id for m in matches}; print('group ids', gids); assert len(gids)==1; gid=next(iter(gids)); assert gid; deleted=Schedule.delete().where(Schedule.group_id==gid).execute(); print('deleted', deleted); assert deleted==expected; remaining=Schedule.select().where(Schedule.group_id==gid).count(); print('remaining', remaining); assert remaining==0"
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -X utf8 -c "from src.data.database import db_manager; from src.data.models import Schedule; import datetime as dt,time,atexit; prefix='__tmp_4_5_update_current_'+str(time.time_ns()); atexit.register(lambda: print('atexit cleanup by prefix', Schedule.delete().where(Schedule.title.startswith(prefix)).execute())); title=prefix+'_base'; print('prefix', prefix); data={'title':title,'item_type':'schedule','priority':0,'repeat_rule':'每周','description':'temporary 4-5 base','category_id':None,'start_time':dt.datetime(2026,1,7,9,0),'end_time':dt.datetime(2026,1,7,10,0),'reminder_time':dt.datetime(2026,1,7,8,30)}; ok=db_manager.add_schedule(data); print('created group', ok); assert ok is True; rows=list(Schedule.select().where(Schedule.title==title).order_by(Schedule.start_time, Schedule.id)); print('created rows', len(rows)); assert len(rows)==53; gids={r.group_id for r in rows}; print('group ids', gids); assert len(gids)==1; group_id=next(iter(gids)); assert group_id; target=rows[10]; target_id=target.id; old_group_count=Schedule.select().where(Schedule.group_id==group_id).count(); print('target id', target_id, 'group count before', old_group_count); assert old_group_count==53; new_title=prefix+'_updated_current_only'; new_data={'title':new_title,'description':'temporary 4-5 updated current only','repeat_rule':'每周'}; updated=db_manager.update_schedule_with_repeat(target_id,new_data,update_future=False); print('updated current only', updated); assert updated is True; refreshed=Schedule.get_by_id(target_id); print('refreshed', refreshed.id, refreshed.title, refreshed.group_id); assert refreshed.title==new_title; assert refreshed.group_id is None; remaining_group=list(Schedule.select().where(Schedule.group_id==group_id)); print('remaining group count', len(remaining_group)); assert len(remaining_group)==52; changed_others=[r.id for r in remaining_group if r.title==new_title]; print('changed others', changed_others); assert changed_others==[]; deleted_current=Schedule.delete().where(Schedule.id==target_id).execute(); print('deleted current', deleted_current); assert deleted_current==1; deleted_group=Schedule.delete().where(Schedule.group_id==group_id).execute(); print('deleted group', deleted_group); assert deleted_group==52; leftovers=Schedule.select().where(Schedule.title.startswith(prefix)).count(); print('leftovers', leftovers); assert leftovers==0"
 ```
 
-验证 `每周`：
+确认临时前缀无残留：
 
 ```cmd
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -X utf8 -c "from src.data.database import db_manager; from src.data.models import Schedule; import datetime as dt,time,atexit; rule='每周'; expected=53; title='__tmp_4_4_repeat_'+str(time.time_ns())+'_'+rule; atexit.register(lambda: print('atexit cleanup by title', Schedule.delete().where(Schedule.title==title).execute())); data={'title':title,'item_type':'schedule','priority':0,'repeat_rule':rule,'description':'temporary 4-4 repeat validation','category_id':None,'start_time':dt.datetime(2026,1,31,9,0),'end_time':dt.datetime(2026,1,31,10,0),'reminder_time':dt.datetime(2026,1,31,8,30)}; ok=db_manager.add_schedule(data); print('created', rule, ok); assert ok is True; matches=list(Schedule.select().where(Schedule.title==title)); print('matches', len(matches)); assert len(matches)==expected; gids={m.group_id for m in matches}; print('group ids', gids); assert len(gids)==1; gid=next(iter(gids)); assert gid; deleted=Schedule.delete().where(Schedule.group_id==gid).execute(); print('deleted', deleted); assert deleted==expected; remaining=Schedule.select().where(Schedule.group_id==gid).count(); print('remaining', remaining); assert remaining==0"
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.models import Schedule; prefix='__tmp_4_5_update_current_'; count=Schedule.select().where(Schedule.title.startswith(prefix)).count(); print('tmp 4-5 leftovers', count); assert count==0"
 ```
 
-验证 `每月`：
+确认未新增不允许规则和字段：
 
 ```cmd
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -X utf8 -c "from src.data.database import db_manager; from src.data.models import Schedule; import datetime as dt,time,atexit; rule='每月'; expected=13; title='__tmp_4_4_repeat_'+str(time.time_ns())+'_'+rule; atexit.register(lambda: print('atexit cleanup by title', Schedule.delete().where(Schedule.title==title).execute())); data={'title':title,'item_type':'schedule','priority':0,'repeat_rule':rule,'description':'temporary 4-4 repeat validation','category_id':None,'start_time':dt.datetime(2026,1,31,9,0),'end_time':dt.datetime(2026,1,31,10,0),'reminder_time':dt.datetime(2026,1,31,8,30)}; ok=db_manager.add_schedule(data); print('created', rule, ok); assert ok is True; matches=list(Schedule.select().where(Schedule.title==title)); print('matches', len(matches)); assert len(matches)==expected; gids={m.group_id for m in matches}; print('group ids', gids); assert len(gids)==1; gid=next(iter(gids)); assert gid; deleted=Schedule.delete().where(Schedule.group_id==gid).execute(); print('deleted', deleted); assert deleted==expected; remaining=Schedule.select().where(Schedule.group_id==gid).count(); print('remaining', remaining); assert remaining==0"
-```
-
-确认临时数据前缀无残留：
-
-```cmd
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.models import Schedule; prefix='__tmp_4_4_repeat_'; count=Schedule.select().where(Schedule.title.startswith(prefix)).count(); print('tmp repeat leftovers', count); assert count==0"
-```
-
-确认未新增不允许规则：
-
-```cmd
-rg -n "每年|yearly|daily|weekly|monthly|parent_id" src/data/database.py src/services/schedule_repeat_service.py
+rg -n "每年|yearly|daily|weekly|monthly|parent_id" src/data/database.py src/services/schedule_service.py
 ```
 
 预期：不应出现新增实现分支；如只在既有文本、注释或无关上下文中出现，需在日志说明。
@@ -161,7 +144,7 @@ rg -n "每年|yearly|daily|weekly|monthly|parent_id" src/data/database.py src/se
 service 静态依赖检查：
 
 ```cmd
-rg -n "QWidget|PyQt|PySide|src\.ui|db_manager|src\.repositories|ScheduleRepository|CategoryRepository" src/services/schedule_repeat_service.py
+rg -n "QWidget|PyQt|PySide|src\.ui|db_manager|src\.repositories|ScheduleRepository|CategoryRepository" src/services/schedule_service.py
 ```
 
 预期：无输出，退出码 1 视为通过。
@@ -169,13 +152,13 @@ rg -n "QWidget|PyQt|PySide|src\.ui|db_manager|src\.repositories|ScheduleReposito
 语法检查：
 
 ```cmd
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src\services\schedule_repeat_service.py src\data\database.py
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src\services\schedule_service.py src\data\database.py
 ```
 
 范围检查：
 
 ```cmd
-git diff --name-only -- src/services/schedule_service.py
+git diff --name-only -- src/services/schedule_repeat_service.py
 git diff --name-only -- src/ui
 git diff --name-only -- src/data/models.py
 git diff --name-only -- src/repositories
@@ -188,40 +171,48 @@ git status --short --branch
 
 预期：
 
-- `src/services/schedule_service.py` 无 diff。
+- `src/services/schedule_repeat_service.py` 无 diff。
 - `src/ui` 无 diff。
 - `src/data/models.py` 无 diff。
 - `src/repositories` 无 diff。
 - `main.py` 无 diff。
 - `requirements.txt` 无 diff。
 - `schedule.db` 无 tracked diff。
-- 若无需源码修正，最终只允许：
+- 若无需源码修改，最终只允许：
   - `manage_instruction/Work_Log.md`
   - 必要时 `manage_instruction/Work_Task_Prompts.md`
-- 若确需最小源码修正，最终只允许额外包含：
+- 若确需最小源码修改，最终只允许额外包含：
+  - `src/services/schedule_service.py`
   - `src/data/database.py`
-  - 或 `src/services/schedule_repeat_service.py`
 
 ## 5. 日志要求
 
 更新 `manage_instruction/Work_Log.md`，至少记录：
 
-- 本轮任务名称：第四轮 4-4（add_schedule 重复路径委托收口与写入验收）
+- 本轮任务名称：第四轮 4-5（update_future=False 仅当前修改路径）
 - 开工前是否已有管理文档 diff
 - 实际修改文件
-- 是否改源码；如未改，明确写“重复路径已符合 4-2 委托边界，本轮仅验收”
-- `add_schedule` 重复路径委托复核结论
-- `DatabaseManager` 是否仍负责 `group_id / db.atomic / insert_many / batch_size / True-False`
-- 明确记录：非重复路径未改
-- 明确记录：`update_schedule_with_repeat` 未改
+- 是否改源码；如未改，明确写“本轮仅做行为基线验收”
+- `update_future=False` 分支复核结论
+- 是否保持：只更新当前条
+- 是否保持：当前条脱离旧 `group_id`
+- 是否保持：同组其他项不修改、不删除
+- 明确记录：`add_schedule` 未改
+- 明确记录：`update_future=True` 路径未改
 - 明确记录：未新增 `parent_id`
 - 明确记录：未新增 `每年/yearly/daily/weekly/monthly` 行为
 - 临时数据标题前缀
-- `每天` 创建数量、`group_id` 一致性、清理数量、残留检查结果
-- `每周` 创建数量、`group_id` 一致性、清理数量、残留检查结果
-- `每月` 创建数量、`group_id` 一致性、清理数量、残留检查结果
+- 临时重复组创建数量和 `group_id`
+- 被选中的中间项 id
+- `update_schedule_with_repeat(..., update_future=False)` 返回结果
+- 当前条更新结果和脱组结果
+- 原组剩余数量
+- 其他组内条目是否未被修改
+- 删除脱组当前条结果
+- 删除剩余临时组结果
+- 前缀残留检查结果
 - `schedule.db` 是否无 tracked diff
-- service import 验证结果
+- service import / db import 验证结果
 - service 静态依赖检查结果
 - py_compile 结果
 - diff 范围检查结果
