@@ -236,11 +236,7 @@ class MainWindow(FramelessMainWindow):
                 print(f"⏰️ 秒级触发提醒: {s.title} (延迟 {diff:.2f}s)")
 
     def show_reminder_popup(self, schedule_data):
-        data_dict = {
-            'title': schedule_data.title,
-            'is_alarm': schedule_data.is_alarm,
-            'target_time': schedule_data.start_time if schedule_data.start_time else schedule_data.end_time
-        }
+        data_dict = self.reminder_service.build_reminder_popup_data(schedule_data)
         
         self.current_popup = ReminderPop(data_dict)
         self.current_popup.show()

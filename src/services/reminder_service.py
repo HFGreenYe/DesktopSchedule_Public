@@ -84,3 +84,11 @@ class ReminderService:
         if start_time is not None:
             return start_time
         return getattr(schedule, "end_time", None)
+
+    def build_reminder_popup_data(self, schedule: Any) -> dict[str, Any]:
+        """Build popup payload with legacy keys and value semantics."""
+        return {
+            "title": schedule.title,
+            "is_alarm": schedule.is_alarm,
+            "target_time": self.select_target_time(schedule),
+        }

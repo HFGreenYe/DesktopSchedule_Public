@@ -16,12 +16,12 @@
 
 当前处于第五轮“提醒与运行期状态服务”。
 
-第五轮 `5-3` MainWindow 提醒扫描最小委托已完成，等待 `5-4` 正式提示词。
+第五轮 `5-4` 提醒弹窗数据构造边界收口已完成，等待 `5-5` 正式提示词。
 
 ## 当前轮次注意事项
 
 - 第四轮 4-0 ~ 4-9 已归档到 `History_Log.md`。
-- 当前没有正在执行的小工单；下一步等待 `5-4` 提示词。
+- 当前没有正在执行的小工单；下一步等待 `5-5` 提示词。
 - 执行窗口不得沿用第四轮 4-9 或第四轮任一提示词继续执行。
 - 执行窗口不得在未收到第五轮后续正式提示词前自行开始提醒服务改造。
 
@@ -364,3 +364,84 @@
   - 复验 `ReminderService.collect_due_schedules` 不隐式标记、`mark_triggered` 后过滤、`should_trigger` 不受去重状态影响。
   - diff 范围确认：`src/ui` 仅 `main_window.py` 有 diff；`src/ui/reminder_pop.py`、`main.py`、`requirements.txt`、`schedule.db` 无 diff；`main_window.py` 末尾补换行属于无行为格式变化。
   - 5-3 可验收通过。
+
+## 2026-05-21 第五轮 5-4（提醒弹窗数据构造边界收口）
+
+- 本轮任务名与边界：
+  - 工单：第五轮 `5-4` 提醒弹窗数据构造边界收口。
+  - 边界：仅把弹窗 `data_dict` 纯构造逻辑收口到 `ReminderService`；不改扫描主流程语义，不改 UI/声音/QTimer 边界。
+
+- 开工前 git 状态基线：
+  - `git status --short` 结果：
+    - `M manage_instruction/Work_Task_Prompts.md`
+  - 该项为开工前既有 diff。
+
+- 实际新增/修改文件：
+  - 修改：`src/services/reminder_service.py`
+  - 修改：`src/ui/main_window.py`
+  - 更新：`manage_instruction/Work_Log.md`
+
+- `ReminderService` 新增的弹窗数据构造方法说明：
+  - 新增 `build_reminder_popup_data(schedule)`。
+  - 返回字段固定为：`title`、`is_alarm`、`target_time`。
+  - 值语义保持：
+    - `title` 来自 `schedule.title`
+    - `is_alarm` 来自 `schedule.is_alarm`
+    - `target_time` 复用 `select_target_time(schedule)`（`start_time` 优先，否则 `end_time`，都无时 `None`）。
+
+- `show_reminder_popup` 保持不变的副作用边界说明（弹窗 + 声音）：
+  - `MainWindow.show_reminder_popup()` 仍负责：
+    - `ReminderPop(data_dict)` 创建
+    - `self.current_popup.show()` 显示
+    - `winsound.PlaySound(...)` 播放声音（仅 `schedule_data.is_alarm` 为真）
+  - 本轮仅把 `data_dict` 的构造改为：
+    - `data_dict = self.reminder_service.build_reminder_popup_data(schedule_data)`
+
+- 假对象验证结果（bundled Python）：
+  - `start_time` 存在时：`target_time == start_time`（通过）。
+  - `start_time` 为空且 `end_time` 存在时：`target_time == end_time`（通过）。
+  - `start_time` / `end_time` 都为空时：`target_time is None`（通过）。
+  - `title` / `is_alarm` 原样来自 schedule（通过）。
+  - dict key 精确等于 `title/is_alarm/target_time`（通过，无新增遗漏字段）。
+
+- py_compile / import / 静态依赖检查结果：
+  - `.venv` 验证：
+    - `.\.venv\Scripts\python.exe -m py_compile src/services/reminder_service.py src/ui/main_window.py`：失败（Unable to create process）。
+    - `.\.venv\Scripts\python.exe -c "from src.services.reminder_service import ReminderService; ..."`：失败（同原因）。
+  - 回退 bundled Python：
+    - `py_compile src/services/reminder_service.py src/ui/main_window.py`：通过。
+    - import `ReminderService`：通过，输出 `reminder service import ok`。
+  - 静态依赖检查：
+    - `rg -n "QWidget|QTimer|winsound|ReminderPop|db_manager|src\.ui|PyQt|PySide" src/services/reminder_service.py`
+    - 结果：无输出/无匹配（`rg` 退出码 1，符合预期）。
+
+- diff 范围检查结果：
+  - `git diff --name-only -- src/ui`：仅 `src/ui/main_window.py`。
+  - `git diff --name-only -- main.py requirements.txt schedule.db`：无输出。
+  - `git status --short`：
+    - `M manage_instruction/Work_Task_Prompts.md`（既有）
+    - `M src/services/reminder_service.py`（本轮预期）
+    - `M src/ui/main_window.py`（本轮预期）
+
+- 本轮未做事项（按工单要求）：
+  - 未修改 `src/ui/reminder_pop.py`。
+  - 未迁移声音播放到 service。
+  - 未迁移 QTimer 到 service。
+  - 未改变 `check_reminders()` 的 `collect -> show -> mark` 顺序。
+  - 未新增提醒持久化字段/表/迁移。
+
+- 风险与后续建议（供 5-5 使用）：
+  - 5-5 可重点做回归验证：`show_reminder_popup` 输入 dict 字段一致性与到点触发行为保持。
+  - 若后续补异常保护，仍需保证 `mark_triggered(s.id)` 在 `show_reminder_popup(s)` 成功调用之后。
+
+- 特别记录：
+  - 本工单完成后不要提交 Git，等待顾问窗口审核。
+- 顾问复验补充：
+  - 顾问修正 `build_reminder_popup_data(schedule)`，将 `title` / `is_alarm` 改为直接读取 `schedule.title` / `schedule.is_alarm`，保持与旧 `MainWindow.show_reminder_popup()` 内联构造完全一致。
+  - 使用 Codex bundled Python 复跑 `py_compile src/services/reminder_service.py src/ui/main_window.py` 和 `ReminderService` import 验证，均通过。
+  - 复跑弹窗 dict 假对象验证，确认 key 精确等于 `title`、`is_alarm`、`target_time`，且 `target_time` 选择语义保持不变。
+  - 静态依赖检查确认 `ReminderService` 未依赖 UI、声音或 `db_manager`。
+  - 复验 `show_reminder_popup()` 仍创建 `ReminderPop(data_dict)`、调用 `show()`，并按 `schedule_data.is_alarm` 在 UI 层调用 `winsound.PlaySound(...)`。
+  - 复验 `check_reminders()` 仍保持 `collect -> show -> mark` 顺序。
+  - diff 范围确认：`src/ui` 仅 `main_window.py` 有 diff；`src/ui/reminder_pop.py`、`main.py`、`requirements.txt`、`schedule.db` 无 diff。
+  - 5-4 可验收通过。
