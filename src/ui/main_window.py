@@ -24,6 +24,7 @@ from .week_window import WeekWindow
 from .suspend_window_week import SuspendWindowWeek
 from .suspend_window_month import SuspendWindowMonth
 from .todo import TodoView
+from ..services.reminder_service import ReminderService
 
 class MainWindow(FramelessMainWindow):
     def __init__(self):
@@ -158,10 +159,10 @@ class MainWindow(FramelessMainWindow):
         self._init_scheduler()
 
     def _init_scheduler(self):
+        self.reminder_service = ReminderService()
         self.reminder_timer = QTimer(self)
         self.reminder_timer.timeout.connect(self.check_reminders)
         self.reminder_timer.start(1000) 
-        self.triggered_reminders = set()
 
     def _refresh_week_if_visible(self):
         if hasattr(self, 'week_window') and self.week_window.isVisible():
@@ -225,17 +226,14 @@ class MainWindow(FramelessMainWindow):
     def check_reminders(self):
         now = datetime.now()
         schedules = db_manager.get_all_schedules()
-        
-        for s in schedules:
-            if not s.reminder_time: continue
-            
-            diff = (now - s.reminder_time).total_seconds()
-            
-            if 0 <= diff < 60:
-                if s.id not in self.triggered_reminders:
-                    self.show_reminder_popup(s)
-                    self.triggered_reminders.add(s.id)
-                    print(f"⏰️ 秒级触发提醒: {s.title} (延迟 {diff:.2f}s)")
+
+        due_schedules = self.reminder_service.collect_due_schedules(schedules, now)
+        for s in due_schedules:
+            self.show_reminder_popup(s)
+            self.reminder_service.mark_triggered(s.id)
+            diff = self.reminder_service.get_reminder_diff_seconds(s, now)
+            if diff is not None:
+                print(f"⏰️ 秒级触发提醒: {s.title} (延迟 {diff:.2f}s)")
 
     def show_reminder_popup(self, schedule_data):
         data_dict = {

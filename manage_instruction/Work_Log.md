@@ -16,12 +16,12 @@
 
 当前处于第五轮“提醒与运行期状态服务”。
 
-第五轮 `5-2` 运行期去重状态抽取已完成，等待 `5-3` 正式提示词。
+第五轮 `5-3` MainWindow 提醒扫描最小委托已完成，等待 `5-4` 正式提示词。
 
 ## 当前轮次注意事项
 
 - 第四轮 4-0 ~ 4-9 已归档到 `History_Log.md`。
-- 当前没有正在执行的小工单；下一步等待 `5-3` 提示词。
+- 当前没有正在执行的小工单；下一步等待 `5-4` 提示词。
 - 执行窗口不得沿用第四轮 4-9 或第四轮任一提示词继续执行。
 - 执行窗口不得在未收到第五轮后续正式提示词前自行开始提醒服务改造。
 
@@ -282,3 +282,85 @@
   - 复跑轻量假对象验证，确认无提醒、未到、到点窗口内、超过窗口、已标记过滤、连续 collect 不隐式标记、新实例状态为空、`should_trigger` 不受去重影响均通过。
   - 静态依赖检查无输出；`src/ui`、`main.py`、`requirements.txt`、`schedule.db` 无 diff。
   - 5-2 可验收通过。
+
+## 2026-05-21 第五轮 5-3（MainWindow 提醒扫描最小委托）
+
+- 本轮任务名与边界：
+  - 工单：第五轮 `5-3` MainWindow 提醒扫描最小委托。
+  - 边界：仅改 `src/ui/main_window.py` 的提醒扫描接入；保持 UI 弹窗/声音/QTimer/数据源语义不变。
+
+- 开工前 git 状态基线：
+  - `git status --short` 结果：
+    - `M manage_instruction/Work_Task_Prompts.md`
+  - 该 diff 为开工前既有状态。
+
+- 实际新增/修改文件：
+  - 修改：`src/ui/main_window.py`
+  - 更新：`manage_instruction/Work_Log.md`
+  - 未修改：`src/services/reminder_service.py`（本轮无兼容修正需求）
+
+- `MainWindow` 接入 `ReminderService` 的位置说明：
+  - 新增 import：`from ..services.reminder_service import ReminderService`（`src/ui/main_window.py:27`）。
+  - `_init_scheduler()` 中创建 service 实例：`self.reminder_service = ReminderService()`（`src/ui/main_window.py:162`）。
+  - 保留原有 QTimer 行为：
+    - `self.reminder_timer = QTimer(self)`
+    - `self.reminder_timer.timeout.connect(self.check_reminders)`
+    - `self.reminder_timer.start(1000)`
+  - 删除主窗口直接维护裸 `triggered_reminders` 的细节。
+
+- `check_reminders()` 新扫描流程摘要：
+  - `now = datetime.now()`
+  - `schedules = db_manager.get_all_schedules()`
+  - `due_schedules = self.reminder_service.collect_due_schedules(schedules, now)`
+  - 遍历 due：
+    - 先 `self.show_reminder_popup(s)`
+    - 后 `self.reminder_service.mark_triggered(s.id)`
+    - 打印日志（延迟由 `get_reminder_diff_seconds` 计算）
+  - 已确认顺序是 `collect -> show -> mark`（定位行：`226/230/232/233`）。
+
+- 本轮明确未做事项（按工单要求）：
+  - 未修改 `src/ui/reminder_pop.py`。
+  - 未修改提醒选择页（`alarm_picker*`、`add_view*`、`schedule_detail_pop` 均未改）。
+  - 未迁移声音播放（`winsound.PlaySound(...)` 仍在 `show_reminder_popup`）。
+  - 未迁移 QTimer（仍由 `MainWindow` 创建与驱动）。
+  - 未生成完整弹窗 dict（`show_reminder_popup` 字段与语义保持不变）。
+  - 未新增提醒持久化字段/表/迁移。
+
+- py_compile / import / 静态检查结果：
+  - `.venv` 验证：
+    - `.\.venv\Scripts\python.exe -m py_compile ...`：失败（Unable to create process）。
+    - `.\.venv\Scripts\python.exe -c "from src.services.reminder_service ..."`：失败（同原因）。
+  - bundled Python 复验：
+    - `py_compile src/services/reminder_service.py src/ui/main_window.py`：通过。
+    - import `ReminderService`：通过，输出 `reminder service import ok`。
+  - 静态检查：
+    - `rg -n "triggered_reminders" src/ui/main_window.py`：无输出（主窗口已不直接操作裸 set）。
+    - `rg -n "winsound|ReminderPop|show_reminder_popup|PlaySound" src/services/reminder_service.py`：无输出（service 未吸收 UI/声音副作用）。
+  - 轻量语义复验（bundled Python）：通过，确认
+    - `collect_due_schedules` 不隐式标记；
+    - `mark_triggered` 后过滤生效；
+    - `should_trigger` 仍不受去重状态影响。
+
+- diff 范围检查结果：
+  - `git diff --name-only -- src/ui`：仅 `src/ui/main_window.py`。
+  - `git diff --name-only -- main.py requirements.txt schedule.db`：无输出。
+  - `git status --short`：
+    - `M manage_instruction/Work_Log.md`（本轮预期）
+    - `M manage_instruction/Work_Task_Prompts.md`（既有）
+    - `M src/ui/main_window.py`（本轮预期）
+
+- 风险与后续建议（供 5-4 使用）：
+  - 5-4 若收口弹窗 dict 构造到 service，需保证字段仍是 `title/is_alarm/target_time` 且 `target_time` 语义不变。
+  - `mark_triggered` 目前依赖 `s.id`；接入层应确保日程对象存在有效 `id`。
+  - 若后续加入异常保护循环，需继续保证“仅 show 成功后才 mark”，不得放在 `finally`。
+
+- 特别记录：
+  - 本工单完成后不要提交 Git，等待顾问窗口审核。
+
+- 顾问复验补充：
+  - 使用 Codex bundled Python 复跑 `py_compile src/services/reminder_service.py src/ui/main_window.py` 和 `ReminderService` import 验证，均通过。
+  - 静态检查确认 `src/ui/main_window.py` 中已无 `triggered_reminders`，`src/services/reminder_service.py` 中无 UI/声音副作用关键字。
+  - 复验 `check_reminders()` 文本顺序为 `collect_due_schedules` -> `show_reminder_popup(s)` -> `mark_triggered(s.id)`，且未把标记放入 `finally`。
+  - 复验 `ReminderService.collect_due_schedules` 不隐式标记、`mark_triggered` 后过滤、`should_trigger` 不受去重状态影响。
+  - diff 范围确认：`src/ui` 仅 `main_window.py` 有 diff；`src/ui/reminder_pop.py`、`main.py`、`requirements.txt`、`schedule.db` 无 diff；`main_window.py` 末尾补换行属于无行为格式变化。
+  - 5-3 可验收通过。
