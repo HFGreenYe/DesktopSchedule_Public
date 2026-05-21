@@ -16,12 +16,12 @@
 
 当前处于第五轮“提醒与运行期状态服务”。
 
-第五轮 `5-4` 提醒弹窗数据构造边界收口已完成，等待 `5-5` 正式提示词。
+第五轮 `5-5` 提醒服务轻量回归验收已完成，等待 `5-6` 正式提示词。
 
 ## 当前轮次注意事项
 
 - 第四轮 4-0 ~ 4-9 已归档到 `History_Log.md`。
-- 当前没有正在执行的小工单；下一步等待 `5-5` 提示词。
+- 当前没有正在执行的小工单；下一步等待 `5-6` 提示词。
 - 执行窗口不得沿用第四轮 4-9 或第四轮任一提示词继续执行。
 - 执行窗口不得在未收到第五轮后续正式提示词前自行开始提醒服务改造。
 
@@ -277,12 +277,6 @@
 - 特别记录：
   - 本工单完成后不要提交 Git，等待顾问窗口审核。
 
-- 顾问复验补充：
-  - 使用 Codex bundled Python 复跑 `py_compile` 和 import 验证，均通过。
-  - 复跑轻量假对象验证，确认无提醒、未到、到点窗口内、超过窗口、已标记过滤、连续 collect 不隐式标记、新实例状态为空、`should_trigger` 不受去重影响均通过。
-  - 静态依赖检查无输出；`src/ui`、`main.py`、`requirements.txt`、`schedule.db` 无 diff。
-  - 5-2 可验收通过。
-
 ## 2026-05-21 第五轮 5-3（MainWindow 提醒扫描最小委托）
 
 - 本轮任务名与边界：
@@ -445,3 +439,78 @@
   - 复验 `check_reminders()` 仍保持 `collect -> show -> mark` 顺序。
   - diff 范围确认：`src/ui` 仅 `main_window.py` 有 diff；`src/ui/reminder_pop.py`、`main.py`、`requirements.txt`、`schedule.db` 无 diff。
   - 5-4 可验收通过。
+
+## 2026-05-21 第五轮 5-5（提醒服务轻量回归验收）
+
+- 本轮任务名与边界：
+  - 工单：第五轮 `5-5` 提醒服务轻量回归验收。
+  - 边界：仅做验证与边界复核，不改源码、不改数据库、不改依赖；仅更新本日志。
+
+- 开工前 git 状态基线：
+  - `git status --short`：
+    - `M manage_instruction/Work_Task_Prompts.md`
+  - 该项记为既有提示词 diff，不计入 5-5 新增改动。
+  - 开工前未发现 5-4 遗留源码 diff，因此继续执行 5-5。
+
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`（本轮预期）
+
+- ReminderService 回归验证结果：
+  - `has_reminder_time(schedule)`：无提醒返回 False（通过）。
+  - `get_reminder_diff_seconds(schedule, now)`：沿用 `total_seconds()` 语义（通过）。
+  - `is_in_trigger_window(diff)`：保持 `0 <= diff < 60`（通过）。
+  - `should_trigger(schedule, now)`：保持无状态纯判断，不受去重状态影响（通过）。
+  - `collect_due_schedules(schedules, now)`：不隐式标记（通过）。
+  - `mark_triggered(id)` 后：同 id 不再被 collect 返回（通过）。
+  - 新建 `ReminderService()` 实例：去重状态为空（通过）。
+  - `select_target_time(schedule)`：`start_time` 优先，否则 `end_time`，都无时 `None`（通过）。
+  - `build_reminder_popup_data(schedule)`：key 精确为 `title/is_alarm/target_time`，字段值语义正确（通过）。
+
+- MainWindow 静态边界复核结果：
+  - `_init_scheduler()` 仍创建 QTimer 且 `start(1000)`（保留）。
+  - `_init_scheduler()` 已创建 `self.reminder_service = ReminderService()`（保留）。
+  - `check_reminders()` 数据来源仍为 `db_manager.get_all_schedules()`（保留）。
+  - 顺序仍为：`collect_due_schedules -> show_reminder_popup(s) -> mark_triggered(s.id)`（保留）。
+  - `show_reminder_popup()` 仍负责 `ReminderPop(data_dict)`、`show()`、`winsound.PlaySound(...)`（保留）。
+  - 声音播放条件仍基于 `schedule_data.is_alarm`（保留）。
+
+- UI/声音/数据库副作用边界复核结果：
+  - `src/ui/reminder_pop.py` 无 diff。
+  - `winsound.PlaySound(...)` 未迁移到 service。
+  - `ReminderPop` 未迁移到 service。
+  - `QTimer` 未迁移到 service。
+  - service 未依赖 `db_manager`。
+  - `schedule.db` 无 diff。
+
+- py_compile / import / 假对象验证 / 静态依赖检查结果：
+  - `.venv` 两条命令均失败：`Unable to create process ... Python311\python.exe`（工具环境问题，已留痕）。
+  - 使用 bundled Python 复验：
+    - `py_compile src/services/reminder_service.py src/ui/main_window.py`：通过。
+    - `from src.services.reminder_service import ReminderService`：通过，输出 `reminder service import ok`。
+  - 轻量假对象回归脚本：通过，输出 `5-5 regression checks ok`。
+  - service 静态依赖检查：
+    - `rg -n "QWidget|QTimer|winsound|ReminderPop|db_manager|src\.ui|PyQt|PySide" src/services/reminder_service.py`
+    - 结果：无输出/无匹配（`rg` 退出码 1，符合预期）。
+
+- diff 范围检查结果：
+  - `git diff --name-only -- src/ui`：无输出。
+  - `git diff --name-only -- src/services/reminder_service.py`：无输出。
+  - `git diff --name-only -- main.py requirements.txt schedule.db`：无输出。
+  - `git status --short`（收尾）：
+    - `M manage_instruction/Work_Log.md`（本轮预期）
+    - `M manage_instruction/Work_Task_Prompts.md`（既有提示词 diff）
+
+- 风险与后续建议（供 5-6 使用）：
+  - 当前 `.venv` 在工具环境仍不可直接执行，5-6 若要求强依赖 `.venv` 命令，应继续使用“`.venv`失败留痕 + bundled Python复验”策略。
+  - 第五轮可进入整体验收与归档准备，重点确认外部行为无回归。
+
+- 特别记录：
+  - 本工单完成后不要提交 Git，等待顾问窗口审核。
+
+- 顾问复验补充：
+  - 使用 Codex bundled Python 复跑 `py_compile src/services/reminder_service.py src/ui/main_window.py` 和 `ReminderService` import 验证，均通过。
+  - 复跑 5-5 轻量假对象回归验证，确认提醒窗口、运行期去重状态、`target_time` 选择和弹窗 dict 构造均符合预期。
+  - 静态依赖检查确认 `ReminderService` 无 UI、声音或 `db_manager` 依赖；`MainWindow` 中无 `triggered_reminders`。
+  - 复验 `check_reminders()` 顺序仍为 `collect_due_schedules` -> `show_reminder_popup(s)` -> `mark_triggered(s.id)`。
+  - diff 范围确认：`src/ui`、`src/services/reminder_service.py`、`main.py`、`requirements.txt`、`schedule.db` 均无 diff；5-5 只追加日志记录。
+  - 5-5 可验收通过。
