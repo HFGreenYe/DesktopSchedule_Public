@@ -1,68 +1,93 @@
-﻿# Work Task Prompts
+# Work Task Prompts
 
-## 第五轮 5-0 提示词（静态审查与只读基线定位）
+## 第五轮 5-1 提示词（ReminderService 骨架与纯判断函数）
 
 ### 1. 本轮目标
 
-- 本工单为只读审查工单：建立“当前提醒链路”的源码基线，不做任何重构与行为修改。
-- 结论必须以源码为准，不得根据 README、旧日志或历史文档推断运行行为。
-- 特别注意：`main.py` 是应用启动入口；`src/ui/main_window.py` 是主窗口协调器与提醒扫描所在地，不得混淆。
+- 本工单为实现工单：新增提醒服务骨架与纯判断辅助函数。
+- 只建立 `ReminderService` 的纯逻辑边界，不接入 `MainWindow`。
+- 不修改任何 `src/ui/*` 文件。
+- 不改变现有提醒弹窗、声音播放、QTimer 扫描、去重行为。
 
 ### 2. 允许/禁止
 
-- 允许：读取代码、检索调用链、执行只读命令、更新 `manage_instruction/Work_Log.md` 日志。
-- 禁止：修改任何源码文件、修改数据库、补做“顺手重构”、新增/删除依赖、改 `requirements.txt`、改 `schedule.db`。
-- 禁止：修改本提示词文件 `manage_instruction/Work_Task_Prompts.md`；如发现提示词问题，只能在 `Work_Log.md` 记录并交回顾问/决策窗口处理。
-- 禁止将本工单升级为实现工单（例如提前创建 `reminder_service.py`）。
+- 允许新增：`src/services/reminder_service.py`
+- 必要时允许修改：`src/services/__init__.py`
+- 允许更新：`manage_instruction/Work_Log.md`
+- 禁止修改：`src/ui/*`
+- 禁止修改：`main.py`
+- 禁止修改：`requirements.txt`
+- 禁止修改：`schedule.db`
+- 禁止修改本提示词文件 `manage_instruction/Work_Task_Prompts.md`；如发现提示词问题，只能在 `Work_Log.md` 记录并交回顾问/决策窗口处理。
+- 禁止新增依赖。
+- 禁止接入 `MainWindow`。
+- 禁止提前实现运行期去重状态，`mark_triggered`、`collect_due_schedules` 留到 5-2。
+- 禁止生成完整弹窗 dict，完整 dict 构造留到 5-4。
+- service 不得依赖 `QWidget`、`QTimer`、`winsound`、`ReminderPop`、`db_manager`。
 
 ### 3. 具体任务
 
-- 必须定位 `src/ui/main_window.py` 中：
-  - `_init_scheduler`
-  - `check_reminders`
-  - `triggered_reminders`
-  - `show_reminder_popup`
-- 必须定位 `src/ui/reminder_pop.py` 中三条停声路径并说明触发入口：
-  - 顶部关闭按钮
-  - “知道了”
-  - “关闭闹钟”
-- 必须检查下列提醒设置/展示相关文件，仅做“位置与作用说明”，不改代码：
-  - `src/ui/alarm_picker.py`
-  - `src/ui/alarm_picker_week.py`
-  - `src/ui/add_view.py`
-  - `src/ui/add_view_week.py`
-  - `src/ui/schedule_detail_pop.py`
-  - `src/data/models.py`
-- 位置说明必须尽量包含文件、类/函数、关键行号；如果行号因工具限制无法稳定获取，必须说明原因。
-- 输出必须使用以下固定结构（按顺序）：
-  - 扫描链路
-  - 触发条件
-  - 去重生命周期
-  - 弹窗/声音边界
-  - 提醒设置入口
-  - 可抽 service 的逻辑
-  - 必须留 UI 的副作用
-  - 风险点
+- 新建 `src/services/reminder_service.py`。
+- 定义 `ReminderService`，只包含纯判断/纯选择辅助。
+- 至少提供以下能力，命名可略作调整，但语义必须清楚：
+  - 判断日程是否有 `reminder_time`。
+  - 计算 `now - reminder_time` 的秒差。
+  - 判断是否处于旧触发窗口：`0 <= diff < 60`。
+  - 判断某个日程在当前时间是否满足提醒触发条件；该判断不得考虑运行期去重，也不得写入任何状态。
+  - 选择 `target_time`：`start_time if start_time else end_time`。
+- 纯函数应可接受轻量假对象，不要求 Peewee 模型实例。
+- 对无 `reminder_time` 的对象，应返回“不触发”而不是抛出异常。
+- 对缺少 `start_time` / `end_time` 的对象，`target_time` 选择辅助应保持旧语义：无开始时间则取结束时间，二者都无则返回 `None`。
+- 如修改 `src/services/__init__.py`，只做轻量导出，不引入 UI 或数据库依赖。
 
 ### 4. 验收命令
 
-- 开工前记录：`git status --short`，并把开工时已经存在的 diff 记为“既有基线”，不得误判为 5-0 新增 diff。
-- 审查后至少执行：
+- 开工前记录：`git status --short`
+- 实现后至少执行：`.\.venv\Scripts\python.exe -m py_compile src/services/reminder_service.py`
+- 如当前 venv Python 因本地环境问题不可用，可改用可用解释器执行等价 `py_compile`，并在日志中说明。
+- 执行 service import 验证：`.\.venv\Scripts\python.exe -c "from src.services.reminder_service import ReminderService; print('reminder service import ok')"`
+- 执行轻量假对象验证，至少覆盖：
+  - 无提醒：不触发。
+  - 未到提醒时间：不触发。
+  - 到点且处于 60 秒窗口内：触发。
+  - 超过 60 秒窗口：不触发。
+  - `target_time` 优先取 `start_time`。
+  - 无 `start_time` 时取 `end_time`。
+- 执行静态依赖检查：`rg -n "QWidget|QTimer|winsound|ReminderPop|db_manager|src\.ui|PyQt|PySide" src/services/reminder_service.py`
+- 静态依赖检查期望无输出；`rg` 无匹配时可能返回退出码 1，此时只要确认为“无输出/无匹配”即视为通过。
+- 收尾检查：
   - `git status --short`
-  - `git diff --name-only`
-  - `git diff --name-only -- src`
+  - `git diff --name-only -- src/ui`
   - `git diff --name-only -- main.py requirements.txt schedule.db`
-- 验收标准：
-  - `src` 无由本工单产生的新 diff。
-  - `main.py`、`requirements.txt`、`schedule.db` 无由本工单产生的新 diff。
-  - 若 `git diff --name-only` 显示开工前已有的管理文档或依赖文件 diff，必须在日志中标注为“既有 diff”，不得声称由 5-0 产生。
+
+验收标准：
+
+- `src/services/reminder_service.py` 可 import。
+- `src/services/reminder_service.py` 可 py_compile。
+- 假对象验证通过。
+- 静态检索确认无 UI/db/sound 依赖。
+- `src/ui` 无 diff。
+- `main.py`、`requirements.txt`、`schedule.db` 无由本工单产生的新 diff。
 
 ### 5. 日志要求
 
-- 在 `manage_instruction/Work_Log.md` 新增 `5-0` 记录，至少包含：
-  - 本轮任务名与边界（只读）
-  - 开工前 git 状态基线，以及哪些 diff 属于既有状态
-  - 实际检索到的关键函数/文件位置
-  - 8 段固定结构结论摘要
-  - 验收命令与结果（含“无新增 diff”结论）
-  - 风险与后续建议（供 5-1 使用）
+- 在 `manage_instruction/Work_Log.md` 新增 `5-1` 记录，至少包含：
+  - 本轮任务名与边界。
+  - 开工前 git 状态基线。
+  - 实际新增/修改文件。
+  - `ReminderService` 提供的纯函数/方法清单。
+  - 明确记录本轮未做事项：
+    - 未接入 `MainWindow`。
+    - 未修改 `src/ui/*`。
+    - 未实现运行期去重状态。
+    - 未生成完整弹窗 dict。
+    - 未迁移声音播放。
+  - 假对象验证结果。
+  - py_compile / import / 静态依赖检查结果。
+  - diff 范围检查结果。
+  - 风险与后续建议，供 5-2 使用。
+
+### 6. 提交要求
+
+- 本工单完成后不要提交 Git。
+- 完成后等待顾问窗口审核。
