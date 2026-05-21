@@ -1,4 +1,4 @@
-# Work Log
+﻿# Work Log
 
 本文件只记录当前阶段/当前轮次的执行日志。
 
@@ -16,12 +16,12 @@
 
 当前处于第五轮“提醒与运行期状态服务”。
 
-第五轮 `5-5` 提醒服务轻量回归验收已完成，等待 `5-6` 正式提示词。
+第五轮 `5-6` 整体验收与归档准备已完成，等待归档收口或第六轮规划提示词。
 
 ## 当前轮次注意事项
 
 - 第四轮 4-0 ~ 4-9 已归档到 `History_Log.md`。
-- 当前没有正在执行的小工单；下一步等待 `5-6` 提示词。
+- 当前没有正在执行的小工单；下一步等待归档收口或第六轮规划提示词。
 - 执行窗口不得沿用第四轮 4-9 或第四轮任一提示词继续执行。
 - 执行窗口不得在未收到第五轮后续正式提示词前自行开始提醒服务改造。
 
@@ -514,3 +514,110 @@
   - 复验 `check_reminders()` 顺序仍为 `collect_due_schedules` -> `show_reminder_popup(s)` -> `mark_triggered(s.id)`。
   - diff 范围确认：`src/ui`、`src/services/reminder_service.py`、`main.py`、`requirements.txt`、`schedule.db` 均无 diff；5-5 只追加日志记录。
   - 5-5 可验收通过。
+
+## 2026-05-21 第五轮 5-6（第五轮整体验收与归档准备）
+
+- 本轮任务名与边界：
+  - 工单：第五轮 `5-6` 整体验收与归档准备。
+  - 边界：仅做最终验收、范围复核与日志收口；不改源码、不改数据库、不改依赖，不执行实际归档搬迁。
+
+- 开工前 git 状态基线：
+  - `git status --short`：
+    - `M manage_instruction/Work_Task_Prompts.md`
+  - 该项为既有提示词 diff，不计入 5-6 新增改动。
+  - 开工前 `src`、`main.py`、`requirements.txt`、`schedule.db` 无 diff，满足继续执行条件。
+
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`（本轮预期）
+
+- 5-0 到 5-5 完成摘要：
+  - `5-0`：完成提醒链路静态基线定位，确认触发窗口与 UI/声音边界。
+  - `5-1`：完成 `ReminderService` 纯判断骨架（无去重、无 UI 副作用）。
+  - `5-2`：完成运行期去重状态抽取（`is_triggered/mark_triggered/collect_due_schedules`）。
+  - `5-3`：完成 `MainWindow.check_reminders()` 最小委托（`collect -> show -> mark`）。
+  - `5-4`：完成弹窗 dict 纯构造收口（`build_reminder_popup_data`）。
+  - `5-5`：完成轻量回归验收并确认边界与行为保持。
+
+- ReminderService 最终职责与禁止边界复核结果：
+  - 最终职责已覆盖：
+    - 提醒时间存在判断。
+    - 秒差计算与触发窗口判断（`0 <= diff < 60`）。
+    - 运行期去重状态管理。
+    - 到期候选筛选。
+    - `target_time` 选择。
+    - 弹窗 dict 纯构造（`title/is_alarm/target_time`）。
+  - 禁止边界满足：
+    - 无 UI 依赖、无 `winsound`、无 `ReminderPop`、无 `QTimer`、无 `db_manager`、无数据库写入。
+
+- MainWindow 最终职责复核结果：
+  - 仍由 `MainWindow` 创建 QTimer，且 `start(1000)`。
+  - 扫描数据来源仍为 `db_manager.get_all_schedules()`。
+  - `check_reminders()` 顺序仍为 `collect_due_schedules -> show_reminder_popup(s) -> mark_triggered(s.id)`。
+  - `show_reminder_popup()` 仍负责：
+    - 创建 `ReminderPop(data_dict)`；
+    - 弹窗 `show()`；
+    - 按 `schedule_data.is_alarm` 播放系统声音。
+
+- 旧行为保持复核结果：
+  - 无 `reminder_time` 不触发（通过）。
+  - 未到提醒时间不触发（通过）。
+  - 超过 60 秒窗口不补弹（通过）。
+  - 到点且在 60 秒窗口内触发（通过）。
+  - 同一日程 ID 本次运行内不重复触发（通过）。
+  - 新 service 实例去重状态为空（通过）。
+  - `target_time` 仍优先 `start_time`，否则 `end_time`，都无则 `None`（通过）。
+  - 弹窗 dict 仍仅 `title/is_alarm/target_time`（通过）。
+  - 强提醒声音仍由 UI 层播放（通过）。
+  - 关闭弹窗/停止闹钟逻辑仍在 `ReminderPop`（通过）。
+
+- 未做事项确认：
+  - 未修改 `ReminderPop`。
+  - 未修改提醒选择页。
+  - 未修改数据库模型。
+  - 未新增数据库字段或提醒持久化。
+  - 未修改 `db_manager` 对外 API。
+  - 未修改 `main.py`、`requirements.txt`、`schedule.db`。
+  - 未开启第六轮 Controller / Router / EventBus 改造。
+
+- py_compile / import / 假对象验证 / 静态依赖检查结果：
+  - `.venv` 命令在工具环境失败：`Unable to create process ... Python311\python.exe`（已留痕）。
+  - bundled Python 复验：
+    - `py_compile main.py src/services/reminder_service.py src/ui/main_window.py src/ui/reminder_pop.py`：通过。
+    - `ReminderService` import：通过，输出 `reminder service import ok`。
+  - 轻量假对象整体验证：通过，输出 `5-6 overall regression checks ok`。
+  - service 静态依赖检查：
+    - `rg -n "QWidget|QTimer|winsound|ReminderPop|db_manager|src\.ui|PyQt|PySide" src/services/reminder_service.py`
+    - 结果：无输出/无匹配（`rg` 退出码 1，符合预期）。
+  - MainWindow 静态检查：
+    - `rg -n "triggered_reminders" src/ui/main_window.py`：无输出。
+    - 顺序/边界关键词检查输出符合预期（含 `get_all_schedules`、`start(1000)`、`collect`、`show`、`mark`、`ReminderPop`、`PlaySound`）。
+
+- diff 范围检查结果：
+  - `git diff --name-only -- src`：无输出。
+  - `git diff --name-only -- main.py requirements.txt schedule.db`：无输出。
+  - `git diff --name-only -- manage_instruction`：
+    - `manage_instruction/Work_Log.md`（本轮预期）
+    - `manage_instruction/Work_Task_Prompts.md`（既有提示词 diff）
+  - `git status --short`（收尾）：
+    - `M manage_instruction/Work_Log.md`（本轮预期）
+    - `M manage_instruction/Work_Task_Prompts.md`（既有）
+
+- 第五轮整体验收结论：
+  - 结论：通过。
+  - 可归档性：第五轮可进入归档/阶段收口流程。
+  - 下一步建议：可由决策窗口/顾问窗口规划第六轮（Controller / Router / EventBus 协调层）。
+
+- 明确声明：
+  - 本工单未实际执行归档搬迁。
+  - 未修改 `History_Log.md`、`History_Instruction.md` 等历史归档文件。
+  - 未开启第六轮改造。
+
+- 特别记录：
+  - 本工单完成后不要提交 Git，等待顾问窗口审核。
+- 顾问复验补充：
+  - 已同步 `Work_Log.md` 顶部当前状态：第五轮 `5-6` 已完成，下一步等待归档收口或第六轮规划提示词。
+  - 使用 Codex bundled Python 复跑 `py_compile main.py src/services/reminder_service.py src/ui/main_window.py src/ui/reminder_pop.py` 和 `ReminderService` import 验证，均通过。
+  - 复跑 5-6 轻量假对象整体验证，确认提醒窗口、运行期去重、`target_time` 选择、弹窗 dict 构造和 `check_reminders()` 顺序均符合预期，输出 `5-6 overall regression checks ok`。
+  - 静态依赖检查确认 `ReminderService` 无 UI、声音或 `db_manager` 依赖；`MainWindow` 中无 `triggered_reminders`。
+  - 范围检查确认：`src`、`main.py`、`requirements.txt`、`schedule.db` 均无 diff；当前仅 `Work_Log.md` 和既有 `Work_Task_Prompts.md` 有 diff。
+  - 5-6 可验收通过；第五轮可进入归档/阶段收口流程。
