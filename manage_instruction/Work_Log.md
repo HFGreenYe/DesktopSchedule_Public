@@ -16,12 +16,12 @@
 
 当前处于第五轮“提醒与运行期状态服务”。
 
-第五轮 `5-1` ReminderService 骨架与纯判断函数已完成，等待 `5-2` 正式提示词。
+第五轮 `5-2` 运行期去重状态抽取已完成，等待 `5-3` 正式提示词。
 
 ## 当前轮次注意事项
 
 - 第四轮 4-0 ~ 4-9 已归档到 `History_Log.md`。
-- 当前没有正在执行的小工单；下一步等待 `5-2` 提示词。
+- 当前没有正在执行的小工单；下一步等待 `5-3` 提示词。
 - 执行窗口不得沿用第四轮 4-9 或第四轮任一提示词继续执行。
 - 执行窗口不得在未收到第五轮后续正式提示词前自行开始提醒服务改造。
 
@@ -209,3 +209,76 @@
   - 用户在本机 CMD 执行 `.\.venv\Scripts\python.exe -c "from src.services.reminder_service import ReminderService; print('reminder service import ok')"` 通过。
   - 顾问工具环境中 `.venv` redirector 仍受工具权限/进程创建限制影响，但使用 Codex bundled Python 复跑 `py_compile`、import 和轻量假对象验证均通过。
   - 顾问复验确认：`src/ui`、`main.py`、`requirements.txt`、`schedule.db` 无 diff；5-1 可验收通过。
+
+## 2026-05-21 第五轮 5-2（运行期去重状态抽取）
+
+- 本轮任务名与边界：
+  - 工单：第五轮 `5-2` 运行期去重状态抽取。
+  - 边界：仅在 `ReminderService` 增加运行期内存去重能力；不接入 `MainWindow`；不改 UI、数据库、依赖、触发窗口语义。
+
+- 开工前 git 状态基线：
+  - `git status --short` 结果：
+    - `M manage_instruction/Work_Task_Prompts.md`
+  - 该 diff 为开工前既有状态。
+
+- 实际新增/修改文件：
+  - 修改：`src/services/reminder_service.py`
+  - 更新：`manage_instruction/Work_Log.md`
+  - 未修改：`src/services/__init__.py`（本轮无需变更导出）
+
+- `ReminderService` 新增的运行期去重方法清单：
+  - `__init__()`：初始化实例级 `self._triggered_ids`（`set[int]`）。
+  - `_get_schedule_id(schedule)`：纯辅助读取 `schedule.id`（仅接收 `int`）。
+  - `is_triggered(schedule_id)`：判断 id 是否已在当前实例标记。
+  - `mark_triggered(schedule_id)`：显式标记 id 已触发。
+  - `collect_due_schedules(schedules, now)`：批量筛选“满足提醒条件且未标记”的对象列表；不隐式标记。
+  - 同步修正：`get_reminder_diff_seconds` docstring 从 `.seconds` 改为 `total_seconds()` 表述（函数行为未变）。
+
+- 本轮明确未做事项（按工单要求）：
+  - 未接入 `MainWindow`。
+  - 未修改 `src/ui/*`。
+  - 未生成完整弹窗 dict（留给 5-4）。
+  - 未迁移声音播放。
+  - 未新增提醒持久化字段/表/迁移。
+
+- 假对象验证结果：
+  - 无提醒：`collect_due_schedules` 不返回（通过）。
+  - 未到提醒时间：不返回（通过）。
+  - 到点且在 60 秒窗口：返回（通过）。
+  - 超过 60 秒窗口：不返回（通过）。
+  - `mark_triggered(id)` 后：同 id 不再返回（通过）。
+  - `collect_due_schedules` 不隐式标记：同一未标记对象连续 collect 两次仍返回（通过）。
+  - 新建 `ReminderService()` 实例：去重状态为空（通过）。
+  - `should_trigger(schedule, now)` 在 `mark_triggered(id)` 后仍返回纯判断结果，不受去重状态影响（通过）。
+
+- py_compile / import / 静态依赖检查结果：
+  - `.\.venv\Scripts\python.exe -m py_compile src/services/reminder_service.py`：失败（Unable to create process，`.venv` redirector 指向不可用本机 Python 路径）。
+  - `.\.venv\Scripts\python.exe -c "from src.services.reminder_service import ReminderService; ..."`：同样失败（同原因）。
+  - 回退 bundled Python：
+    - `C:\Users\22339\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe -m py_compile src/services/reminder_service.py`：通过。
+    - import 校验：通过，输出 `reminder service import ok`。
+  - 静态依赖检查：
+    - `rg -n "QWidget|QTimer|winsound|ReminderPop|db_manager|src\.ui|PyQt|PySide" src/services/reminder_service.py`
+    - 结果：无输出/无匹配（`rg` 退出码 1，符合预期）。
+
+- diff 范围检查结果：
+  - `git status --short`：
+    - `M manage_instruction/Work_Log.md`（本轮预期）
+    - `M manage_instruction/Work_Task_Prompts.md`（既有）
+    - `M src/services/reminder_service.py`（本轮预期）
+  - `git diff --name-only -- src/ui`：无输出（`src/ui` 无 diff）。
+  - `git diff --name-only -- main.py requirements.txt schedule.db`：无输出（本工单未引入这三项 diff）。
+
+- 风险与后续建议（供 5-3 使用）：
+  - 5-3 接入 `MainWindow` 时，应在弹窗成功后显式调用 `mark_triggered(id)`，避免重复弹窗。
+  - `collect_due_schedules` 当前对 `id` 非 `int` 的对象会跳过；接入层需确保日程对象带有效 `id`。
+  - 保持 `should_trigger` 的无状态纯判断边界，不要在其中引入去重写入。
+
+- 特别记录：
+  - 本工单完成后不要提交 Git，等待顾问窗口审核。
+
+- 顾问复验补充：
+  - 使用 Codex bundled Python 复跑 `py_compile` 和 import 验证，均通过。
+  - 复跑轻量假对象验证，确认无提醒、未到、到点窗口内、超过窗口、已标记过滤、连续 collect 不隐式标记、新实例状态为空、`should_trigger` 不受去重影响均通过。
+  - 静态依赖检查无输出；`src/ui`、`main.py`、`requirements.txt`、`schedule.db` 无 diff。
+  - 5-2 可验收通过。
