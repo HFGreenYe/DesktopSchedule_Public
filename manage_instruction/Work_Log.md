@@ -18,13 +18,13 @@
 
 第六轮：Controller / Router / EventBus 协调层，已启动。
 
-当前已完成 6-2（ViewRouter 视图切换基线与低风险接管），等待顾问窗口复核与后续 6-3 小工单发布。
+当前已完成 6-3（添加页来源与 picker 返回状态基线），等待顾问窗口复核与后续 6-4 小工单发布。
 
 ## 当前轮次注意事项
 
-- 6-2 仅接管 `MainWindow.switch_view` 的纯路由决策，不迁移 Qt 实际操作。
+- 6-3 仅做添加页来源与 picker 返回状态基线审查，不改源码。
 - 后续第六轮改造需按小工单逐步迁移，不得一次性重构 `MainWindow`/`WeekWindow`/`TodoBoardWindow`。
-- 在未收到后续正式提示词前，不得自行开始 6-3 及之后的实现改造。
+- 在未收到后续正式提示词前，不得自行开始 6-4 及之后的实现改造。
 
 ## 2026-05-25 第六轮 6-0（静态审查与跨视图耦合定位）
 
@@ -359,3 +359,180 @@
 ### 风险或疑点
 
 - `switch_view` 仍是多职责方法，本轮仅接管低风险字符串决策；后续若继续迁移需保持行为基线与回归用例。
+
+## 2026-05-25 第六轮 6-3（添加页来源与 picker 返回状态基线）
+
+- 本轮任务名称：第六轮 6-3（添加页来源与 picker 返回状态基线）。
+- 开工前 git 状态：
+  - `git status --short --branch` -> `## main...temp/main [ahead 3]`
+  - 开工前既有 diff：`M manage_instruction/Work_Task_Prompts.md`
+  - 结论：开工前已有管理文档 diff，不视为本轮源码改动。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+
+### 读取的阶段合同和 6-0/6-1/6-2 结论
+
+- `6-3` 仅允许静态审查和日志记录，不改 `src`。
+- 本轮需输出添加页来源与 picker 返回链路地图、状态字段写入/读取/返回目标表、风险等级和 6-4 建议。
+- 延续 6-0/6-1/6-2 约束：不做跨窗口大迁移，不在 6-4 同时触碰 MainWindow/WeekWindow/TodoBoardWindow 全量链路。
+
+### 静态搜索命令和关键结果
+
+- MainWindow 添加页来源与返回：
+  - `rg -n "source_view_for_add|page_add\\.btn_cancel|on_schedule_saved|handle_header_action|setCurrentWidget\\(self\\.page_add|return_target|page_add\\.reset|default_to_schedule|body_stack\\.currentWidget" src/ui/main_window.py`
+  - 关键命中：`126-127, 491-497, 499-565`。
+- MainWindow time picker：
+  - `rg -n "time_picker_mode|...|editing_schedule|setCurrentWidget\\(self\\.page_time|..." src/ui/main_window.py`
+  - 关键命中：`131-137, 268-336`。
+- MainWindow alarm picker：
+  - 命中：`139-143, 369-424`。
+- MainWindow list picker：
+  - 命中：`145-152, 427-488, 455-463`。
+- WeekWindow 添加页与 picker：
+  - `rg -n "page_add\\.btn_cancel|on_schedule_saved|switch_to_main_board|time_picker_mode|alarm_picker_mode|list_picker_mode|..." src/ui/week_window.py`
+  - 关键命中：`748-761, 774-927`。
+- TodoBoardWindow list picker / inline add：
+  - `rg -n "inline_add_view|page_list|list_picker_mode|current_folder_id|current_folder_name|..." src/ui/todo_board.py`
+  - 关键命中：`1223-1224, 1529-1660, 1692-1708, 1905-1957`。
+- 代码片段阅读：
+  - `main_window.py`：`Select-Object -Skip 110 -First 390` + `-Skip 500 -First 80`
+  - `week_window.py`：`-Skip 730 -First 260`
+  - `todo_board.py`：`-Skip 1510 -First 260` + `-Skip 1888 -First 95`
+
+### MainWindow 添加页来源与返回链路地图
+
+- 添加页取消：
+  - `page_add.btn_cancel` -> `setCurrentWidget(getattr(source_view_for_add, page_dashboard))`（`main_window.py:126-127`）。
+- 添加页保存：
+  - `on_schedule_saved()` 内 `return_target = getattr(source_view_for_add, page_dashboard)` 后返回（`491-497`）。
+  - 保存后还会 `page_dashboard.refresh_data()`、`page_todo.refresh_data()`、`_refresh_week_if_visible()`（`491-494`）。
+- 进入添加页：
+  - `switch_to_add_page()` 在当前页为 dashboard/todo 时写入 `source_view_for_add = current_widget`（`558-559`）。
+  - 来源是 todo 时 `default_to_schedule=False`，否则 `True`（`562-563`）。
+  - 若当前已在添加页，再点 add 会按 `source_view_for_add` 返回（`552-554`）。
+- Header 触发：
+  - `handle_header_action('add')` -> `switch_to_add_page()`（`499-501`）。
+
+### MainWindow time/alarm/list picker add/edit 返回链路地图
+
+- Time picker：
+  - add 模式：`time_picker_mode='add'`（`270`）-> `back_from_time_picker()` 返回 `page_add`（`304-307`）。
+  - edit 模式：`time_picker_mode='edit'` + `editing_schedule`（`290-291`）-> 返回 `page_dashboard`（`304-309`）。
+  - edit 确认后触发：写库更新 + `page_dashboard/page_todo/_refresh_week_if_visible` + popup 刷新后返回（`316-336`）。
+- Alarm picker：
+  - add 模式：返回 `page_add`（`394-395`）。
+  - edit 模式：返回 `page_dashboard`（`396-397`）。
+  - edit 确认后触发：写库更新 + `page_dashboard/page_todo/_refresh_week_if_visible` + popup 刷新后返回（`404-424`）。
+- List picker：
+  - add 模式：返回 `page_add`（`456-457`）。
+  - edit 模式：先写 `list_picker_source`（`445`），返回时按来源：
+    - `todo` -> `page_todo`（`460-461`）
+    - 否则 -> `page_dashboard`（`463`）
+  - edit 确认后触发：写库更新 + `page_dashboard/page_todo/_refresh_week_if_visible` + popup 刷新后返回（`470-488`）。
+
+### WeekWindow 添加页与 picker 返回链路地图
+
+- 添加页取消：
+  - `page_add.btn_cancel` -> `switch_to_main_board()`（`748, 777-778`）。
+- 添加页保存：
+  - `on_schedule_saved()` -> `switch_to_main_board()` + `refresh_week_data()`（`782-784`）。
+- picker add/edit 返回：
+  - time：edit 返回 `switch_to_main_board()`；add 返回 `page_add`（`810-815`）。
+  - alarm：edit 返回 `switch_to_main_board()`；add 返回 `page_add`（`859-863`）。
+  - list：edit 返回 `switch_to_main_board()`；add 返回 `page_add`（`904-908`）。
+- edit 确认后刷新回流：
+  - 三个 picker 在 edit 确认后均 `refresh_week_data()` + `schedule_updated.emit(editing_schedule)`（`827-833, 876-882, 919-925`）。
+
+### TodoBoardWindow list picker 与 inline add 返回链路地图
+
+- inline add 进入 list picker：
+  - `inline_add_view.req_open_list_picker` -> `go_to_list_picker()`（`1544, 1550-1555`）。
+  - 进入 picker 后 `view_stack` 切到 `page_list`，并临时隐藏顶部按钮（`1555-1561`）。
+- edit 进入 list picker：
+  - `go_to_list_picker_for_edit()` 设置 `list_picker_mode='edit'` + `editing_schedule`，切到 `page_list`（`1564-1573`）。
+- picker 返回：
+  - `back_from_list_picker()` 先根据 `current_folder_id/current_folder_name` 恢复标题与按钮（`1582-1599`）。
+  - edit/manage 模式根据 `in_folder + view_mode + current_todos` 回到 `empty/stick/folder`（`1602-1610`）。
+  - add 模式固定回 `inline_add_view`（`1613-1614`）。
+- picker 确认：
+  - edit：写库更新后 `refresh_data()` + `notify_main_window_refresh()` + popup 回流，再 `back_from_list_picker()`（`1620-1649`）。
+  - add：给 `inline_add_view` 设分类后返回 `back_from_list_picker()`（`1659-1660`）。
+- `current_folder_id/current_folder_name` 影响：
+  - 文件夹进入写入（`1692-1693`），返回主看板重置（`1707-1708`）。
+  - add 入口会把当前 folder 分类预填到 inline_add（`1907-1910`）。
+
+### 状态字段清单（写入点 / 读取点 / 返回目标）
+
+- `source_view_for_add`（MainWindow）：
+  - 写入：`switch_to_add_page()`（`558-559`）
+  - 读取：`btn_cancel`、`on_schedule_saved`、二次点击 add（`126-127, 496, 553`）
+  - 返回目标：`page_dashboard` 或 `page_todo`
+- `list_picker_source`（MainWindow）：
+  - 写入：`go_to_list_picker_for_edit(..., source_view)`（`445`）
+  - 读取：`back_from_list_picker()`（`460-463`）
+  - 返回目标：edit 返回 `todo` 或 `dashboard`
+- `time_picker_mode`（MainWindow/WeekWindow）：
+  - 写入：`go_to_time_picker`/`go_to_time_picker_for_edit`（Main `270/290`，Week `788/799`）
+  - 读取：`back_from_time_picker`、`on_time_confirmed`
+  - 返回目标：Main add->`page_add`，edit->`page_dashboard`；Week add->`page_add`，edit->`page_week_board`
+- `alarm_picker_mode`（MainWindow/WeekWindow）：
+  - 写入：`go_to_alarm_picker`/`go_to_alarm_picker_for_edit`
+  - 读取：`back_from_alarm_picker`、`on_alarm_confirmed`
+  - 返回目标：Main add->`page_add`，edit->`page_dashboard`；Week add->`page_add`，edit->`page_week_board`
+- `list_picker_mode`（MainWindow/WeekWindow/TodoBoardWindow）：
+  - 写入：`go_to_list_picker`/`go_to_list_picker_for_edit`
+  - 读取：`back_from_list_picker`、`on_list_confirmed`
+  - 返回目标：
+    - Main：add->`page_add`，edit->`page_todo`/`page_dashboard`
+    - Week：add->`page_add`，edit->`page_week_board`
+    - TodoBoard：add->`inline_add_view`，edit/manage->`stick/folder/empty` 动态
+- `editing_schedule`（MainWindow/WeekWindow/TodoBoardWindow）：
+  - 写入：各 picker `go_to_*_for_edit`
+  - 读取：各 picker `on_*_confirmed` edit 分支
+  - 返回目标：通过 `back_from_*` 返回到对应上级页面，同时驱动 popup/refresh 回流
+- `current_folder_id/current_folder_name`（TodoBoardWindow）：
+  - 写入：`_open_folder_view`（`1692-1693`），`_back_to_folder_view` 重置（`1707-1708`）
+  - 读取：`back_from_list_picker`、`_on_add_clicked`、`_on_inline_add_canceled`、`refresh_data` 过滤
+  - 返回目标：决定 `view_stack` 退回 `folder/stick/empty/inline_add`，并影响标题/按钮状态
+
+### 风险等级
+
+- 低风险：
+  - MainWindow `source_view_for_add` 的来源记录与返回目标决策（纯状态+路由，不直接触写库）。
+  - MainWindow `list_picker_source` 的 edit 返回目标决策（`todo/dashboard` 二选一）。
+- 中风险：
+  - WeekWindow 内部 picker add/edit 返回决策（单文件内，但联动 `schedule_updated.emit` 与 `refresh_week_data`）。
+- 高风险：
+  - MainWindow 三类 picker edit 分支（涉及写库、重复规则弹窗、跨视图刷新顺序）。
+  - TodoBoardWindow `list_picker_mode + current_folder_id/current_folder_name + view_mode + view_stack` 组合状态机。
+  - TodoBoard edit 路径对主窗口 dashboard popup 的回流联动。
+
+### 适合 6-4 最小接管的候选项
+
+- 建议仅接管一个最低风险闭环：
+  - **MainWindow 添加页来源返回决策闭环**（`source_view_for_add` 写入 + cancel/save 返回目标读取）
+  - 理由：单文件、纯路由状态、不涉及写库和跨窗口生命周期，回归面最小。
+
+### 不适合 6-4 接管、应推迟或继续拆分的项
+
+- 不建议在 6-4 一次性迁移 MainWindow 全部 picker 状态（time/alarm/list）。
+- 不建议在 6-4 同时碰 WeekWindow 与 TodoBoardWindow。
+- TodoBoard 的 list picker + inline add + folder/stick 状态机建议推迟到第八轮 UI 拆分前后，或至少另拆独立基线工单再做。
+
+### diff 范围检查结果
+
+- `git diff --name-only -- src` -> 无输出。
+- `git diff --name-only -- main.py` -> 无输出。
+- `git diff --name-only -- requirements.txt` -> 无输出。
+- `git diff --name-only -- schedule.db` -> 无输出。
+- `git diff --name-only` -> `manage_instruction/Work_Log.md`、`manage_instruction/Work_Task_Prompts.md`（后者为开工前既有）。
+- `git status --short --branch` -> `## main...temp/main [ahead 3]`，`M manage_instruction/Work_Log.md`，`M manage_instruction/Work_Task_Prompts.md`。
+
+### 未完成事项
+
+- 待顾问窗口下发 `6-4` 正式提示词，确认是否仅接管 MainWindow `source_view_for_add` 最小闭环。
+
+### 风险或疑点
+
+- MainWindow picker edit 分支与写库/刷新顺序耦合较重，若进入接管需先做单路径行为回归脚本。
+- TodoBoard 当前状态机依赖 `current_folder_id + view_mode + current_todos` 多条件组合，提前迁移会引入高回归风险。
