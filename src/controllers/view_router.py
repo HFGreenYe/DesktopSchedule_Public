@@ -7,6 +7,7 @@ class ViewRouter:
     """Pure helpers for view-name normalization and validation."""
 
     KNOWN_VIEWS = ("day", "week", "month", "todo")
+    MAIN_SWITCH_VIEWS = ("day", "week", "month", "todo", "priority")
 
     @classmethod
     def normalize_view_name(cls, view_name):
@@ -29,3 +30,10 @@ class ViewRouter:
             return normalized
         fallback = cls.normalize_view_name(default)
         return fallback if fallback is not None else "day"
+
+    @classmethod
+    def classify_main_view(cls, view_name):
+        """Classify top-level view targets by exact string match."""
+        if not isinstance(view_name, str):
+            return None
+        return view_name if view_name in cls.MAIN_SWITCH_VIEWS else None

@@ -25,6 +25,7 @@ from .suspend_window_week import SuspendWindowWeek
 from .suspend_window_month import SuspendWindowMonth
 from .todo import TodoView
 from ..services.reminder_service import ReminderService
+from ..controllers.view_router import ViewRouter
 
 class MainWindow(FramelessMainWindow):
     def __init__(self):
@@ -565,6 +566,8 @@ class MainWindow(FramelessMainWindow):
 
     # 处理视图切换
     def switch_view(self, view_name):
+        route_action = ViewRouter.classify_main_view(view_name)
+
         # 切换前，先把可能处于打开状态的视图选择菜单隐藏掉
         if hasattr(self, 'page_dashboard'):
             self.page_dashboard.view_selector.hide()
@@ -572,20 +575,20 @@ class MainWindow(FramelessMainWindow):
             self.page_todo.view_selector.hide()
 
         # 从周视图切走时，让主窗口在周视图当前位置居中出现
-        if view_name != "week" and hasattr(self, 'week_window') and self.week_window.isVisible():
+        if route_action != "week" and hasattr(self, 'week_window') and self.week_window.isVisible():
             geom = self.week_window.geometry()
             self.move(geom.x() + (geom.width() - self.width()) // 2, geom.y() + (geom.height() - self.height()) // 2)
             self.week_window.hide()  # 关掉周界面
             self.show()
 
         # 从月视图切走时，让主窗口在月视图当前位置居中出现
-        if view_name != "month" and hasattr(self, 'month_window') and self.month_window.isVisible():
+        if route_action != "month" and hasattr(self, 'month_window') and self.month_window.isVisible():
             geom = self.month_window.geometry()
             self.move(geom.x() + (geom.width() - self.width()) // 2, geom.y() + (geom.height() - self.height()) // 2)
             self.month_window.hide()  # 关掉月界面
             self.show()
         
-        if view_name == "week":
+        if route_action == "week":
             # 切换到周视图 
             self.hide()
             self.week_window.refresh_week_data()
@@ -600,7 +603,7 @@ class MainWindow(FramelessMainWindow):
             self.week_window.move(new_x, new_y)
             self.week_window.show()
 
-        elif view_name == "month":
+        elif route_action == "month":
             # 月视图切换逻辑
             self.hide()
             if hasattr(self, 'header') and hasattr(self.header, 'current_weather_data'):
@@ -613,17 +616,17 @@ class MainWindow(FramelessMainWindow):
             self.month_window.move(new_x, new_y)
             self.month_window.show()
             
-        elif view_name == "todo":
+        elif route_action == "todo":
             # 切换到待办视图
             self.body_stack.setCurrentWidget(self.page_todo)
             self.page_todo.refresh_data() # 切过去的时候刷新一下数据
             
-        elif view_name == "day":
+        elif route_action == "day":
             # 切换回日视图 (主面板)
             self.body_stack.setCurrentWidget(self.page_dashboard)
             self.page_dashboard.refresh_data()
             
-        elif view_name == "priority":
+        elif route_action == "priority":
 
             self.show_toast("准备切换至：四象限视图")
         else:

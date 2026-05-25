@@ -18,13 +18,13 @@
 
 第六轮：Controller / Router / EventBus 协调层，已启动。
 
-当前已完成 6-1（Controller / Router / Coordinator 最小骨架），等待顾问窗口复核与后续 6-2 小工单发布。
+当前已完成 6-2（ViewRouter 视图切换基线与低风险接管），等待顾问窗口复核与后续 6-3 小工单发布。
 
 ## 当前轮次注意事项
 
-- 6-1 仅建立 controller 最小骨架，不接入旧 UI。
+- 6-2 仅接管 `MainWindow.switch_view` 的纯路由决策，不迁移 Qt 实际操作。
 - 后续第六轮改造需按小工单逐步迁移，不得一次性重构 `MainWindow`/`WeekWindow`/`TodoBoardWindow`。
-- 在未收到后续正式提示词前，不得自行开始 6-2 及之后的实现改造。
+- 在未收到后续正式提示词前，不得自行开始 6-3 及之后的实现改造。
 
 ## 2026-05-25 第六轮 6-0（静态审查与跨视图耦合定位）
 
@@ -248,3 +248,114 @@
 
 - 当前 controller 仅是边界骨架，尚未接入 UI，实际价值依赖后续小步接管工单。
 - 后续接入时必须先保持旧路径并行，再逐步替换，避免跨窗口刷新顺序回归。
+
+## 2026-05-25 第六轮 6-2（ViewRouter 视图切换基线与低风险接管）
+
+- 本轮任务名称：第六轮 6-2（ViewRouter 视图切换基线与低风险接管）。
+- 开工前 git 状态：
+  - `git status --short --branch` 延续 6-1 收尾状态：`## main...temp/main [ahead 2]`，仅有 `M manage_instruction/Work_Task_Prompts.md` 作为开工前既有管理文档 diff。
+  - 结论：开工前已有管理文档 diff，不视为本轮源码改动。
+- 实际修改文件：
+  - `src/controllers/view_router.py`
+  - `src/ui/main_window.py`
+  - `manage_instruction/Work_Log.md`
+
+### switch_view 旧行为基线
+
+- `view_name == "week"`：
+  - 主窗口 `hide()`
+  - `week_window.refresh_week_data()`
+  - 若有天气数据则 `week_window.update_weather_ui(...)`
+  - 按主窗口中心计算位置后 `week_window.move(...); week_window.show()`
+- `view_name == "month"`：
+  - 主窗口 `hide()`
+  - 若有天气数据则 `month_window.update_weather_ui(...)`
+  - 按主窗口中心计算位置后 `month_window.move(...); month_window.show()`
+- `view_name == "todo"`：
+  - `body_stack.setCurrentWidget(self.page_todo)`
+  - `page_todo.refresh_data()`
+- `view_name == "day"`：
+  - `body_stack.setCurrentWidget(self.page_dashboard)`
+  - `page_dashboard.refresh_data()`
+- `view_name == "priority"`：
+  - `show_toast("准备切换至：四象限视图")`
+- 未知 `view_name`：
+  - `show_toast(f"准备切换至：{view_name}")`
+- 从可见 `week_window` 切到非 week：
+  - 主窗口移动到周视图中心后 `week_window.hide(); self.show()`
+- 从可见 `month_window` 切到非 month：
+  - 主窗口移动到月视图中心后 `month_window.hide(); self.show()`
+
+### 本轮实现
+
+- ViewRouter 新增方法名：
+  - `classify_main_view(view_name)`
+- 方法语义：
+  - 仅精确匹配 `day/week/month/todo/priority`
+  - 未知返回 `None`
+  - 不做 `strip()`/`lower()`，保持 `switch_view` 旧分支匹配语义
+- 为什么不直接使用 `normalize_view_name`：
+  - `normalize_view_name` 会 `strip/lower`，会把 `" WEEK "`/`"Week"` 归一化，改变旧 `switch_view` 对未知输入的 toast 行为。
+- MainWindow.switch_view 最小替换说明：
+  - 新增 `route_action = ViewRouter.classify_main_view(view_name)`
+  - 分支判断从 `view_name == ...` / `view_name != ...` 改为 `route_action == ...` / `route_action != ...`
+  - Qt 操作代码（`hide/show/move/setCurrentWidget/refresh_data/refresh_week_data/update_weather_ui/show_toast`）全部保留在 `MainWindow`
+  - 除 `switch_view` 处新增 `ViewRouter` import 外，无其他流程变更
+- `priority` 分支是否保持原行为：
+  - 是，仍为 `show_toast("准备切换至：四象限视图")`
+- 未知 `view_name` 是否保持原 toast 行为：
+  - 是，仍为 `show_toast(f"准备切换至：{view_name}")`
+
+### 验证结果
+
+- `py_compile` 验证结果：
+  - 命令：`python -m py_compile src/controllers/view_router.py src/ui/main_window.py`
+  - 结果：通过（无输出）
+- ViewRouter 纯行为验证结果：
+  - `day/week/month/todo/priority` 正确识别
+  - `bad` 返回 `None`
+  - `" WEEK "`、`"Week"` 返回 `None`
+  - 结果：通过（输出 `view router exact switch behavior ok`）
+- controller import 回归结果：
+  - 命令通过，输出 `controller imports ok`
+- MainWindow import 或兜底验证结果：
+  - `from src.ui.main_window import MainWindow` 通过，输出 `main window import ok True`
+- ViewRouter 静态依赖检查结果：
+  - 命令：`rg -n "QWidget|QStackedWidget|PyQt|PySide|MainWindow|WeekWindow|MonthWindow|TodoView|TodoBoard|db_manager|Repository|ScheduleRepository|CategoryRepository" src/controllers/view_router.py`
+  - 结果：无输出（退出码 1，视为通过）
+
+### 禁止范围 diff 检查结果
+
+- `src/ui/week_window.py`：无 diff
+- `src/ui/month_window.py`：无 diff
+- `src/ui/todo.py`：无 diff
+- `src/ui/todo_board.py`：无 diff
+- `src/data`：无 diff
+- `src/repositories`：无 diff
+- `src/services`：无 diff
+- `src/utils/signals.py`：无 diff
+- `main.py`：无 diff
+- `requirements.txt`：无 diff
+- `schedule.db`：无 tracked diff
+
+### 最终 diff 范围检查结果
+
+- `git diff --name-only`：
+  - `manage_instruction/Work_Task_Prompts.md`（开工前既有）
+  - `src/controllers/view_router.py`
+  - `src/ui/main_window.py`
+  - 写入本日志后另含 `manage_instruction/Work_Log.md`
+- `git status --short --branch`：
+  - `## main...temp/main [ahead 2]`
+  - `M manage_instruction/Work_Task_Prompts.md`
+  - `M src/controllers/view_router.py`
+  - `M src/ui/main_window.py`
+  - 写入本日志后另含 `M manage_instruction/Work_Log.md`
+
+### 未完成事项
+
+- 待顾问窗口下发 `6-3` 正式提示词，进入 add/picker 返回状态基线审查。
+
+### 风险或疑点
+
+- `switch_view` 仍是多职责方法，本轮仅接管低风险字符串决策；后续若继续迁移需保持行为基线与回归用例。
