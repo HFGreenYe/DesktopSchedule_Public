@@ -18,13 +18,13 @@
 
 第六轮：Controller / Router / EventBus 协调层，已启动。
 
-当前已完成 6-5（RefreshCoordinator 跨视图刷新边界建立），等待顾问窗口复核与后续 6-6 小工单发布。
+当前已完成 6-6（EventBus 并行通知试点），等待顾问窗口复核与后续 6-7 小工单发布。
 
 ## 当前轮次注意事项
 
-- 6-5 仅建立 MainWindow 内 Dashboard/Todo/Week 刷新协调边界，不接 EventBus，不改触发时机。
+- 6-6 仅在旧刷新路径后追加 EventBus 并行通知，不替换旧刷新路径。
 - 后续第六轮改造需按小工单逐步迁移，不得一次性重构 `MainWindow`/`WeekWindow`/`TodoBoardWindow`。
-- 在未收到后续正式提示词前，不得自行开始 6-6 及之后的实现改造。
+- 在未收到后续正式提示词前，不得自行开始 6-7 及之后的实现改造。
 
 ## 2026-05-25 第六轮 6-0（静态审查与跨视图耦合定位）
 
@@ -763,3 +763,114 @@
 ### 风险或疑点
 
 - 当前仅在 MainWindow 建立刷新协调边界，跨窗口层面的统一刷新治理仍依赖后续小工单逐步收口。
+
+## 2026-05-25 第六轮 6-6（EventBus 并行通知试点）
+
+- 本轮任务名称：第六轮 6-6（EventBus 并行通知试点）。
+- 开工前 git 状态：
+  - `git status --short --branch` -> `## main...temp/main [ahead 6]`
+  - 开工前既有 diff：`M manage_instruction/Work_Task_Prompts.md`
+  - 结论：开工前已有管理文档 diff，不视为本轮源码改动。
+- 实际修改文件：
+  - `src/utils/signals.py`
+  - `src/ui/main_window.py`
+  - `manage_instruction/Work_Log.md`
+
+### 选择的低风险通知点
+
+- 选点：`MainWindow._refresh_dashboard_todo_week()`
+- 原因：
+  - 该方法已在 6-5 统一封装 Dashboard/Todo/Week 三连刷新。
+  - 触发点清晰、影响面可控。
+  - 可在旧刷新执行后追加并行通知，不改变现有刷新主路径。
+
+### 新增或复用的 EventBus 信号
+
+- 在 `src/utils/signals.py` 的 `AppSignals` 中新增：
+  - `refresh_requested = pyqtSignal(str)`
+- `global_signals` 名称保留，未改实例化方式。
+
+### 并行通知接入方式
+
+- 在 `MainWindow._refresh_dashboard_todo_week()` 中保持原逻辑：
+  - `self.main_controller.request_refresh_many(("dashboard", "todo", "week_if_visible"))`
+- 在其后追加：
+  - `global_signals.refresh_requested.emit("dashboard_todo_week")`
+- 结论：
+  - 旧刷新路径仍执行。
+  - 新 EventBus 通知仅作并行增强，不参与实际 UI 刷新决策。
+
+### payload 语义
+
+- `refresh_requested` 的 payload 为字符串刷新域：
+  - 本轮试点值：`"dashboard_todo_week"`
+- 语义：表示该刷新域已请求/已执行对应协调刷新，供后续兼容监听扩展。
+
+### 兼容性与约束结论
+
+- `skin_changed` 是否保持无参签名：是（`pyqtSignal()` 未改）。
+- 其他旧信号签名是否保持：
+  - `theme_changed(str)`：保持
+  - `schedule_added(object)`：保持
+  - `schedule_updated(object)`：保持
+  - `schedule_deleted(int)`：保持
+  - `category_changed()`：保持
+- 是否未连接任何 UI 监听新信号：是（本轮只 emit，不新增 connect）。
+- 是否未修改 WeekWindow / TodoView / TodoBoardWindow / MonthWindow：是。
+- 是否未改刷新顺序：是（dashboard -> todo -> week_if_visible 仍保持）。
+
+### 验证结果
+
+- `py_compile` 验证结果：
+  - 命令：`python -m py_compile src/utils/signals.py src/ui/main_window.py`
+  - 结果：通过（无输出）。
+- `global_signals` 兼容性和新信号验证结果：
+  - 命令按提示词验证 `skin_changed` 与 `refresh_requested`。
+  - 结果：通过，输出 `global signals compatibility ok`。
+- MainWindow import 或兜底验证结果：
+  - 通过，输出 `main window import ok True`。
+- 静态检查结果：
+  - `rg -n "_refresh_dashboard_todo_week|request_refresh_many|refresh_requested|global_signals|page_dashboard\\.refresh_data|page_todo\\.refresh_data|_refresh_week_if_visible" src/ui/main_window.py src/utils/signals.py`
+  - 结果确认：
+    - 旧刷新调用仍在。
+    - `refresh_requested` 仅在 `_refresh_dashboard_todo_week` 中追加 emit。
+  - `rg -n "skin_changed|theme_changed|schedule_added|schedule_updated|schedule_deleted|category_changed|refresh_requested|global_signals" src/utils/signals.py`
+  - 结果确认旧信号签名未改，新增 `refresh_requested = pyqtSignal(str)`。
+
+### 禁止范围 diff 检查结果
+
+- `src/controllers/main_controller.py`：无 diff。
+- `src/controllers/view_router.py`：无 diff。
+- `src/controllers/__init__.py`：无 diff。
+- `src/ui/week_window.py`：无 diff。
+- `src/ui/month_window.py`：无 diff。
+- `src/ui/todo.py`：无 diff。
+- `src/ui/todo_board.py`：无 diff。
+- `src/data`：无 diff。
+- `src/repositories`：无 diff。
+- `src/services`：无 diff。
+- `main.py`：无 diff。
+- `requirements.txt`：无 diff。
+- `schedule.db`：无 tracked diff。
+
+### 最终 diff 范围检查结果
+
+- `git diff --name-only`：
+  - `manage_instruction/Work_Task_Prompts.md`（开工前既有）
+  - `src/ui/main_window.py`
+  - `src/utils/signals.py`
+  - 写入本日志后另含 `manage_instruction/Work_Log.md`
+- `git status --short --branch`：
+  - `## main...temp/main [ahead 6]`
+  - `M manage_instruction/Work_Task_Prompts.md`
+  - `M src/ui/main_window.py`
+  - `M src/utils/signals.py`
+  - 写入本日志后另含 `M manage_instruction/Work_Log.md`
+
+### 未完成事项
+
+- 待顾问窗口下发 `6-7` 正式提示词，执行详情弹窗与跨视图刷新回流复核。
+
+### 风险或疑点
+
+- 当前 `refresh_requested` 尚无订阅方，本轮仅验证并行通知可用性；后续若接入监听需确保不造成重复刷新。

@@ -27,6 +27,7 @@ from .todo import TodoView
 from ..services.reminder_service import ReminderService
 from ..controllers.main_controller import MainController
 from ..controllers.view_router import ViewRouter
+from ..utils.signals import global_signals
 
 class MainWindow(FramelessMainWindow):
     def __init__(self):
@@ -184,6 +185,7 @@ class MainWindow(FramelessMainWindow):
 
     def _refresh_dashboard_todo_week(self):
         self.main_controller.request_refresh_many(("dashboard", "todo", "week_if_visible"))
+        global_signals.refresh_requested.emit("dashboard_todo_week")
 
     def show_calendar_popup(self):
         """在顶栏日期文字下方弹出日历"""
