@@ -40,3 +40,20 @@ class MainController:
     def request_refresh_many(self, names, *args, **kwargs):
         """Trigger multiple registered refresh callbacks."""
         return self.refresh_coordinator.trigger_many(names, *args, **kwargs)
+
+    @staticmethod
+    def resolve_add_source(current_widget, dashboard_widget, todo_widget, existing_source=None):
+        """Resolve add-page source view while preserving prior source when unknown."""
+        if current_widget is dashboard_widget or current_widget is todo_widget:
+            return current_widget
+        return existing_source
+
+    @staticmethod
+    def resolve_add_return_target(source_view, dashboard_widget):
+        """Resolve add-page return target with dashboard as fallback."""
+        return source_view if source_view is not None else dashboard_widget
+
+    @staticmethod
+    def default_to_schedule_for_add(current_widget, todo_widget):
+        """Determine add-page default type based on entry view."""
+        return current_widget is not todo_widget

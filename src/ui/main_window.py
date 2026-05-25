@@ -25,11 +25,13 @@ from .suspend_window_week import SuspendWindowWeek
 from .suspend_window_month import SuspendWindowMonth
 from .todo import TodoView
 from ..services.reminder_service import ReminderService
+from ..controllers.main_controller import MainController
 from ..controllers.view_router import ViewRouter
 
 class MainWindow(FramelessMainWindow):
     def __init__(self):
         super().__init__()
+        self.main_controller = MainController()
         
         self.setFixedWidth(AppConfig.DEFAULT_WIDTH)
         self.setMinimumHeight(600) 
@@ -124,7 +126,12 @@ class MainWindow(FramelessMainWindow):
         
         # AddView 逻辑
         self.page_add.btn_cancel.clicked.connect(
-            lambda: self.body_stack.setCurrentWidget(getattr(self, 'source_view_for_add', self.page_dashboard))
+            lambda: self.body_stack.setCurrentWidget(
+                self.main_controller.resolve_add_return_target(
+                    getattr(self, 'source_view_for_add', None),
+                    self.page_dashboard,
+                )
+            )
         )
         self.page_add.saved.connect(self.on_schedule_saved)
         
@@ -493,7 +500,10 @@ class MainWindow(FramelessMainWindow):
         self.page_todo.refresh_data()
         self._refresh_week_if_visible()
         self.body_stack.setCurrentIndex(0)
-        return_target = getattr(self, 'source_view_for_add', self.page_dashboard)
+        return_target = self.main_controller.resolve_add_return_target(
+            getattr(self, 'source_view_for_add', None),
+            self.page_dashboard,
+        )
         self.body_stack.setCurrentWidget(return_target)
 
     def handle_header_action(self, action_name):
@@ -550,17 +560,24 @@ class MainWindow(FramelessMainWindow):
         # 原本的切换逻辑
         if current_widget == self.page_add:
             # 如果当前在添加页，再点一次顶栏的 + 号，相当于取消，退回来源页
-            return_target = getattr(self, 'source_view_for_add', self.page_dashboard)
+            return_target = self.main_controller.resolve_add_return_target(
+                getattr(self, 'source_view_for_add', None),
+                self.page_dashboard,
+            )
             self.body_stack.setCurrentWidget(return_target)
         else:
-            # 进入添加页前，记录当前是哪个页面（主界面 或 待办界面）
-            if current_widget in [self.page_dashboard, self.page_todo]:
-                self.source_view_for_add = current_widget
+            self.source_view_for_add = self.main_controller.resolve_add_source(
+                current_widget,
+                self.page_dashboard,
+                self.page_todo,
+                getattr(self, 'source_view_for_add', None),
+            )
             
-            # 智能判断来源，决定默认是“日程”还是“待办”
-            # 如果是从待办界面进来的，默认就不是日程模式 (False)
-            is_from_todo = (current_widget == self.page_todo)
-            self.page_add.reset(default_to_schedule=not is_from_todo)
+            default_to_schedule = self.main_controller.default_to_schedule_for_add(
+                current_widget,
+                self.page_todo,
+            )
+            self.page_add.reset(default_to_schedule=default_to_schedule)
             
             self.body_stack.setCurrentWidget(self.page_add)
 

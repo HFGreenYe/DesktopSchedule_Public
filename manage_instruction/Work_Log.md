@@ -18,13 +18,13 @@
 
 第六轮：Controller / Router / EventBus 协调层，已启动。
 
-当前已完成 6-3（添加页来源与 picker 返回状态基线），等待顾问窗口复核与后续 6-4 小工单发布。
+当前已完成 6-4（添加页来源与 picker 返回状态最小接管），等待顾问窗口复核与后续 6-5 小工单发布。
 
 ## 当前轮次注意事项
 
-- 6-3 仅做添加页来源与 picker 返回状态基线审查，不改源码。
+- 6-4 仅接管 MainWindow `source_view_for_add` 闭环纯决策，不迁移任何 picker 逻辑。
 - 后续第六轮改造需按小工单逐步迁移，不得一次性重构 `MainWindow`/`WeekWindow`/`TodoBoardWindow`。
-- 在未收到后续正式提示词前，不得自行开始 6-4 及之后的实现改造。
+- 在未收到后续正式提示词前，不得自行开始 6-5 及之后的实现改造。
 
 ## 2026-05-25 第六轮 6-0（静态审查与跨视图耦合定位）
 
@@ -536,3 +536,112 @@
 
 - MainWindow picker edit 分支与写库/刷新顺序耦合较重，若进入接管需先做单路径行为回归脚本。
 - TodoBoard 当前状态机依赖 `current_folder_id + view_mode + current_todos` 多条件组合，提前迁移会引入高回归风险。
+
+## 2026-05-25 第六轮 6-4（添加页来源与 picker 返回状态最小接管）
+
+- 本轮任务名称：第六轮 6-4（添加页来源与 picker 返回状态最小接管）。
+- 开工前 git 状态：
+  - `git status --short --branch` -> `## main...temp/main [ahead 4]`
+  - 开工前既有 diff：`M manage_instruction/Work_Task_Prompts.md`
+  - 结论：开工前已有管理文档 diff，不视为本轮源码改动。
+- 实际修改文件：
+  - `src/controllers/main_controller.py`
+  - `src/ui/main_window.py`
+  - `manage_instruction/Work_Log.md`
+- 是否进入源码修改分支：是（按 6-4 条件执行，仅接管最低风险闭环）。
+
+### 接管的具体字段/路径
+
+- `source_view_for_add` 写入决策：
+  - `MainWindow.switch_to_add_page` 中改为调用 `MainController.resolve_add_source(...)`。
+- 添加页取消返回目标：
+  - `page_add.btn_cancel` 回调改为调用 `MainController.resolve_add_return_target(...)`。
+- 添加页保存后返回目标：
+  - `MainWindow.on_schedule_saved` 的 `return_target` 改为调用 `MainController.resolve_add_return_target(...)`。
+- 添加页再次点击 add 的返回目标：
+  - `switch_to_add_page` 中“当前已在 page_add”分支改为调用 `MainController.resolve_add_return_target(...)`。
+- `default_to_schedule` 判断：
+  - `switch_to_add_page` 中改为调用 `MainController.default_to_schedule_for_add(...)`。
+
+### MainController 新增方法名和语义
+
+- 新增方法：
+  - `resolve_add_source(current_widget, dashboard_widget, todo_widget, existing_source=None)`
+  - `resolve_add_return_target(source_view, dashboard_widget)`
+  - `default_to_schedule_for_add(current_widget, todo_widget)`
+- 语义：
+  - 仅做对象比较和返回目标选择，不执行任何 UI 操作，不写数据库，不依赖 Qt/UI/db/Repository。
+
+### MainWindow 最小替换说明
+
+- 仅替换 `source_view_for_add` 闭环中的纯决策部分，Qt 实际操作仍在 MainWindow：
+  - `setCurrentWidget(...)` 仍在 MainWindow。
+  - `page_add.reset(...)` 仍在 MainWindow。
+  - 保存后刷新顺序保持原样：
+    - `page_dashboard.refresh_data()`
+    - `page_todo.refresh_data()`
+    - `_refresh_week_if_visible()`
+- `handle_header_action` 未修改。
+- `switch_view` 逻辑未修改。
+
+### 未接管路径及原因
+
+- `time picker`：未接管。原因：涉及 edit 写库、重复规则确认、跨视图刷新回流，风险高于本轮边界。
+- `alarm picker`：未接管。原因同上。
+- `list picker`：未接管。原因：除写库外还涉及 `list_picker_source` 和 todo/dashboard 返回分支，不属于本轮最小闭环。
+- `WeekWindow`：未接管。原因：本轮明确禁止触碰。
+- `TodoBoardWindow`：未接管。原因：本轮明确禁止触碰，且状态机复杂度高。
+
+### 验证结果
+
+- `py_compile` 验证结果：
+  - 命令：`python -m py_compile src/controllers/main_controller.py src/ui/main_window.py`
+  - 结果：通过（无输出）。
+- MainController 纯决策行为验证结果：
+  - 命令按提示词断言 `resolve_add_source/resolve_add_return_target/default_to_schedule_for_add`。
+  - 结果：通过，输出 `main controller add source behavior ok`。
+- controller import 回归结果：
+  - 通过，输出 `controller imports ok`。
+- MainWindow import 或兜底验证结果：
+  - 通过，输出 `main window import ok True`。
+- MainController 静态依赖检查结果：
+  - 命令：`rg -n "QWidget|QStackedWidget|PyQt|PySide|MainWindow|WeekWindow|MonthWindow|TodoView|TodoBoard|db_manager|Repository|ScheduleRepository|CategoryRepository|add_schedule|update_schedule|delete_schedule|soft_delete|hard_delete|setCurrentWidget|refresh_data" src/controllers/main_controller.py`
+  - 结果：无输出（退出码 1，视为通过）。
+
+### 禁止范围 diff 检查结果
+
+- `src/controllers/refresh_coordinator.py`：无 diff。
+- `src/controllers/__init__.py`：无 diff。
+- `src/ui/week_window.py`：无 diff。
+- `src/ui/month_window.py`：无 diff。
+- `src/ui/todo.py`：无 diff。
+- `src/ui/todo_board.py`：无 diff。
+- `src/data`：无 diff。
+- `src/repositories`：无 diff。
+- `src/services`：无 diff。
+- `src/utils/signals.py`：无 diff。
+- `main.py`：无 diff。
+- `requirements.txt`：无 diff。
+- `schedule.db`：无 tracked diff。
+
+### 最终 diff 范围检查结果
+
+- `git diff --name-only`：
+  - `manage_instruction/Work_Task_Prompts.md`（开工前既有）
+  - `src/controllers/main_controller.py`
+  - `src/ui/main_window.py`
+  - 写入本日志后另含 `manage_instruction/Work_Log.md`
+- `git status --short --branch`：
+  - `## main...temp/main [ahead 4]`
+  - `M manage_instruction/Work_Task_Prompts.md`
+  - `M src/controllers/main_controller.py`
+  - `M src/ui/main_window.py`
+  - 写入本日志后另含 `M manage_instruction/Work_Log.md`
+
+### 未完成事项
+
+- 待顾问窗口下发 `6-5` 正式提示词，评估是否进入刷新协调边界建立。
+
+### 风险或疑点
+
+- `source_view_for_add` 闭环已迁入 controller 纯决策，但 MainWindow 内仍存在多个 picker 状态分支，后续若继续迁移需要保持“单闭环、可回归”节奏。
