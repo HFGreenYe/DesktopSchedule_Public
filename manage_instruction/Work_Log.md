@@ -18,13 +18,13 @@
 
 第六轮：Controller / Router / EventBus 协调层，已启动。
 
-当前已完成 6-4（添加页来源与 picker 返回状态最小接管），等待顾问窗口复核与后续 6-5 小工单发布。
+当前已完成 6-5（RefreshCoordinator 跨视图刷新边界建立），等待顾问窗口复核与后续 6-6 小工单发布。
 
 ## 当前轮次注意事项
 
-- 6-4 仅接管 MainWindow `source_view_for_add` 闭环纯决策，不迁移任何 picker 逻辑。
+- 6-5 仅建立 MainWindow 内 Dashboard/Todo/Week 刷新协调边界，不接 EventBus，不改触发时机。
 - 后续第六轮改造需按小工单逐步迁移，不得一次性重构 `MainWindow`/`WeekWindow`/`TodoBoardWindow`。
-- 在未收到后续正式提示词前，不得自行开始 6-5 及之后的实现改造。
+- 在未收到后续正式提示词前，不得自行开始 6-6 及之后的实现改造。
 
 ## 2026-05-25 第六轮 6-0（静态审查与跨视图耦合定位）
 
@@ -645,3 +645,121 @@
 ### 风险或疑点
 
 - `source_view_for_add` 闭环已迁入 controller 纯决策，但 MainWindow 内仍存在多个 picker 状态分支，后续若继续迁移需要保持“单闭环、可回归”节奏。
+
+## 2026-05-25 第六轮 6-5（RefreshCoordinator 跨视图刷新边界建立）
+
+- 本轮任务名称：第六轮 6-5（RefreshCoordinator 跨视图刷新边界建立）。
+- 开工前 git 状态：
+  - `git status --short --branch` -> `## main...temp/main [ahead 5]`
+  - 开工前既有 diff：`M manage_instruction/Work_Task_Prompts.md`
+  - 结论：开工前已有管理文档 diff，不视为本轮源码改动。
+- 实际修改文件：
+  - `src/ui/main_window.py`
+  - `manage_instruction/Work_Log.md`
+
+### MainWindow 旧刷新基线
+
+- `on_schedule_saved`：
+  - 旧逻辑直接顺序调用：
+    - `page_dashboard.refresh_data()`
+    - `page_todo.refresh_data()`
+    - `_refresh_week_if_visible()`
+- `on_time_confirmed` edit 分支：
+  - 更新成功后直接顺序调用上述三连刷新。
+- `on_alarm_confirmed` edit 分支：
+  - 更新成功后直接顺序调用上述三连刷新。
+- `on_list_confirmed` edit 分支：
+  - 更新成功后直接顺序调用上述三连刷新（含“为保险起见”注释）。
+- 旧信号连接保留基线：
+  - `page_dashboard.req_refresh_all.connect(self._refresh_week_if_visible)`
+  - `page_todo.req_refresh_all.connect(self.page_dashboard.refresh_data)`
+  - `page_dashboard.req_refresh_all.connect(self.page_todo.refresh_data)`
+  - `week_window.schedule_updated.connect(self._on_week_schedule_updated)`
+
+### RefreshCoordinator 当前能力或新增方法说明
+
+- `RefreshCoordinator` 现有 `register/unregister/trigger/trigger_many` 已满足本轮，不新增方法。
+- 本轮未修改 `src/controllers/refresh_coordinator.py`，仅复用现有能力。
+
+### 刷新目标注册方式
+
+- 在 MainWindow 新增 `_register_refresh_targets()`，通过 `MainController` 注册三个目标：
+  - `dashboard` -> `self.page_dashboard.refresh_data`
+  - `todo` -> `self.page_todo.refresh_data`
+  - `week_if_visible` -> `self._refresh_week_if_visible`
+- 在 `__init__` 中调用 `_register_refresh_targets()` 完成注册。
+
+### 接管的刷新链路
+
+- 新增 `MainWindow._refresh_dashboard_todo_week()`：
+  - 使用 `self.main_controller.request_refresh_many(("dashboard", "todo", "week_if_visible"))`
+  - 保持原顺序：dashboard -> todo -> week_if_visible
+- 用该方法替换四处同构三连刷新：
+  - `on_schedule_saved`
+  - `on_time_confirmed` edit 分支
+  - `on_alarm_confirmed` edit 分支
+  - `on_list_confirmed` edit 分支
+
+### 保留的旧直连路径及原因
+
+- 保留 `req_refresh_all` 的旧连接：本轮不改触发时机和信号路径。
+- 保留 `week_window.schedule_updated` 旧连接：本轮不改跨窗口更新入口。
+- 保留 `_refresh_week_if_visible` 内部可见性判断：本轮仅封装协调调用，不改变判断逻辑。
+
+### 行为保持结论
+
+- 是否保持旧刷新顺序：是。
+- 是否保持旧触发时机：是。
+- 是否未接 global_signals：是（未新增/未连接 EventBus 信号）。
+
+### 验证结果
+
+- `py_compile` 验证结果：
+  - 命令：`python -m py_compile src/controllers/refresh_coordinator.py src/controllers/main_controller.py src/ui/main_window.py`
+  - 结果：通过（无输出）。
+- RefreshCoordinator 纯行为验证结果：
+  - 通过，输出 `refresh coordinator behavior ok`。
+- controller import 回归结果：
+  - 通过，输出 `controller imports ok`。
+- MainWindow import 或兜底验证结果：
+  - 通过，输出 `main window import ok True`。
+- RefreshCoordinator 静态依赖检查结果：
+  - 命令：`rg -n "QWidget|QStackedWidget|PyQt|PySide|MainWindow|WeekWindow|MonthWindow|TodoView|TodoBoard|db_manager|Repository|ScheduleRepository|CategoryRepository|add_schedule|update_schedule|delete_schedule|soft_delete|hard_delete|setCurrentWidget|refresh_data" src/controllers/refresh_coordinator.py`
+  - 结果：无输出（退出码 1，视为通过）。
+- `signals.py` 是否无 diff：
+  - `git diff --name-only -- src/utils/signals.py` -> 无输出。
+
+### 禁止范围 diff 检查结果
+
+- `src/controllers/view_router.py`：无 diff。
+- `src/controllers/__init__.py`：无 diff。
+- `src/ui/week_window.py`：无 diff。
+- `src/ui/month_window.py`：无 diff。
+- `src/ui/todo.py`：无 diff。
+- `src/ui/todo_board.py`：无 diff。
+- `src/data`：无 diff。
+- `src/repositories`：无 diff。
+- `src/services`：无 diff。
+- `main.py`：无 diff。
+- `requirements.txt`：无 diff。
+- `schedule.db`：无 tracked diff。
+
+### 最终 diff 范围检查结果
+
+- `git diff --name-only`：
+  - `manage_instruction/Work_Task_Prompts.md`（开工前既有）
+  - `src/ui/main_window.py`
+  - 写入本日志后另含 `manage_instruction/Work_Log.md`
+- `git status --short --branch`：
+  - `## main...temp/main [ahead 5]`
+  - `M manage_instruction/Work_Task_Prompts.md`
+  - `M src/ui/main_window.py`
+  - 写入本日志后另含 `M manage_instruction/Work_Log.md`
+
+### 未完成事项
+
+- 待顾问窗口下发 `6-6` 正式提示词，再评估 EventBus 并行通知试点。
+
+### 风险或疑点
+
+- 当前仅在 MainWindow 建立刷新协调边界，跨窗口层面的统一刷新治理仍依赖后续小工单逐步收口。

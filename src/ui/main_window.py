@@ -160,6 +160,7 @@ class MainWindow(FramelessMainWindow):
         self.page_time.suspend_requested.connect(self.switch_to_suspend)
         self.page_alarm.suspend_requested.connect(self.switch_to_suspend)
         self.page_list.suspend_requested.connect(self.switch_to_suspend)
+        self._register_refresh_targets()
         current_style = self.styleSheet()
         self.setStyleSheet(current_style + StyleManager.get_tooltip_style())
 
@@ -175,6 +176,14 @@ class MainWindow(FramelessMainWindow):
     def _refresh_week_if_visible(self):
         if hasattr(self, 'week_window') and self.week_window.isVisible():
             self.week_window.refresh_week_data()
+
+    def _register_refresh_targets(self):
+        self.main_controller.register_refresh_target("dashboard", self.page_dashboard.refresh_data)
+        self.main_controller.register_refresh_target("todo", self.page_todo.refresh_data)
+        self.main_controller.register_refresh_target("week_if_visible", self._refresh_week_if_visible)
+
+    def _refresh_dashboard_todo_week(self):
+        self.main_controller.request_refresh_many(("dashboard", "todo", "week_if_visible"))
 
     def show_calendar_popup(self):
         """在顶栏日期文字下方弹出日历"""
@@ -332,9 +341,7 @@ class MainWindow(FramelessMainWindow):
                 self.editing_schedule.created_at = now
                 if not update_future: self.editing_schedule.group_id = None # 同步脱离队伍
                 
-                self.page_dashboard.refresh_data()
-                self.page_todo.refresh_data()
-                self._refresh_week_if_visible()
+                self._refresh_dashboard_todo_week()
                 for p in self.page_dashboard.open_popups:
                     if p.data.id == self.editing_schedule.id:
                         p.refresh_time_display()
@@ -420,9 +427,7 @@ class MainWindow(FramelessMainWindow):
                 self.editing_schedule.created_at = now
                 if not update_future: self.editing_schedule.group_id = None
                 
-                self.page_dashboard.refresh_data()
-                self.page_todo.refresh_data()
-                self._refresh_week_if_visible()
+                self._refresh_dashboard_todo_week()
                 for p in self.page_dashboard.open_popups:
                     if p.data.id == self.editing_schedule.id: 
                         p.refresh_alarm_display()
@@ -484,9 +489,7 @@ class MainWindow(FramelessMainWindow):
                 self.editing_schedule.created_at = now
                 if not update_future: self.editing_schedule.group_id = None
                 
-                self.page_dashboard.refresh_data()
-                self.page_todo.refresh_data()
-                self._refresh_week_if_visible() # 为保险起见，清单改变也同步刷新下周视图
+                self._refresh_dashboard_todo_week() # 为保险起见，清单改变也同步刷新下周视图
                 for p in self.page_dashboard.open_popups:
                     if p.data.id == self.editing_schedule.id: 
                         p.refresh_list_display()
@@ -496,9 +499,7 @@ class MainWindow(FramelessMainWindow):
     # --- 其他逻辑 ---
 
     def on_schedule_saved(self):
-        self.page_dashboard.refresh_data()
-        self.page_todo.refresh_data()
-        self._refresh_week_if_visible()
+        self._refresh_dashboard_todo_week()
         self.body_stack.setCurrentIndex(0)
         return_target = self.main_controller.resolve_add_return_target(
             getattr(self, 'source_view_for_add', None),
