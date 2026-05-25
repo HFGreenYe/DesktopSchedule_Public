@@ -18,13 +18,13 @@
 
 第六轮：Controller / Router / EventBus 协调层，已启动。
 
-当前已完成 6-7（详情弹窗与跨视图刷新回流复核），等待顾问窗口复核与后续 6-8 整体验收发布。
+当前已完成 6-8（第六轮整体验收与归档准备），等待顾问窗口复核与第七轮 Theme/QSS 接入阶段合同。
 
 ## 当前轮次注意事项
 
-- 6-7 仅做详情弹窗与跨视图刷新回流复核，不做源码接管。
+- 6-8 仅做第六轮整体验收与归档准备，不改源码。
 - 后续第六轮改造需按小工单逐步迁移，不得一次性重构 `MainWindow`/`WeekWindow`/`TodoBoardWindow`。
-- 在未收到后续正式提示词前，不得自行开始 6-8 及之后的实现改造。
+- 在未收到后续正式提示词前，不得自行开始第七轮 Theme/QSS 接入改造。
 
 ## 2026-05-25 第六轮 6-0（静态审查与跨视图耦合定位）
 
@@ -1054,3 +1054,135 @@
 ### 风险或疑点
 
 - 详情弹窗回流目前依赖多条并行刷新通道（局部 refresh + `req_refresh_all` + 6-6 并行 EventBus emit），后续若继续接管必须先明确“主路径/辅路径”职责，避免重复刷新或时序竞态。
+
+## 2026-05-26 第六轮 6-8（第六轮整体验收与归档准备）
+
+- 本轮任务名称：第六轮 6-8（第六轮整体验收与归档准备）。
+- 开工前 git 状态：
+  - `git status --short --branch` -> `## main...temp/main [ahead 8]`
+  - 开工前既有 diff：`M manage_instruction/Work_Task_Prompts.md`
+  - 结论：开工前已有管理文档 diff，不视为本轮源码改动。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+
+### 6-0 ~ 6-7 完成摘要
+
+- `6-0`：完成跨视图耦合静态定位，给出风险分级与迁移候选。
+- `6-1`：建立 `MainController` / `ViewRouter` / `RefreshCoordinator` 最小骨架。
+- `6-2`：`ViewRouter.classify_main_view` 接管 `switch_view` 纯决策，Qt 路由操作保留在 MainWindow。
+- `6-3`：完成添加页来源与 picker 返回状态基线地图。
+- `6-4`：`MainController` 接管 `source_view_for_add` 最小闭环决策。
+- `6-5`：在 MainWindow 建立 Dashboard/Todo/Week 三连刷新协调边界。
+- `6-6`：新增 `global_signals.refresh_requested(str)` 并在旧刷新后并行 emit。
+- `6-7`：完成详情弹窗与跨视图刷新回流复核，形成后续接管建议与风险边界。
+
+### 第六轮实际迁移到协调层的职责
+
+- `ViewRouter`：
+  - `classify_main_view` 提供 `day/week/month/todo/priority` 精确路由分类。
+- `MainController`：
+  - 添加页来源与返回的纯决策：
+    - `resolve_add_source`
+    - `resolve_add_return_target`
+    - `default_to_schedule_for_add`
+  - 刷新目标注册与触发代理（通过 `refresh_coordinator`）。
+- `RefreshCoordinator`：
+  - `register/unregister/trigger/trigger_many` 统一回调注册与顺序触发。
+- `global_signals.refresh_requested`：
+  - 并行通知试点，仅增强，不替代旧刷新主路径。
+
+### 保留在 UI 中的职责及原因
+
+- MainWindow 仍保留 Qt 实际路由与页面切换操作（`setCurrentWidget/show/hide/move`）。
+- time/alarm/list picker edit 写库与返回路径仍在 UI（涉及写库和复杂回流，风险高）。
+- WeekWindow 内部 picker 路径仍独立（未纳入本轮接管范围）。
+- TodoBoardWindow `view_stack + list picker + folder/stick` 状态机仍未迁移（高耦合，建议第八轮处理）。
+- 详情弹窗来源借道与 `source_view` 分支逻辑仍在 UI（跨窗口高耦合）。
+
+### 验证命令与结果
+
+- controller import 验证：
+  - 命令通过，输出 `controller imports ok` 与 `True True True True`。
+- py_compile 验证：
+  - `main_controller.py/view_router.py/refresh_coordinator.py/__init__.py/signals.py/main_window.py` 全部通过。
+- ViewRouter 行为验证：
+  - 精确匹配通过；`' WEEK '`/`'Week'` 返回 `None`，保持旧语义。
+- MainController 行为验证：
+  - 添加页来源/返回/默认类型决策断言全部通过。
+- RefreshCoordinator 行为验证：
+  - register/trigger/trigger_many/unregister 断言全部通过。
+- global_signals 兼容性验证：
+  - `skin_changed` 无参兼容通过；
+  - `refresh_requested('dashboard_todo_week')` 发射与接收通过。
+- MainWindow import 验证：
+  - 通过，输出 `main window import ok True`。
+
+### MainWindow 关键接入点静态检查结果
+
+- 命中项确认：
+  - `MainController`、`ViewRouter`、`global_signals`
+  - `_register_refresh_targets`
+  - `_refresh_dashboard_todo_week`
+  - `request_refresh_many`
+  - `refresh_requested`
+  - `resolve_add_source/resolve_add_return_target/default_to_schedule_for_add`
+  - `classify_main_view`
+
+### signals.py 旧信号签名检查结果
+
+- `skin_changed`：`pyqtSignal()`（保持）
+- `theme_changed`：`pyqtSignal(str)`（保持）
+- `schedule_added`：`pyqtSignal(object)`（保持）
+- `schedule_updated`：`pyqtSignal(object)`（保持）
+- `schedule_deleted`：`pyqtSignal(int)`（保持）
+- `category_changed`：`pyqtSignal()`（保持）
+- `refresh_requested`：`pyqtSignal(str)`（新增）
+- `global_signals` 名称保留。
+
+### controller 静态依赖检查结果
+
+- 命令：`rg -n "...|setCurrentWidget|refresh_data" src/controllers`
+- 结果：无输出（退出码 1，视为通过），controller 不依赖 UI/db/Repository。
+
+### diff 范围检查结果
+
+- `git diff --name-only -- src`：无输出。
+- `git diff --name-only -- main.py`：无输出。
+- `git diff --name-only -- requirements.txt`：无输出。
+- `git diff --name-only -- schedule.db`：无输出。
+- `git diff --name-only`：
+  - `manage_instruction/Work_Task_Prompts.md`（开工前既有）
+  - 写入本日志后另含 `manage_instruction/Work_Log.md`
+- `git status --short --branch`：
+  - `## main...temp/main [ahead 8]`
+  - `M manage_instruction/Work_Task_Prompts.md`（开工前既有）
+  - 写入本日志后另含 `M manage_instruction/Work_Log.md`
+
+### 第六轮未迁移债务
+
+- MainWindow Qt 实际路由仍是 UI 直控。
+- picker time/alarm/list edit 写库与返回路径仍在 UI。
+- WeekWindow 内部 picker 路径仍独立。
+- TodoBoardWindow `view_stack/list picker` 状态机仍未迁移。
+- 详情弹窗打开与 `source_view` 分支仍未迁移。
+- `refresh_requested` 当前无 UI 监听者，仅并行通知试点。
+- 第八轮 UI 拆分需重点处理 `TodoBoardWindow` / `MainWindow` / `WeekWindow` 大文件结构。
+
+### 第七轮 Theme/QSS 接入前注意事项
+
+- 不要在第七轮顺带改动第六轮协调层行为路径。
+- Theme/QSS 改动应避免触碰详情弹窗回流、picker 返回、跨视图刷新触发时机。
+- 保留第六轮回归集（路由决策、添加页来源、三连刷新、EventBus 并行通知、详情弹窗回流链路）作为 smoke 基线。
+
+### 归档建议结论
+
+- **第六轮可归档。**
+- **可进入第七轮 Theme/QSS 接入阶段合同/规划。**
+
+### 未完成事项
+
+- 待顾问窗口复核 6-8 结论并确认归档后，发布第七轮正式执行提示词。
+
+### 风险或疑点
+
+- 第六轮的 EventBus 仅为并行通知试点，后续若接入监听需先定义“主刷新路径 vs 辅助通知路径”边界，防止重复刷新。
