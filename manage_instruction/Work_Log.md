@@ -18,13 +18,13 @@
 
 第六轮：Controller / Router / EventBus 协调层，已启动。
 
-当前已完成 6-6（EventBus 并行通知试点），等待顾问窗口复核与后续 6-7 小工单发布。
+当前已完成 6-7（详情弹窗与跨视图刷新回流复核），等待顾问窗口复核与后续 6-8 整体验收发布。
 
 ## 当前轮次注意事项
 
-- 6-6 仅在旧刷新路径后追加 EventBus 并行通知，不替换旧刷新路径。
+- 6-7 仅做详情弹窗与跨视图刷新回流复核，不做源码接管。
 - 后续第六轮改造需按小工单逐步迁移，不得一次性重构 `MainWindow`/`WeekWindow`/`TodoBoardWindow`。
-- 在未收到后续正式提示词前，不得自行开始 6-7 及之后的实现改造。
+- 在未收到后续正式提示词前，不得自行开始 6-8 及之后的实现改造。
 
 ## 2026-05-25 第六轮 6-0（静态审查与跨视图耦合定位）
 
@@ -874,3 +874,183 @@
 ### 风险或疑点
 
 - 当前 `refresh_requested` 尚无订阅方，本轮仅验证并行通知可用性；后续若接入监听需确保不造成重复刷新。
+
+## 2026-05-25 第六轮 6-7（详情弹窗与跨视图刷新回流复核）
+
+- 本轮任务名称：第六轮 6-7（详情弹窗与跨视图刷新回流复核）。
+- 开工前 git 状态：
+  - `git status --short --branch` -> `## main...temp/main [ahead 7]`
+  - 开工前既有 diff：`M manage_instruction/Work_Task_Prompts.md`
+  - 结论：开工前仅有管理文档 diff，不视为本轮源码改动；本轮不新增源码改动，仅记录复核结论。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+
+### 读取的阶段合同和 6-0 ~ 6-6 结论
+
+- 第六轮定位：先做跨视图协调层小步接管，不做 UI 大拆分。
+- 本轮 6-7 要求：只读复核详情弹窗来源、更新回流、picker 编辑回流，不做源码改造。
+- 6-6 已存在并行 EventBus 通知 `refresh_requested("dashboard_todo_week")`，需评估是否与弹窗回流形成并行风险。
+
+### 静态搜索命令和关键结果
+
+- 命令：
+  - `rg -n "_show_detail_popup|request_schedule_detail|req_show_detail|schedule_updated|ScheduleDetailPop|source_view|req_edit_time|req_edit_alarm|req_edit_list|req_refresh_all|refresh_requested" src/ui/dashboard.py src/ui/todo.py src/ui/todo_board.py src/ui/week_window.py src/ui/main_window.py src/ui/schedule_detail_pop.py`
+  - `Get-Content ... dashboard.py/todo.py/week_window.py/main_window.py/todo_board.py/schedule_detail_pop.py` 指定片段。
+  - `rg -n "source_view|schedule_updated\\.emit|req_edit_time|req_edit_alarm|req_edit_list|delete|soft|hard|update|refresh" src/ui/schedule_detail_pop.py`
+- 关键命中：
+  - Dashboard 弹窗入口与回流：`dashboard.py:533-548`
+  - Todo 弹窗入口与回流：`todo.py:469-480`
+  - Week -> Main -> Dashboard 路径：`main_window.py:98-99`，`week_window.py:1044`
+  - TodoBoard 借道 Dashboard 路径：`todo_board.py:1858-1867`
+  - ScheduleDetailPop 发射点：`schedule_detail_pop.py:563,606,696,715`，编辑信号 `620/623/626`
+
+### 详情弹窗打开来源地图
+
+- Dashboard 卡片：
+  - `ScheduleCard.req_show_detail` -> `DashboardView._show_detail_popup(schedule_data, source_view="dashboard")`
+  - 位置：`dashboard.py:529, 533`
+- TodoView 卡片：
+  - `TodoCard.req_show_detail` -> `TodoView._show_detail_popup(schedule_data, source_view="todo")`
+  - 位置：`todo.py:466, 469`
+- WeekWindow 卡片：
+  - `WeekScheduleCard.clicked` -> `WeekWindow.request_schedule_detail.emit(data)`（`week_window.py:1044`）
+  - MainWindow 连接：`week_window.request_schedule_detail.connect(lambda data: page_dashboard._show_detail_popup(data, source_view="week"))`
+  - 位置：`main_window.py:98-99`
+- TodoBoardWindow 卡片：
+  - `stick_view.req_show_detail` -> `TodoBoardWindow._show_detail_popup(schedule_data)`（`todo_board.py:1230,1858`）
+  - 内部借道：`main_win.page_dashboard._show_detail_popup(schedule_data, source_view="todo_board")`
+  - 位置：`todo_board.py:1867`
+
+### 详情弹窗更新回流地图
+
+- Dashboard 来源弹窗：
+  - `pop.schedule_updated` 连接：
+    - `DashboardView.refresh_data`
+    - `DashboardView.req_refresh_all.emit`
+  - 位置：`dashboard.py:543-544`
+- Todo 来源弹窗：
+  - `pop.schedule_updated` 连接：
+    - `TodoView.refresh_data`
+    - `TodoView.req_refresh_all.emit`
+  - 位置：`todo.py:478-479`
+- Week 来源弹窗：
+  - 本质借道 Dashboard 弹窗机制，`schedule_updated -> Dashboard.req_refresh_all.emit`
+  - MainWindow 已连接：
+    - `page_dashboard.req_refresh_all -> page_todo.refresh_data`
+    - `page_dashboard.req_refresh_all -> _refresh_week_if_visible`
+  - 因此 Week 来源更新可通过 Dashboard 全局刷新广播回流周视图（可见时）。
+- TodoBoard 来源弹窗：
+  - 同样借道 Dashboard 弹窗回流（Dashboard refresh + req_refresh_all）
+  - TodoBoard 自身还在 `__init__` 中监听 `parent.page_dashboard.req_refresh_all.connect(self.refresh_data)`（`todo_board.py:1242`）
+  - 因此 TodoBoard 来源更新可经 Dashboard 广播回流到 TodoBoard 刷新。
+
+### edit picker 回流地图
+
+- 时间编辑：
+  - `ScheduleDetailPop.req_edit_time.emit(self.data)`（`schedule_detail_pop.py:620`）
+  - Dashboard 中转：`pop.req_edit_time -> Dashboard.req_edit_time.emit(data, source_view)`（`dashboard.py:546`）
+  - MainWindow 接收：`go_to_time_picker_for_edit(schedule_data, source_view)`
+  - 分支：`source_view == "week"` 时移交 `week_window.go_to_time_picker_for_edit(...)`（`main_window.py:302-306`）
+- 提醒编辑：
+  - `ScheduleDetailPop.req_edit_alarm`（`623`） -> Dashboard.req_edit_alarm（`547`） -> MainWindow
+  - `source_view == "week"` 时移交周视图（`main_window.py:392-394`）
+- 清单编辑：
+  - `ScheduleDetailPop.req_edit_list`（`626`）
+  - Dashboard/Todo 分别中转到 MainWindow `go_to_list_picker_for_edit(schedule_data, source_view)`
+  - MainWindow 分支：
+    - `source_view == "week"` -> `week_window.go_to_list_picker_for_edit(...)`
+    - `source_view == "todo_board"` -> `todo_board.go_to_list_picker_for_edit(...)`
+    - 其他走主窗口 list picker 路径
+  - 位置：`main_window.py:449-454`
+
+### ScheduleDetailPop 中 schedule_updated.emit 发射点
+
+- 优先级修改成功后：`schedule_updated.emit()`（`schedule_detail_pop.py:563`）
+- 重复规则修改成功后：`schedule_updated.emit()`（`606`）
+- 标题修改成功后：`schedule_updated.emit()`（`696`）
+- 描述修改成功后：`schedule_updated.emit()`（`715`）
+
+### source_view 当前语义
+
+- `"dashboard"`：主面板来源，使用主面板风格与回流链路。
+- `"todo"`：待办来源，回流到 Todo 视图刷新并广播 req_refresh_all。
+- `"week"`：周视图来源，但实际仍借道 Dashboard 弹窗机制，风格与分支有所差异。
+- `"todo_board"`：待办看板来源，借道 Dashboard 打开弹窗，同时有看板图标提示与后续广播回流。
+- `"month"`：在 ScheduleDetailPop 内与 week 同类风格分支（白底详情区域）。
+
+### 直接耦合点
+
+- WeekWindow 通过 MainWindow lambda 借 Dashboard 打开弹窗（`main_window.py:98-99`）。
+- TodoBoardWindow 直接调用 `main_win.page_dashboard._show_detail_popup(...)`（`todo_board.py:1867`）。
+- Dashboard/Todo 弹窗回流直接连接本视图 refresh 与 `req_refresh_all.emit`。
+- ScheduleDetailPop 通过 `source_view` 改变弹窗风格与编辑回流路径分支。
+- `req_refresh_all` 与 `refresh_requested` 当前并行存在，但 `refresh_requested` 尚无监听者；暂无重复刷新实效，仅存在未来并行接入风险。
+
+### 风险等级
+
+- 低风险：
+  - 仅记录 `source_view` 字符串映射和弹窗来源地图。
+  - 将“弹窗更新后刷新域”作为 RefreshCoordinator 注册候选（不改代码）。
+- 中风险：
+  - 将 Dashboard/Todo 的 `schedule_updated` 回流改为统一 RefreshCoordinator 协调调用。
+  - Week 来源弹窗更新回流统一走 MainWindow 刷新协调入口。
+- 高风险：
+  - TodoBoard 借道 Dashboard 路径迁移。
+  - ScheduleDetailPop 的 `source_view` 分支重构。
+  - 弹窗内 edit picker 回流迁移（涉及 week/todo_board 双分支）。
+  - 弹窗内删除/重复相关更新路径迁移。
+
+### 适合后续接入 RefreshCoordinator 的候选项
+
+- 候选（建议作为单独小工单）：
+  - 仅在 Dashboard/Todo 两处 `_show_detail_popup` 中，把 `schedule_updated` 的“刷新动作”统一收敛为 MainWindow 侧已存在的 `_refresh_dashboard_todo_week()` 入口或对应协调接口。
+  - 前提：保留 `req_refresh_all` 并行路径，先做行为等价回归。
+
+### 应推迟到第八轮 UI 拆分或另拆工单的项
+
+- TodoBoardWindow 借道 Dashboard 的详情弹窗打开链路（高耦合，建议留待 UI 拆分阶段）。
+- ScheduleDetailPop 的 `source_view` 多分支 UI/行为收敛。
+- picker 编辑回流（time/alarm/list）跨窗口路径统一。
+
+### 是否建议第六轮继续做详情弹窗源码接管
+
+- 结论：**不建议在当前第六轮继续直接接管详情弹窗主链路**。
+- 原因：
+  - 当前链路跨 Dashboard/Todo/Week/TodoBoard 多窗口耦合，且包含借道调用。
+  - 6-8 临近整体验收，继续接管会增加高回归风险。
+- 如必须前进，建议仅做一个最小候选：
+  - 只在 Dashboard/Todo 的 `schedule_updated` 后刷新动作做协调层包装，不改弹窗打开来源与 source_view 分支。
+
+### 6-8 整体验收前需要重点回归的弹窗行为
+
+- Dashboard 来源弹窗：编辑 title/desc/priority/repeat 后是否触发本页刷新 + 全局刷新。
+- Todo 来源弹窗：编辑 list 后 Todo 列表与主面板同步是否正常。
+- Week 来源弹窗：通过 MainWindow lambda 借道打开后，更新是否回流周视图（可见时）。
+- TodoBoard 来源弹窗：借道 Dashboard 打开后，看板是否通过 `req_refresh_all` 监听回流刷新。
+- 弹窗编辑入口：
+  - `req_edit_time/alarm/list` 的 source_view 分支是否仍正确落在 Main/Week/TodoBoard 对应路径。
+- 并行信号：
+  - `refresh_requested("dashboard_todo_week")` 的 emit 不应破坏现有 `req_refresh_all` 刷新行为。
+
+### diff 范围检查结果
+
+- `git diff --name-only -- src`：
+  - 无输出。
+- `git diff --name-only -- main.py`：无输出。
+- `git diff --name-only -- requirements.txt`：无输出。
+- `git diff --name-only -- schedule.db`：无输出。
+- `git diff --name-only`：
+  - `manage_instruction/Work_Log.md`
+  - `manage_instruction/Work_Task_Prompts.md`（开工前既有）
+- `git status --short --branch`：
+  - `## main...temp/main [ahead 7]`
+  - `M manage_instruction/Work_Log.md`
+  - `M manage_instruction/Work_Task_Prompts.md`
+
+### 未完成事项
+
+- 待顾问窗口下发 `6-8` 第六轮整体验收与归档准备工单。
+
+### 风险或疑点
+
+- 详情弹窗回流目前依赖多条并行刷新通道（局部 refresh + `req_refresh_all` + 6-6 并行 EventBus emit），后续若继续接管必须先明确“主路径/辅路径”职责，避免重复刷新或时序竞态。
