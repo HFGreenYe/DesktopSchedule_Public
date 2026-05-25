@@ -1,115 +1,179 @@
-请执行第六轮 6-0：静态审查与跨视图耦合定位。本轮只做代码阅读、搜索、分析和日志记录，不改源码。
+请执行第六轮 6-1：Controller / Router / Coordinator 最小骨架。本轮只创建/完善最小 controller 文件，不接入旧 UI，不替换旧路由和刷新逻辑。
 
 ## 1. 本轮目标
 
-基于 manage_instruction/Work_Instruction.md 中第六轮阶段合同，定位当前跨视图协调逻辑，为后续 Controller / Router / EventBus 小步改造建立基线。
+基于 manage_instruction/Work_Instruction.md 第六轮阶段合同，以及 Work_Log.md 中 6-0 的静态审查结论，建立第六轮后续会使用的最小协调层骨架。
 
-重点审查：
+本轮目标只包括：
 
-- MainWindow 中的主视图路由、添加页来源、picker 返回、跨视图刷新。
-- WeekWindow 中的内部路由、picker 返回、刷新和对主窗口的通知。
-- MonthWindow 中的视图切换、日期选择、恢复/挂起信号。
-- TodoView 中的刷新信号、详情弹窗回流。
-- TodoBoardWindow 中的内部路由、清单 picker、详情弹窗、刷新链路、对主窗口/其他视图的直接调用。
-- global_signals 当前信号是否已足够支撑第六轮协调层。
+- 创建或完善 src/controllers/main_controller.py。
+- 创建或完善 src/controllers/view_router.py。
+- 创建或完善 src/controllers/refresh_coordinator.py。
+- 更新 src/controllers/__init__.py 做轻量导出。
+- 保证 MainController、ViewRouter、RefreshCoordinator 可 import。
+- 保证 controller 文件不依赖 QWidget、db_manager、Repository、Service 写入对象。
+- 不接入 MainWindow、WeekWindow、MonthWindow、TodoView、TodoBoardWindow。
+- 不改变任何旧 UI 行为。
 
-本轮必须输出：
-
-- 跨视图耦合地图。
-- 每个耦合点的风险等级。
-- 适合第六轮迁移的候选项。
-- 应推迟到第八轮 UI 拆分的项。
-- 是否需要后续补充 EventBus 信号。
+本轮只是建立边界，不迁移业务逻辑、不迁移 UI 路由、不迁移刷新链路。
 
 ## 2. 允许/禁止
 
 本轮允许修改：
 
+- src/controllers/__init__.py
+- src/controllers/main_controller.py
+- src/controllers/view_router.py
+- src/controllers/refresh_coordinator.py
 - manage_instruction/Work_Log.md
 - manage_instruction/Work_Task_Prompts.md（仅在需要维护本轮复核锚点时）
 
 本轮禁止修改：
 
-- src/
+- src/ui/
+- src/data/
+- src/repositories/
+- src/services/
+- src/utils/signals.py
 - main.py
 - requirements.txt
 - schedule.db
 - Work_Snapshot.md
 - Work_Formulation.md
 
-禁止做任何源码改造、数据库写入、UI 调整、信号签名修改、controller 文件创建或功能实现。
+禁止事项：
 
-若开工前已有 manage_instruction/Work_Instruction.md 或其他管理文档 diff，需要在 Work_Log.md 单独记录为开工前既有状态，不视为本轮源码改动。
+- 不接 UI。
+- 不修改 MainWindow。
+- 不修改 WeekWindow。
+- 不修改 MonthWindow。
+- 不修改 TodoView。
+- 不修改 TodoBoardWindow。
+- 不修改 global_signals。
+- 不新增或修改 signal。
+- 不写数据库。
+- 不改 db_manager API。
+- 不迁移 switch_view。
+- 不迁移 picker 返回逻辑。
+- 不迁移刷新逻辑。
+- 不创建空泛复杂抽象。
+- 不实现新功能。
+
+若开工前已有管理文档 diff，需要在 Work_Log.md 中单独记录，不视为本轮源码改动。
 
 ## 3. 具体任务
 
-1. 读取第六轮阶段合同：
+1. 读取第六轮阶段合同和 6-0 结论：
 
     Get-Content -Path manage_instruction\Work_Instruction.md -Encoding UTF8
 
-2. 审查 src/utils/signals.py，记录 global_signals 当前已有信号、参数和兼容边界：
+    Get-Content -Path manage_instruction\Work_Log.md -Encoding UTF8
 
-    Get-Content -Path src\utils\signals.py -Encoding UTF8
-
-3. 定位主窗口路由与跨视图刷新：
-
-    rg -n "def switch_view|source_view_for_add|list_picker_source|time_picker_mode|alarm_picker_mode|list_picker_mode|body_stack|setCurrentWidget|setCurrentIndex|req_refresh_all|schedule_updated|refresh_data|refresh_week|request_schedule_detail|_show_detail_popup|global_signals" src/ui/main_window.py
-
-4. 定位周视图内部路由、picker 返回、刷新和主窗口通知：
-
-    rg -n "body_stack|setCurrentWidget|setCurrentIndex|go_to_time_picker|go_to_alarm_picker|go_to_list_picker|back_from_time_picker|back_from_alarm_picker|back_from_list_picker|on_list_confirmed|refresh_week_data|schedule_updated|request_schedule_detail|view_selected|restore_requested|suspend_requested|global_signals" src/ui/week_window.py
-
-5. 定位月视图切换、日期选择、恢复/挂起链路：
-
-    rg -n "view_selected|date_selected|restore_requested|suspend_requested|refresh|show|hide|global_signals" src/ui/month_window.py
-
-6. 定位待办视图刷新和详情弹窗回流：
-
-    rg -n "req_refresh_all|refresh_data|req_show_detail|_show_detail_popup|schedule_updated|req_change_view|req_edit_list|global_signals" src/ui/todo.py
-
-7. 定位待办看板内部路由、picker 返回、清单管理、刷新和详情弹窗回流：
-
-    rg -n "view_stack|setCurrentWidget|go_to_list_picker|back_from_list_picker|on_list_confirmed|refresh_data|req_open_list_picker|req_show_detail|_show_detail_popup|window\(\)|parent\.|page_dashboard|page_todo|req_refresh_all|global_signals|soft_delete_category|hard_delete_category|check_category_status" src/ui/todo_board.py
-
-8. 定位跨文件直接调用和信号连接：
-
-    rg -n "page_dashboard|page_todo|week_window|month_window|todo_board|req_refresh_all|schedule_updated|request_schedule_detail|view_selected|restore_requested|suspend_requested|global_signals" src/ui
-
-9. 检查 controller 目录当前状态：
+2. 检查 controller 目录当前状态：
 
     Get-ChildItem -Path src\controllers -Force
 
     Get-Content -Path src\controllers\__init__.py -Encoding UTF8
 
-10. 形成耦合地图，至少按以下分类记录：
+3. 新增或完善 src/controllers/view_router.py。
 
-- 主视图切换链路。
-- 添加页来源与返回链路。
-- time/alarm/list picker add/edit 返回链路。
-- 日程/待办保存后的刷新链路。
-- 清单新增/删除/修改后的刷新链路。
-- 周/月/待办窗口与主窗口之间的信号链路。
-- 详情弹窗打开与更新后的刷新回流。
-- global_signals 当前可用信号与缺口。
+   要求：
 
-11. 给每个候选迁移点标记风险等级：
+   - 只放最小路由决策边界。
+   - 可以定义 ViewRouter 类。
+   - 可以定义轻量的 route/view name 常量或集合。
+   - 可以提供不触碰 Qt 的纯判断/归一化方法，例如 normalize_view_name(view_name) 或 is_known_view(view_name)。
+   - 不直接 import QWidget、QStackedWidget、MainWindow、WeekWindow、MonthWindow、TodoView、TodoBoardWindow。
+   - 不调用 show/hide/setCurrentWidget。
+   - 不改变旧 switch_view 行为。
 
-- 低：只做纯路由映射或只读状态记录，不影响写库和 UI 生命周期。
-- 中：涉及一个 UI 文件的最小调用替换，但可明确回归。
-- 高：涉及多个窗口、弹窗生命周期、刷新顺序、拖拽、写库或旧信号互相联动。
+4. 新增或完善 src/controllers/refresh_coordinator.py。
 
-12. 分类输出建议：
+   要求：
 
-- 适合第六轮迁移。
-- 需要先做行为基线再决定。
-- 应推迟到第八轮 UI 大文件拆分。
-- 不应迁移或暂不迁移。
+   - 只放刷新协调边界。
+   - 可以定义 RefreshCoordinator 类。
+   - 可以预留注册刷新回调的轻量结构，但不得接入旧 UI。
+   - 如果实现回调注册，也只能保存 callable 并提供显式调用方法；不得自动连接 UI 或 global_signals。
+   - 不 import db_manager。
+   - 不 import Repository。
+   - 不 import QWidget。
+   - 不写数据库。
+   - 不改变旧刷新触发时机。
+
+5. 新增或完善 src/controllers/main_controller.py。
+
+   要求：
+
+   - 只放主协调器边界。
+   - 可以定义 MainController 类。
+   - 可以组合 ViewRouter 和 RefreshCoordinator。
+   - 不持有具体 UI 窗口实例。
+   - 不 import MainWindow。
+   - 不 import QWidget。
+   - 不 import db_manager。
+   - 不 import Repository。
+   - 不调用旧 UI 方法。
+   - 不执行实际路由、刷新或写库。
+
+6. 更新 src/controllers/__init__.py。
+
+   要求：
+
+   - 只做轻量导出。
+   - 可以导出 MainController、ViewRouter、RefreshCoordinator。
+   - 不触发 UI 创建。
+   - 不触发数据库连接。
+   - 不触发信号连接副作用。
+
+7. 不修改任何 src/ui 文件。
+
+8. 不修改 src/utils/signals.py。
+
+9. 不修改 src/services、src/data、src/repositories。
 
 ## 4. 验收命令
 
-完成审查和日志记录后执行范围检查：
+1. controller import 验证：
 
-    git diff --name-only -- src
+    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.controllers.main_controller import MainController; from src.controllers.view_router import ViewRouter; from src.controllers.refresh_coordinator import RefreshCoordinator; import src.controllers as controllers; print('controller imports ok'); print(MainController is not None, ViewRouter is not None, RefreshCoordinator is not None, controllers is not None)"
+
+2. py_compile 验证：
+
+    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src/controllers/main_controller.py src/controllers/view_router.py src/controllers/refresh_coordinator.py src/controllers/__init__.py
+
+3. 静态依赖检查，确认 controller 不依赖 UI、db_manager、Repository、Service 写入对象：
+
+    rg -n "QWidget|QStackedWidget|PyQt|PySide|MainWindow|WeekWindow|MonthWindow|TodoView|TodoBoard|db_manager|Repository|ScheduleRepository|CategoryRepository|add_schedule|update_schedule|delete_schedule|soft_delete|hard_delete" src/controllers
+
+   预期：
+   - 不应命中 QWidget/QStackedWidget/PyQt/PySide。
+   - 不应命中 MainWindow/WeekWindow/MonthWindow/TodoView/TodoBoard。
+   - 不应命中 db_manager/Repository/ScheduleRepository/CategoryRepository。
+   - 不应命中写入方法名。
+   - 如果命中类名来自注释或文档字符串，需要确认不会造成运行依赖，并在 Work_Log.md 说明。
+
+4. 检查 src/ui 无改动：
+
+    git diff --name-only -- src/ui
+
+5. 检查 src/data 无改动：
+
+    git diff --name-only -- src/data
+
+6. 检查 src/repositories 无改动：
+
+    git diff --name-only -- src/repositories
+
+7. 检查 src/services 无改动：
+
+    git diff --name-only -- src/services
+
+8. 检查 src/utils/signals.py 无改动：
+
+    git diff --name-only -- src/utils/signals.py
+
+9. 检查 main.py、requirements.txt、schedule.db 无改动：
 
     git diff --name-only -- main.py
 
@@ -117,35 +181,45 @@
 
     git diff --name-only -- schedule.db
 
+10. 检查本轮最终 diff 范围：
+
     git diff --name-only
 
     git status --short --branch
 
-预期：
+预期最终只允许包含：
 
-- src 无 diff。
-- main.py 无 diff。
-- requirements.txt 无 diff。
-- schedule.db 无 diff。
-- 最终只允许 manage_instruction/Work_Log.md，以及必要时的 manage_instruction/Work_Task_Prompts.md。
-- 如果开工前已有 manage_instruction/Work_Instruction.md diff，需要在日志中明确说明它是开工前既有状态，不属于 6-0 执行改动。
+- src/controllers/__init__.py
+- src/controllers/main_controller.py
+- src/controllers/view_router.py
+- src/controllers/refresh_coordinator.py
+- manage_instruction/Work_Log.md
+- manage_instruction/Work_Task_Prompts.md（仅在需要维护本轮复核锚点时）
+
+如果 Python 验证受沙箱权限影响，请申请沙箱外权限运行；若仍受限，请写明需用户本地 CMD 复跑命令。
 
 ## 5. 日志要求
 
 更新 manage_instruction/Work_Log.md，至少记录：
 
-- 本轮任务名称：第六轮 6-0（静态审查与跨视图耦合定位）
-- 开工前 git 状态，特别是是否已有管理文档 diff
+- 本轮任务名称：第六轮 6-1（Controller / Router / Coordinator 最小骨架）
+- 开工前 git 状态
 - 实际修改文件
-- 读取的阶段合同结论
-- 静态搜索命令和关键结果
-- global_signals 当前信号清单与缺口判断
-- 跨视图耦合地图
-- 每个耦合点的风险等级
-- 适合第六轮迁移的候选项
-- 需要先做行为基线再决定的候选项
-- 应推迟到第八轮 UI 拆分的项
-- diff 范围检查结果
+- 新增或完善的 controller 文件
+- MainController 当前职责边界
+- ViewRouter 当前职责边界
+- RefreshCoordinator 当前职责边界
+- __init__.py 导出说明
+- import 验证命令和结果
+- py_compile 验证命令和结果
+- 静态依赖检查结果
+- src/ui 是否无 diff
+- src/data 是否无 diff
+- src/repositories 是否无 diff
+- src/services 是否无 diff
+- src/utils/signals.py 是否无 diff
+- main.py、requirements.txt、schedule.db 是否无 diff
+- 最终 diff 范围检查结果
 - 未完成事项
 - 风险或疑点
 

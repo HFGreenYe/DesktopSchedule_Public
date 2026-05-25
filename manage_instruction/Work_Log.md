@@ -18,13 +18,13 @@
 
 第六轮：Controller / Router / EventBus 协调层，已启动。
 
-当前已完成 6-0（静态审查与跨视图耦合定位），等待顾问窗口复核与后续 6-1 小工单发布。
+当前已完成 6-1（Controller / Router / Coordinator 最小骨架），等待顾问窗口复核与后续 6-2 小工单发布。
 
 ## 当前轮次注意事项
 
-- 6-0 只做静态审查和耦合定位，不做源码改造。
+- 6-1 仅建立 controller 最小骨架，不接入旧 UI。
 - 后续第六轮改造需按小工单逐步迁移，不得一次性重构 `MainWindow`/`WeekWindow`/`TodoBoardWindow`。
-- 在未收到后续正式提示词前，不得自行开始 6-1 及之后的实现改造。
+- 在未收到后续正式提示词前，不得自行开始 6-2 及之后的实现改造。
 
 ## 2026-05-25 第六轮 6-0（静态审查与跨视图耦合定位）
 
@@ -160,3 +160,91 @@
 
 - `TodoBoardWindow` 当前对主窗口子页面的直接访问较多，迁移时必须保持刷新顺序与弹窗回流行为。
 - `MainWindow` 同时处理路由、picker 状态和刷新协调，任何接管都需要小步验证并保留兜底旧路径。
+
+## 2026-05-25 第六轮 6-1（Controller / Router / Coordinator 最小骨架）
+
+- 本轮任务名称：第六轮 6-1（Controller / Router / Coordinator 最小骨架）。
+- 开工前 git 状态：
+  - `git status --short --branch` -> `## main...temp/main [ahead 1]`，`M manage_instruction/Work_Task_Prompts.md`。
+  - 结论：开工前已有管理文档 diff，不视为本轮源码改动。
+- 实际修改文件：
+  - `src/controllers/__init__.py`
+  - `src/controllers/main_controller.py`
+  - `src/controllers/view_router.py`
+  - `src/controllers/refresh_coordinator.py`
+  - `manage_instruction/Work_Log.md`
+- 新增或完善的 controller 文件：
+  - `src/controllers/main_controller.py`
+  - `src/controllers/view_router.py`
+  - `src/controllers/refresh_coordinator.py`
+- MainController 当前职责边界：
+  - 只组合 `ViewRouter` 与 `RefreshCoordinator`。
+  - 仅提供视图名归一化/判断与刷新回调触发代理方法。
+  - 不持有具体 UI 实例，不执行 Qt 路由操作，不写数据库。
+- ViewRouter 当前职责边界：
+  - 只做视图名纯判断与归一化（`day/week/month/todo`）。
+  - 提供 `normalize_view_name / is_known_view / resolve_or_default`。
+  - 不涉及 `show/hide/setCurrentWidget` 或任何 QWidget 行为。
+- RefreshCoordinator 当前职责边界：
+  - 只做刷新回调注册、移除和显式触发。
+  - 不自动连接 UI，不连接信号总线，不写数据库。
+- `__init__.py` 导出说明：
+  - 仅轻量导出 `MainController`、`ViewRouter`、`RefreshCoordinator`。
+  - 无 UI 创建、无数据库连接、无信号连接副作用。
+
+### 验证结果
+
+- import 验证命令和结果：
+  - 命令：
+    - `python -c "from src.controllers.main_controller import MainController; from src.controllers.view_router import ViewRouter; from src.controllers.refresh_coordinator import RefreshCoordinator; import src.controllers as controllers; ..."`
+  - 结果：
+    - 输出 `controller imports ok`
+    - `True True True True`
+- py_compile 验证命令和结果：
+  - 命令：
+    - `python -m py_compile src/controllers/main_controller.py src/controllers/view_router.py src/controllers/refresh_coordinator.py src/controllers/__init__.py`
+  - 结果：通过（无输出）。
+- 静态依赖检查结果：
+  - 命令：
+    - `rg -n "QWidget|QStackedWidget|PyQt|PySide|MainWindow|WeekWindow|MonthWindow|TodoView|TodoBoard|db_manager|Repository|ScheduleRepository|CategoryRepository|add_schedule|update_schedule|delete_schedule|soft_delete|hard_delete" src/controllers`
+  - 结果：无输出（退出码 1，视为通过）。
+
+### 禁止范围检查
+
+- `src/ui` 是否无 diff：
+  - 是，`git diff --name-only -- src/ui` 无输出。
+- `src/data` 是否无 diff：
+  - 是，`git diff --name-only -- src/data` 无输出。
+- `src/repositories` 是否无 diff：
+  - 是，`git diff --name-only -- src/repositories` 无输出。
+- `src/services` 是否无 diff：
+  - 是，`git diff --name-only -- src/services` 无输出。
+- `src/utils/signals.py` 是否无 diff：
+  - 是，`git diff --name-only -- src/utils/signals.py` 无输出。
+- `main.py`、`requirements.txt`、`schedule.db` 是否无 diff：
+  - 是，三者 `git diff --name-only -- ...` 均无输出。
+
+### 最终 diff 范围检查结果
+
+- `git diff --name-only`（仅 tracked diff）：
+  - `manage_instruction/Work_Task_Prompts.md`（开工前既有）
+  - `src/controllers/__init__.py`
+  - 写入本日志后另含 `manage_instruction/Work_Log.md`
+  - 注：`src/controllers/main_controller.py`、`src/controllers/refresh_coordinator.py`、`src/controllers/view_router.py` 为本轮新增未跟踪文件，需以 `git status --short --branch` 复核。
+- `git status --short --branch`：
+  - `## main...temp/main [ahead 1]`
+  - `M manage_instruction/Work_Task_Prompts.md`
+  - `M src/controllers/__init__.py`
+  - `?? src/controllers/main_controller.py`
+  - `?? src/controllers/refresh_coordinator.py`
+  - `?? src/controllers/view_router.py`
+  - 写入本日志后另含 `M manage_instruction/Work_Log.md`
+
+### 未完成事项
+
+- 待顾问窗口下发 `6-2` 正式提示词，决定是否接管 `switch_view` 的低风险路由决策映射。
+
+### 风险或疑点
+
+- 当前 controller 仅是边界骨架，尚未接入 UI，实际价值依赖后续小步接管工单。
+- 后续接入时必须先保持旧路径并行，再逐步替换，避免跨窗口刷新顺序回归。
