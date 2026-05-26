@@ -18,12 +18,12 @@
 
 第六轮：Controller / Router / EventBus 协调层，已完成并归档。
 
-第七轮：Theme / QSS 接入，已完成 7-1（ThemeManager 与 Skin Preset 边界确认），等待顾问窗口复核与 7-2 工单。
+第七轮：Theme / QSS 接入，已完成 7-2（默认 QSS 启动接入），等待顾问窗口复核与 7-3 工单。
 
 ## 当前轮次注意事项
 
 - 第六轮已归档，历史记录见 `History_Instruction.md` 与 `History_Log.md`。
-- 7-0、7-1 已完成，当前已建立 ThemeManager 最小边界，尚未接入 `main.py`。
+- 7-0、7-1、7-2 已完成，默认 preset 已在启动流程接入，尚未进入动态属性试点。
 - 第七轮后续应保持第六轮回归重点不变：路由决策、添加页来源、三连刷新、`refresh_requested` 并行通知、详情弹窗回流链路。
 
 ## 2026-05-26 第七轮 7-0（主题与样式债务静态审查）
@@ -260,3 +260,75 @@
 
 - 风险或疑点：
   - 当前 fallback 使用空字符串时，若在启动期应用会清空应用级 QSS；虽然本轮未接入 `main.py`，但 7-2 需谨慎处理默认行为。
+
+## 2026-05-26 第七轮 7-2（默认 QSS 启动接入）
+
+- 本轮任务名称：第七轮 7-2（默认 QSS 启动接入）。
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 13]`
+  - 既有变更：`M manage_instruction/Work_Task_Prompts.md`
+  - 说明：开工前已有管理文档 diff，本轮不视为源码改动。
+- 实际修改文件：
+  - `main.py`
+  - `manage_instruction/Work_Log.md`
+
+- 默认 skin preset 名称：
+  - `ThemeManager.DEFAULT_PRESET = "light.qss"`。
+
+- `main.py` 接入位置：
+  - 在 `QApplication` 创建与 `app.setStyle("Fusion")` 之后、`MainWindow()` 之前新增：
+    - `theme_manager = ThemeManager()`
+    - `theme_manager.apply_theme(app, ThemeManager.DEFAULT_PRESET)`
+  - 保持原启动流程与业务路径不变。
+
+- 是否修改 `ThemeManager`：
+  - 否。本轮未修改 `src/theme/theme_manager.py`。
+
+- 是否修改 `light.qss`：
+  - 否。本轮未修改 `src/theme/light.qss`，保持低侵入占位内容。
+
+- QSS 读取失败时的启动期处理策略：
+  - 采用 7-1 已有保守兜底：`apply_theme -> read_qss_safe(..., fallback="")`。
+  - 读取失败时应用空字符串样式，不阻断启动流程。
+  - 后续 7-3/7-4 前保留该策略，7-2 不扩展复杂主题错误处理系统。
+
+- 验证结果：
+  - 读取接入位置：
+    - `rg -n "ThemeManager|apply_theme|DEFAULT_PRESET|setStyle\\(" main.py src/theme/theme_manager.py`
+    - 命中 `main.py` 新接入点，`theme_manager.py` 常量与方法命中正常。
+  - ThemeManager import 验证：
+    - `theme import ok light.qss light.qss`
+  - main import 验证（offscreen）：
+    - `main import ok`
+  - QApplication 启动接入 smoke（offscreen）：
+    - `default preset light.qss`
+    - `before len 0`
+    - `after len 104`
+    - `stylesheet type ok True`
+  - QSS 文件验证：
+    - `qss len 104`
+  - py_compile：
+    - `python -m py_compile main.py src/theme/theme_manager.py src/theme/__init__.py` 通过。
+
+- diff 范围检查结果：
+  - `git diff --name-only -- src/ui`：无输出。
+  - `git diff --name-only -- src/utils/signals.py`：无输出。
+  - `git diff --name-only -- src/utils/styles.py`：无输出。
+  - `git diff --name-only -- src/theme/dark.qss`：无输出。
+  - `git diff --name-only -- src/data`：无输出。
+  - `git diff --name-only -- src/repositories`：无输出。
+  - `git diff --name-only -- src/services`：无输出。
+  - `git diff --name-only -- src/controllers`：无输出。
+  - `git diff --name-only -- requirements.txt`：无输出。
+  - `git diff --name-only -- schedule.db`：无输出。
+  - 当前总 diff：
+    - `main.py`
+    - `manage_instruction/Work_Log.md`
+    - `manage_instruction/Work_Task_Prompts.md`（开工前既有）
+
+- 未完成事项：
+  - 7-3 需建立 `role/state/variant` 动态属性规范与刷新验证。
+  - 7-4 需选择单一低风险控件做样式试点，避免范围扩散。
+
+- 风险或疑点：
+  - 读取失败时“应用空样式”在更复杂接入场景下可能清空既有应用级样式；当前因 `light.qss` 可读且接入点位于启动早期，风险可控。
