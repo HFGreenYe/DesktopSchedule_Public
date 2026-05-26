@@ -18,12 +18,12 @@
 
 第六轮：Controller / Router / EventBus 协调层，已完成并归档。
 
-第七轮：Theme / QSS 接入，已完成 7-4（低风险真实控件动态属性样式试点），等待顾问窗口复核与 7-5 工单。
+第七轮：Theme / QSS 接入，已完成 7-5（Theme 信号兼容与手动 Skin Preset 切换 smoke），等待顾问窗口复核与 7-6 工单。
 
 ## 当前轮次注意事项
 
 - 第六轮已归档，历史记录见 `History_Instruction.md` 与 `History_Log.md`。
-- 7-0、7-1、7-2、7-3、7-3b、7-4 已完成，已完成单个真实控件试点，尚未扩大到其他控件或页面。
+- 7-0、7-1、7-2、7-3、7-3b、7-4、7-5 已完成，已完成信号兼容与手动 preset 切换 smoke，尚未连接真实换肤 UI。
 - 第七轮后续应保持第六轮回归重点不变：路由决策、添加页来源、三连刷新、`refresh_requested` 并行通知、详情弹窗回流链路。
 
 ## 2026-05-26 第七轮 7-0（主题与样式债务静态审查）
@@ -586,3 +586,85 @@
 
 - 风险或疑点：
   - `header.py` 当前构造函数对 `parent_window` 存在隐式依赖（`btn_close` 连接 close）；离线实例化测试需提供 parent。该问题为既有结构特点，本轮未改变行为。
+
+## 2026-05-26 第七轮 7-5（Theme 信号兼容与手动 Skin Preset 切换 smoke）
+
+- 本轮任务名称：第七轮 7-5（Theme 信号兼容与手动 Skin Preset 切换 smoke）。
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 17]`
+  - 既有变更：`M manage_instruction/Work_Task_Prompts.md`
+  - 说明：开工前已有管理文档 diff，本轮不视为源码改动。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+
+- `skin_changed` 无参 emit 验证结果：
+  - 命令执行输出：
+    - `signals import ok`
+    - `calls ['skin', ('theme', 'default.qss')]`
+  - 结论：`skin_changed` 无参 emit 正常。
+
+- `theme_changed(str)` emit 验证结果：
+  - 同上命令输出已包含 `('theme', 'default.qss')`。
+  - 结论：`theme_changed(str)` emit 正常。
+
+- `ThemeManager.DEFAULT_PRESET` 当前值：
+  - `default.qss`
+
+- `SUPPORTED_PRESETS` 当前清单：
+  - `('default.qss', 'light.qss', 'dark.qss')`
+
+- `resolve_preset(None)` 与非法值回落结果：
+  - `resolve_preset(None) == 'default.qss'`
+  - `resolve_preset('bad.qss') == 'default.qss'`
+  - 验证通过。
+
+- 手动 preset apply 结果（offscreen）：
+  - `default.qss`：apply 后 `app.styleSheet()` 为字符串，长度 `1532`
+  - `light.qss`：apply 后 `app.styleSheet()` 为字符串，长度 `1166`
+  - `dark.qss`：apply 后 `app.styleSheet()` 为字符串，长度 `1031`
+  - 结论：`default/light/dark` 手动切换 smoke 通过。
+
+- 7-4 `btn_sync` 试点回归结果：
+  - `sync role windowControl`
+  - `sync variant toolbar`
+  - `sync state normal`
+  - 结论：7-4 单点试点属性未被破坏。
+
+- 默认启动接入回归结果：
+  - `main import ok`（offscreen）通过。
+
+- py_compile 结果：
+  - 命令：`python -m py_compile main.py src/theme/theme_manager.py src/theme/__init__.py src/utils/signals.py src/ui/header.py`
+  - 结果：通过。
+
+- diff 范围检查结果：
+  - `git diff --name-only -- src/theme/theme_manager.py`：无输出。
+  - `git diff --name-only -- src/theme/default.qss`：无输出。
+  - `git diff --name-only -- src/theme/light.qss`：无输出。
+  - `git diff --name-only -- src/theme/dark.qss`：无输出。
+  - `git diff --name-only -- main.py`：无输出。
+  - `git diff --name-only -- src/ui`：无输出。
+  - `git diff --name-only -- src/utils/signals.py`：无输出。
+  - `git diff --name-only -- src/utils/styles.py`：无输出。
+  - `git diff --name-only -- src/data`：无输出。
+  - `git diff --name-only -- src/repositories`：无输出。
+  - `git diff --name-only -- src/services`：无输出。
+  - `git diff --name-only -- src/controllers`：无输出。
+  - `git diff --name-only -- requirements.txt`：无输出。
+  - `git diff --name-only -- schedule.db`：无输出。
+  - 总 diff：
+    - `manage_instruction/Work_Task_Prompts.md`（开工前既有）
+    - `manage_instruction/Work_Log.md`（本轮）
+
+- 特别记录：
+  - 本轮只做信号兼容和手动 preset 切换 smoke。
+  - 本轮不连接真实换肤 UI。
+  - 本轮不扩大 7-4 控件试点范围。
+  - `default.qss` 是 canonical 默认 skin preset。
+  - `light.qss` / `dark.qss` 只是兼容/test preset，不代表 light/dark mode matrix。
+
+- 未完成事项：
+  - 进入 7-6 前需汇总 7-0~7-5 结果并完成第七轮整体验收/归档准备。
+
+- 风险或疑点：
+  - 当前仍无真实换肤 UI 接入链路；后续若引入，需单独工单控制信号连接范围与回归面。

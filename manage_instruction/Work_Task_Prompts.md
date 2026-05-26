@@ -1,62 +1,47 @@
-请执行第七轮 7-4：低风险真实控件动态属性样式试点。本轮只选择一个真实业务界面中的低风险控件做 QSS 动态属性试点，不做全局控件样式，不做 light/dark 模式切换。
+请执行第七轮 7-5：Theme 信号兼容与手动 Skin Preset 切换 smoke。本轮只做兼容性验证和日志记录，不扩大 UI 试点范围，不连接真实换肤 UI。
 
 ## 1. 本轮目标
 
-基于第七轮阶段合同、7-0 到 7-3b 的结果，选择一个低风险真实控件验证：
+基于第七轮阶段合同、7-0 到 7-4 的结果，验证 ThemeManager 与既有 global_signals 的兼容性，并做手动 skin preset 切换 smoke。
 
-- `default.qss` 中的 skin preset 样式可以作用到真实 UI 控件。
-- 真实 UI 控件可以通过 `role/state/variant` 动态属性接入 QSS。
-- 不改变业务逻辑、路由、刷新链路、数据库行为。
-- 不批量迁移旧 `setStyleSheet(...)`。
-- 不建立 light/dark mode matrix。
-- 不围绕 `light.qss` / `dark.qss` 做模式切换。
+本轮目标：
 
-本轮试点控件限定为：
+- 验证 `global_signals.skin_changed` 仍为无参信号且可 emit。
+- 验证 `global_signals.theme_changed(str)` 仍可 emit。
+- 验证 `ThemeManager` 可手动 apply `default.qss`。
+- 验证兼容/test preset `light.qss` / `dark.qss` 可手动 apply。
+- 确认当前路线是 `default.qss / skin preset`。
+- 确认 `light.qss` / `dark.qss` 仍只是兼容或测试 preset，不代表 light/dark mode matrix。
+- 不修改真实业务 UI。
+- 不扩大 7-4 的 `btn_sync` 试点范围。
+- 不实现换肤 UI。
+- 不连接真实主题切换链路。
 
-- `src/ui/header.py` 中的 `btn_sync` 云同步窗口控制按钮。
-
-选择理由：
-
-- 该按钮是窗口控制区的低风险控件。
-- 不涉及数据库写入。
-- 不涉及路由切换。
-- 不涉及添加、编辑、删除、提醒、详情弹窗回流。
-- 相比大块页面样式，单点可回滚。
-
-本轮不处理：
-
-- `btn_more`
-- `btn_close`
-- tooltip 全局样式
-- `todo_board.py`
-- `week_window.py`
-- `month_window.py`
-- `add_view.py`
-- `add_view_week.py`
-- `StyleManager` 大范围重构
+本轮预期不改源码。
 
 ## 2. 允许/禁止
 
 本轮允许修改：
 
-- `src/theme/default.qss`
-- `src/ui/header.py`
 - `manage_instruction/Work_Log.md`
 - `manage_instruction/Work_Task_Prompts.md`（仅在需要维护本轮复核锚点时）
 
+本轮原则上禁止修改源码。
+
 本轮禁止修改：
 
+- `src/theme/theme_manager.py`
+- `src/theme/default.qss`
 - `src/theme/light.qss`
 - `src/theme/dark.qss`
-- `src/theme/theme_manager.py`
 - `main.py`
+- `src/ui/`
 - `src/utils/signals.py`
 - `src/utils/styles.py`
 - `src/data/`
 - `src/repositories/`
 - `src/services/`
 - `src/controllers/`
-- 除 `src/ui/header.py` 外的任何 `src/ui/` 文件
 - `requirements.txt`
 - `schedule.db`
 - `Work_Snapshot.md`
@@ -67,12 +52,12 @@
 - 不新增 signal。
 - 不改变 `global_signals.skin_changed` 无参签名。
 - 不改变 `global_signals.theme_changed(str)` 签名。
-- 不改数据库字段。
-- 不改业务逻辑。
-- 不改路由、刷新、picker、详情弹窗回流行为。
-- 不修改 `btn_sync` 点击连接关系。
-- 不修改 `btn_more` / `btn_close` 行为。
-- 不修改 header 布局结构。
+- 不连接真实 UI 换肤入口。
+- 不修改 `btn_sync` 试点。
+- 不修改 `btn_more` / `btn_close`。
+- 不新增皮肤文件。
+- 不删除 `light.qss` / `dark.qss`。
+- 不建立 light/dark mode matrix。
 - 不提交 Git。
 
 若开工前已有 diff，需在 `Work_Log.md` 单独记录，不视为本轮新增问题。
@@ -83,72 +68,67 @@
 
     Get-Content -Path manage_instruction\Work_Instruction.md -Encoding UTF8
     Get-Content -Path manage_instruction\Work_Log.md -Encoding UTF8
+    Get-Content -Path src\utils\signals.py -Encoding UTF8
+    Get-Content -Path src\theme\theme_manager.py -Encoding UTF8
     Get-Content -Path src\theme\default.qss -Encoding UTF8
-    Get-Content -Path src\ui\header.py -Encoding UTF8
-    Get-Content -Path src\utils\styles.py -Encoding UTF8
+    Get-Content -Path src\theme\light.qss -Encoding UTF8
+    Get-Content -Path src\theme\dark.qss -Encoding UTF8
 
-2. 在 `default.qss` 中新增仅针对窗口控制按钮试点的动态属性选择器。
+2. 验证 signal 兼容性：
 
-    建议选择器：
+    - `global_signals.skin_changed` 必须可无参 emit。
+    - `global_signals.theme_changed` 必须可带一个字符串参数 emit。
+    - 不修改 `signals.py`。
+    - 不连接真实 UI。
 
-    - `QToolButton[role="windowControl"][variant="toolbar"]`
-    - `QToolButton[role="windowControl"][variant="toolbar"]:hover`
-    - `QToolButton[role="windowControl"][variant="toolbar"]:pressed`
+3. 验证手动 skin preset apply：
 
-    要求：
+    - 在 offscreen `QApplication` 中手动 apply `default.qss`。
+    - 再手动 apply `light.qss`。
+    - 再手动 apply `dark.qss`。
+    - 验证每次 apply 后 `app.styleSheet()` 是字符串。
+    - 验证 `ThemeManager.resolve_preset(None)` 和非法值仍回落到 `default.qss`。
 
-    - 只作用于设置了 `role="windowControl"` 且 `variant="toolbar"` 的 `QToolButton`。
-    - 不新增全局 `QToolButton` 默认规则。
-    - 不影响没有动态属性的旧控件。
-    - 样式尽量对齐 `StyleManager.get_window_control_style(is_close=False)` 的现有视觉：
-      - transparent background
-      - no border
-      - border-radius 6px
-      - hover 使用 `rgba(255, 255, 255, 0.2)` 或接近值
-      - pressed 使用 `rgba(255, 255, 255, 0.3)` 或接近值
+4. 验证 7-4 单点试点仍可用：
 
-3. 在 `src/ui/header.py` 中只对 `btn_sync` 做最小试点。
-
-    允许做法：
-
-    - 创建 `self.btn_sync` 后设置：
+    - offscreen 实例化 `HeaderBar`。
+    - 确认 `btn_sync` 动态属性仍为：
       - `role = "windowControl"`
       - `variant = "toolbar"`
-      - `state = "normal"`（可选）
-    - 让 `btn_sync` 使用 `default.qss` 中的动态属性样式。
-    - 如果 `btn_sync` 原本的局部 `setStyleSheet(...)` 会覆盖应用级 QSS，允许仅对 `btn_sync` 清除或避免局部样式。
-    - 不改变 `btn_sync` 的 icon、size、tooltip、layout、信号连接。
+      - `state = "normal"`
+    - 不修改 `header.py`。
 
-    禁止做法：
+5. 记录结论：
 
-    - 不修改 `_create_control_btn(...)` 影响所有窗口控制按钮，除非仅为支持 `btn_sync` 做可选参数且默认行为完全不变。
-    - 不修改 `btn_more`。
-    - 不修改 `btn_close`。
-    - 不改 `StyleManager.get_window_control_style(...)`。
-    - 不引入 `ThemeManager` 到 `header.py`，除非确有必要；默认不需要。
+    - 第七轮主题路线是 skin preset。
+    - `default.qss` 是 canonical 默认皮肤。
+    - `light.qss` / `dark.qss` 是兼容/test preset。
+    - 本轮不实现换肤 UI。
+    - 本轮不扩大真实控件试点。
 
-4. 不修改 `light.qss` / `dark.qss`。
-
-5. 更新 `manage_instruction/Work_Log.md`。
+6. 更新 `manage_instruction/Work_Log.md`。
 
 ## 4. 验收命令
 
-定位试点选择器：
+信号定义定位：
 
-    rg -n "windowControl|variant=\"toolbar\"|role=\"windowControl\"|QToolButton\\[role" src/theme/default.qss src/ui/header.py
+    rg -n "skin_changed|theme_changed|global_signals" src/utils/signals.py
 
-确认未修改 light/dark preset：
+ThemeManager preset 定位：
 
-    git diff --name-only -- src/theme/light.qss
-    git diff --name-only -- src/theme/dark.qss
+    rg -n "DEFAULT_PRESET|SUPPORTED_PRESETS|default\\.qss|light\\.qss|dark\\.qss" src/theme/theme_manager.py src/theme/default.qss src/theme/light.qss src/theme/dark.qss
 
-Header import 验证：
+signals import 与 emit smoke：
 
-    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.ui.header import HeaderBar; print('header import ok', HeaderBar)"
+    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.utils.signals import global_signals; print('signals import ok'); calls=[]; global_signals.skin_changed.connect(lambda: calls.append('skin')); global_signals.theme_changed.connect(lambda name: calls.append(('theme', name))); global_signals.skin_changed.emit(); global_signals.theme_changed.emit('default.qss'); print('calls', calls); assert 'skin' in calls; assert ('theme', 'default.qss') in calls"
 
-Header offscreen 实例化与属性验证：
+ThemeManager 手动切换 smoke：
 
-    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from src.theme import ThemeManager; from src.ui.header import HeaderBar; app=QApplication([]); ThemeManager().apply_theme(app, ThemeManager.DEFAULT_PRESET); h=HeaderBar(); print('has sync', hasattr(h, 'btn_sync')); print('sync role', h.btn_sync.property('role')); print('sync variant', h.btn_sync.property('variant')); print('sync state', h.btn_sync.property('state')); assert h.btn_sync.property('role') == 'windowControl'; assert h.btn_sync.property('variant') == 'toolbar'"
+    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from src.theme import ThemeManager; app=QApplication([]); tm=ThemeManager(); print('default', ThemeManager.DEFAULT_PRESET); print('presets', tm.get_available_presets()); assert ThemeManager.DEFAULT_PRESET == 'default.qss'; assert tm.resolve_preset(None) == 'default.qss'; assert tm.resolve_preset('bad.qss') == 'default.qss'; results=[]; [tm.apply_theme(app, preset) or results.append((preset, isinstance(app.styleSheet(), str), len(app.styleSheet()))) for preset in ('default.qss','light.qss','dark.qss')]; print('apply results', results); assert all(ok for _, ok, _ in results)"
+
+7-4 试点回归：
+
+    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication, QWidget; from src.theme import ThemeManager; from src.ui.header import HeaderBar; app=QApplication([]); ThemeManager().apply_theme(app, ThemeManager.DEFAULT_PRESET); parent=QWidget(); h=HeaderBar(parent); print('sync role', h.btn_sync.property('role')); print('sync variant', h.btn_sync.property('variant')); print('sync state', h.btn_sync.property('state')); assert h.btn_sync.property('role') == 'windowControl'; assert h.btn_sync.property('variant') == 'toolbar'; assert h.btn_sync.property('state') == 'normal'"
 
 默认启动接入回归：
 
@@ -156,14 +136,16 @@ Header offscreen 实例化与属性验证：
 
 语法检查：
 
-    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src/ui/header.py main.py src/theme/theme_manager.py src/theme/__init__.py
+    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile main.py src/theme/theme_manager.py src/theme/__init__.py src/utils/signals.py src/ui/header.py
 
 禁止范围检查：
 
+    git diff --name-only -- src/theme/theme_manager.py
+    git diff --name-only -- src/theme/default.qss
     git diff --name-only -- src/theme/light.qss
     git diff --name-only -- src/theme/dark.qss
-    git diff --name-only -- src/theme/theme_manager.py
     git diff --name-only -- main.py
+    git diff --name-only -- src/ui
     git diff --name-only -- src/utils/signals.py
     git diff --name-only -- src/utils/styles.py
     git diff --name-only -- src/data
@@ -173,46 +155,40 @@ Header offscreen 实例化与属性验证：
     git diff --name-only -- requirements.txt
     git diff --name-only -- schedule.db
 
-确认除 header 外无 UI diff：
-
-    git diff --name-only -- src/ui
-
-预期 `src/ui` diff 中只允许：
-
-    src/ui/header.py
-
 总范围检查：
 
     git diff --name-only
     git status --short --branch
 
-预期最终只允许：
+预期：
 
-- `src/theme/default.qss`
-- `src/ui/header.py`
-- `manage_instruction/Work_Log.md`
-- 必要时 `manage_instruction/Work_Task_Prompts.md`
+- 所有源码与 QSS 文件无 diff。
+- `src/ui` 无 diff。
+- `src/theme` 无 diff。
+- `signals.py` 无 diff。
+- `main.py` 无 diff。
+- `requirements.txt` 无 diff。
+- `schedule.db` 无 tracked diff。
+- 最终只允许：
+  - `manage_instruction/Work_Log.md`
+  - 必要时 `manage_instruction/Work_Task_Prompts.md`
 
 ## 5. 日志要求
 
 更新 `manage_instruction/Work_Log.md`，至少记录：
 
-- 本轮任务名称：第七轮 7-4（低风险真实控件动态属性样式试点）
+- 本轮任务名称：第七轮 7-5（Theme 信号兼容与手动 Skin Preset 切换 smoke）
 - 开工前 git 状态
 - 实际修改文件
-- 试点控件：
-  - `src/ui/header.py`
-  - `btn_sync`
-- 为什么选择该控件
-- `default.qss` 新增选择器说明
-- `btn_sync` 设置的动态属性：
-  - `role`
-  - `variant`
-  - `state`（如有）
-- 是否清除或避免了 `btn_sync` 的局部 stylesheet，如有需说明原因
-- 确认未修改 `btn_more` / `btn_close` 行为
-- Header import 验证结果
-- Header offscreen 实例化与属性验证结果
+- `skin_changed` 无参 emit 验证结果
+- `theme_changed(str)` emit 验证结果
+- `ThemeManager.DEFAULT_PRESET` 当前值
+- `SUPPORTED_PRESETS` 当前清单
+- `resolve_preset(None)` 与非法值回落结果
+- `default.qss` 手动 apply 结果
+- `light.qss` 兼容 preset 手动 apply 结果
+- `dark.qss` test preset 手动 apply 结果
+- 7-4 `btn_sync` 试点回归结果
 - 默认启动接入回归结果
 - py_compile 结果
 - diff 范围检查结果
@@ -221,10 +197,11 @@ Header offscreen 实例化与属性验证：
 
 特别记录：
 
-- 本轮基于 `default.qss / skin preset`。
-- 本轮不围绕 `light.qss` / `dark.qss` 做模式切换。
-- 本轮只做单个真实控件试点，不做全局控件样式。
-- 后续若要扩大范围，必须另开小工单。
+- 本轮只做信号兼容和手动 preset 切换 smoke。
+- 本轮不连接真实换肤 UI。
+- 本轮不扩大 7-4 控件试点范围。
+- `default.qss` 是 canonical 默认 skin preset。
+- `light.qss` / `dark.qss` 只是兼容/test preset，不代表 light/dark mode matrix。
 
 如果 Python 验证受沙箱权限影响，请申请沙箱外权限运行；若仍受限，请写明需用户本地 CMD 复跑命令。
 
