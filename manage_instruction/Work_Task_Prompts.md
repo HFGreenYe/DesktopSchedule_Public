@@ -1,187 +1,167 @@
-请执行第七轮 7-0：主题与样式债务静态审查。本轮只做代码阅读、搜索、分析和日志记录，不改源码。
+﻿请执行第七轮 7-1：ThemeManager 与 Skin Preset 边界确认。本轮只完善 ThemeManager 最小边界，不接入 main.py，不改 UI。
 
 ## 1. 本轮目标
 
-基于 manage_instruction/Work_Instruction.md 中第七轮阶段合同，审查当前主题系统、QSS 文件、StyleManager、内联 setStyleSheet 分布和样式债务，为后续 Theme/QSS 小步接入建立基线。
+基于 `manage_instruction/Work_Instruction.md` 第七轮阶段合同，以及 `Work_Log.md` 中 7-0 的审查结论，补齐 ThemeManager 的最小可用边界。
 
-本轮只读审查，不接入 ThemeManager，不改 QSS，不改 UI。
+本轮目标：
 
-重点审查：
+- 仅在 `src/theme/theme_manager.py` 内完善主题能力边界。
+- 明确 skin preset 白名单与默认主题名。
+- 增加读取 QSS 的安全兜底（文件缺失/读取失败不抛到 UI 层）。
+- 保持 `apply_qss/apply_theme/refresh_widget_style` 语义兼容。
+- 不接入 `main.py`。
+- 不修改任何 UI 文件。
 
-- src/theme/theme_manager.py 当前能力与缺口。
-- src/theme/light.qss / src/theme/dark.qss 当前内容。
-- main.py 当前 QApplication 启动流程。
-- src/utils/styles.py 当前 StyleManager 职责。
-- src/ui/ 下 setStyleSheet 高频分布。
-- 当前已有 global_signals.skin_changed / theme_changed 是否满足第七轮信号兼容需求。
-- 哪些控件适合作为低风险 QSS 动态属性试点。
-- 哪些样式债务应推迟到第八轮 UI 大文件拆分。
+本轮不做：
 
-本轮必须输出：
-
-- ThemeManager 能力/缺口清单。
-- QSS 文件状态。
-- StyleManager 职责地图。
-- setStyleSheet 热点文件和热点类型。
-- 低风险试点候选项。
-- 不适合第七轮处理、应推迟的样式债务。
-- 对 7-1 / 7-2 / 7-3 的建议。
+- 不修改 `light.qss` / `dark.qss` 内容。
+- 不接入应用启动。
+- 不做动态属性试点。
+- 不做换肤 UI。
 
 ## 2. 允许/禁止
 
 本轮允许修改：
 
-- manage_instruction/Work_Log.md
-- manage_instruction/Work_Task_Prompts.md（仅在需要维护本轮复核锚点时）
+- `src/theme/theme_manager.py`
+- `src/theme/__init__.py`
+- `manage_instruction/Work_Log.md`
+- `manage_instruction/Work_Task_Prompts.md`（仅在需要维护本轮复核锚点时）
 
 本轮禁止修改：
 
-- src/
-- main.py
-- requirements.txt
-- schedule.db
-- Work_Snapshot.md
-- Work_Formulation.md
+- `src/theme/light.qss`
+- `src/theme/dark.qss`
+- `main.py`
+- `src/ui/`
+- `src/utils/signals.py`
+- `src/utils/styles.py`
+- `src/data/`
+- `src/repositories/`
+- `src/services/`
+- `src/controllers/`
+- `requirements.txt`
+- `schedule.db`
+- `Work_Snapshot.md`
+- `Work_Formulation.md`
 
 禁止事项：
 
-- 不修改 ThemeManager。
-- 不修改 light.qss / dark.qss。
-- 不修改 main.py。
-- 不修改 StyleManager。
-- 不修改任何 UI 文件。
-- 不新增动态属性。
-- 不新增或修改信号。
-- 不接入 ThemeManager。
-- 不运行换肤 UI。
-- 不批量清理 setStyleSheet。
+- 不接入 QApplication 启动流程。
+- 不新增/修改任何 signal。
+- 不改业务逻辑。
+- 不改 db_manager API。
 - 不提交 Git。
 
-若开工前已有 manage_instruction/Work_Instruction.md 或其他管理文档 diff，需要在 Work_Log.md 中单独记录为开工前既有状态，不视为本轮源码改动。
+若开工前已有管理文档 diff，需在 `Work_Log.md` 单独记录，不视为本轮源码改动。
 
 ## 3. 具体任务
 
-1. 读取第七轮阶段合同：
+1. 读取合同和日志基线：
 
     Get-Content -Path manage_instruction\Work_Instruction.md -Encoding UTF8
 
-2. 审查 theme 目录：
+    Get-Content -Path manage_instruction\Work_Log.md -Encoding UTF8
 
-    Get-ChildItem -Path src\theme -Force
+2. 读取 ThemeManager 现状：
 
     Get-Content -Path src\theme\theme_manager.py -Encoding UTF8
 
-    Get-Content -Path src\theme\light.qss -Encoding UTF8
-
-    Get-Content -Path src\theme\dark.qss -Encoding UTF8
-
     Get-Content -Path src\theme\__init__.py -Encoding UTF8
 
-3. 审查 QApplication 启动流程：
+3. 在 `src/theme/theme_manager.py` 做最小增强，建议保留/新增以下边界（方法名可微调，但语义必须覆盖）：
 
-    Get-Content -Path main.py -Encoding UTF8
+- 默认主题常量：`DEFAULT_PRESET = "light.qss"`
+- 白名单方法：`get_available_presets() -> tuple[str, ...]`，至少包含 `("light.qss", "dark.qss")`
+- 校验方法：`is_supported_preset(file_name: str) -> bool`
+- 解析方法：`resolve_preset(file_name: str | None) -> str`，非法输入回落默认 preset
+- 安全读取方法：`read_qss_safe(file_name: str | None, fallback: str = "") -> str`
+  - 读取失败返回 `fallback`（默认空字符串）
+  - 不抛异常到调用方
+  - 只捕获文件读取相关异常，例如 `OSError`、`UnicodeDecodeError`；不要用宽泛的 `except Exception` 吞掉代码错误
+- `apply_theme(...)` 内部使用 `resolve_preset + read_qss_safe`
+  - 保持调用后可 `app.setStyleSheet(...)`
+  - 本轮 smoke 可接受读取失败时应用空样式或 fallback，不中断流程
+  - 后续 7-2 真实启动接入前，需要再明确失败时是“应用空样式”还是“保留当前样式”
 
-4. 审查 StyleManager：
+职责边界必须明确：
 
-    Get-Content -Path src\utils\styles.py -Encoding UTF8
+- `resolve_preset(...)` 只负责 preset 合法性判断与非法值回落默认 preset。
+- `read_qss_safe(...)` 只负责读取文件，并在真实文件读取失败时返回 fallback。
+- `apply_theme(...)` 负责组合 `resolve_preset(...)` 与 `read_qss_safe(...)` 后调用 `apply_qss(...)`。
+- 不要让 `read_qss_safe(...)` 用宽泛 `except Exception` 吞掉代码错误。
+- 不要在 `read_qss_safe(...)` 中混入 UI、信号、应用启动或业务逻辑。
 
-5. 审查现有信号：
+要求：
 
-    Get-Content -Path src\utils\signals.py -Encoding UTF8
+- 不依赖 UI 文件。
+- 不依赖 db_manager / Repository / Service。
+- 不写数据库。
+- 保持 `refresh_widget_style(widget)` 可用。
 
-6. 搜索 ThemeManager / QSS / theme 使用情况：
+4. 更新 `src/theme/__init__.py`：
 
-    rg -n "ThemeManager|apply_theme|apply_qss|read_qss|theme_changed|skin_changed|global_signals|light\.qss|dark\.qss|\.qss|QSS|theme" src main.py
+- 轻量导出 `ThemeManager`。
+- 不触发副作用（不创建 QApplication，不读取文件，不连接信号）。
 
-7. 搜索 setStyleSheet 高频分布：
+5. 不修改 `light.qss` / `dark.qss`。
 
-    rg -n "setStyleSheet\(" src
+6. 不修改 `main.py`。
 
-8. 搜索 StyleManager 使用点：
-
-    rg -n "StyleManager\.|get_tooltip_style|get_button_style|get_menu_style|get_header_container_style|get_search_input_style|get_window_control_style" src
-
-9. 搜索动态属性使用情况：
-
-    rg -n "setProperty\(|property\(|dynamicProperty|role|state|variant" src
-
-10. 搜索 add view 中“设置字体”与 theme_color 相关既有缺口：
-
-    rg -n "设置字体|btn_font|theme_color|font|color" src/ui/add_view.py src/ui/add_view_week.py src/data/models.py src/data/database.py src/repositories src/services
-
-11. 统计或归纳 setStyleSheet 热点文件。
-
-建议至少关注：
-
-- src/ui/add_view.py
-- src/ui/add_view_week.py
-- src/ui/main_window.py
-- src/ui/header.py
-- src/ui/list_picker.py
-- src/ui/month_window.py
-- src/ui/todo_board.py
-- src/ui/week_window.py
-- src/ui/calendar_pop.py
-- src/ui/schedule_detail_pop.py
-- src/utils/styles.py
-
-12. 形成 ThemeManager 能力/缺口清单，至少判断：
-
-- 是否能读取 QSS。
-- 是否能 apply 到 QApplication。
-- 是否能刷新 QWidget 动态属性样式。
-- 是否能列出 skin preset。
-- 是否有默认主题名。
-- 是否有失败兜底。
-- 是否依赖 UI/db/Repository。
-- 是否已接入 main.py。
-
-13. 形成 QSS 文件状态，至少记录：
-
-- light.qss 当前是否为占位。
-- dark.qss 当前是否为占位。
-- 是否已有动态属性选择器。
-- 是否已有全局基础规则。
-- 是否适合直接应用到生产 UI。
-
-14. 形成 StyleManager 职责地图，至少记录：
-
-- 哪些公共样式仍在 StyleManager。
-- 哪些 UI 直接使用 StyleManager。
-- 哪些 UI 完全内联 setStyleSheet。
-- 哪些样式适合未来迁到 QSS。
-- 哪些样式本轮不应移动。
-
-15. 形成低风险试点候选项。
-
-建议按风险分级：
-
-- 低风险：
-  - tooltip / toast / 单个非业务按钮 / 窗口控制按钮 role 动态属性。
-- 中风险：
-  - Header 局部输入框或按钮。
-  - ListPicker 单个按钮。
-- 高风险：
-  - add_view / week_window / todo_board / month_window 大块内联样式。
-  - CalendarPop 内部主题切换逻辑。
-  - ScheduleDetailPop source_view 样式分支。
-  - theme_color / 设置字体功能闭环。
-
-16. 输出对后续小工单的建议：
-
-- 7-1 应如何完善 ThemeManager。
-- 7-2 默认 QSS 接入应采用哪个默认 skin preset。
-- 7-3 动态属性规范应采用哪些命名。
-- 7-4 试点控件建议选哪个，为什么。
-- 哪些内容应明确推迟到第八轮 UI 拆分或第九轮功能轮。
+7. 更新 `manage_instruction/Work_Log.md`。
 
 ## 4. 验收命令
 
-完成审查和日志记录后执行范围检查：
+读取与定位：
 
-    git diff --name-only -- src
+    Get-Content -Path src\theme\theme_manager.py -Encoding UTF8
+
+    rg -n "DEFAULT|preset|available|resolve|read_qss|read_qss_safe|apply_theme|apply_qss|refresh_widget_style" src/theme/theme_manager.py src/theme/__init__.py
+
+import 验证：
+
+    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.theme.theme_manager import ThemeManager; from src.theme import ThemeManager as ThemeManager2; print('theme manager import ok', ThemeManager is ThemeManager2)"
+
+行为验证（白名单/回落/安全读取）：
+
+    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.theme.theme_manager import ThemeManager; tm=ThemeManager(); presets=tm.get_available_presets() if hasattr(tm,'get_available_presets') else (); print('presets', presets); assert 'light.qss' in presets and 'dark.qss' in presets; rp=tm.resolve_preset('light.qss') if hasattr(tm,'resolve_preset') else 'light.qss'; print('resolve light', rp); assert rp=='light.qss'; rp2=tm.resolve_preset('bad.qss') if hasattr(tm,'resolve_preset') else None; print('resolve bad', rp2); assert rp2 in ('light.qss','dark.qss'); txt=tm.read_qss_safe('light.qss') if hasattr(tm,'read_qss_safe') else tm.read_qss('light.qss'); print('light len', len(txt)); txt2=tm.read_qss_safe('missing.qss','') if hasattr(tm,'read_qss_safe') else ''; print('missing len', len(txt2)); assert isinstance(txt2,str)"
+
+QApplication apply 烟测（仅临时进程，不改业务）：
+
+    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from src.theme.theme_manager import ThemeManager; app=QApplication([]); tm=ThemeManager(); tm.apply_theme(app, 'light.qss'); print('applied light', isinstance(app.styleSheet(), str)); tm.apply_theme(app, 'missing.qss'); print('applied missing fallback', isinstance(app.styleSheet(), str));"
+
+静态依赖检查（ThemeManager 不依赖 UI/db/Repository/Service）：
+
+    rg -n "src\.ui|MainWindow|WeekWindow|MonthWindow|Todo|db_manager|src\.repositories|Repository|src\.services|ScheduleRepository|CategoryRepository" src/theme/theme_manager.py src/theme/__init__.py
+
+预期：无输出（若 `rg` 退出码 1 但无输出，视为通过）。
+
+语法检查：
+
+    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src/theme/theme_manager.py src/theme/__init__.py
+
+范围检查：
+
+    git diff --name-only -- src/theme/light.qss
+
+    git diff --name-only -- src/theme/dark.qss
 
     git diff --name-only -- main.py
+
+    git diff --name-only -- src/ui
+
+    git diff --name-only -- src/utils/signals.py
+
+    git diff --name-only -- src/utils/styles.py
+
+    git diff --name-only -- src/data
+
+    git diff --name-only -- src/repositories
+
+    git diff --name-only -- src/services
+
+    git diff --name-only -- src/controllers
 
     git diff --name-only -- requirements.txt
 
@@ -193,36 +173,44 @@
 
 预期：
 
-- src 无 diff。
-- main.py 无 diff。
-- requirements.txt 无 diff。
-- schedule.db 无 diff。
-- 最终只允许 manage_instruction/Work_Log.md，以及必要时的 manage_instruction/Work_Task_Prompts.md。
-- 如果开工前已有 manage_instruction/Work_Instruction.md diff，需要在日志中明确说明它是开工前既有状态，不属于 7-0 执行改动。
+- `light.qss` 无 diff。
+- `dark.qss` 无 diff。
+- `main.py` 无 diff。
+- `src/ui` 无 diff。
+- `signals.py` 无 diff。
+- `styles.py` 无 diff。
+- `src/data` / `src/repositories` / `src/services` / `src/controllers` 无 diff。
+- `requirements.txt` 无 diff。
+- `schedule.db` 无 tracked diff。
+- 最终只允许：
+  - `src/theme/theme_manager.py`
+  - `src/theme/__init__.py`
+  - `manage_instruction/Work_Log.md`
+  - 必要时 `manage_instruction/Work_Task_Prompts.md`
 
 ## 5. 日志要求
 
-更新 manage_instruction/Work_Log.md，至少记录：
+更新 `manage_instruction/Work_Log.md`，至少记录：
 
-- 本轮任务名称：第七轮 7-0（主题与样式债务静态审查）
+- 本轮任务名称：第七轮 7-1（ThemeManager 与 Skin Preset 边界确认）
 - 开工前 git 状态
 - 实际修改文件
-- 读取的第七轮阶段合同结论
-- 静态搜索命令和关键结果
-- ThemeManager 能力/缺口清单
-- QSS 文件状态
-- main.py 启动流程中的主题接入现状
-- StyleManager 职责地图
-- setStyleSheet 热点文件和热点类型
-- 动态属性使用现状
-- skin_changed / theme_changed 信号现状
-- theme_color / 设置字体相关既有缺口
-- 低风险试点候选项
-- 中/高风险样式债务
-- 建议推迟到第八轮 UI 拆分或第九轮功能轮的内容
-- 对 7-1 / 7-2 / 7-3 / 7-4 的建议
+- ThemeManager 新增/调整的方法清单
+- skin preset 白名单与默认 preset
+- 非法 preset 回落策略
+- QSS 读取失败兜底策略
+- `apply_theme` 兼容行为说明
+- `refresh_widget_style` 是否保持可用
+- `__init__.py` 导出说明
+- import 验证结果
+- 行为验证结果
+- QApplication apply 烟测结果
+- 静态依赖检查结果
+- py_compile 结果
 - diff 范围检查结果
 - 未完成事项
 - 风险或疑点
+
+如果 Python 验证受沙箱权限影响，请申请沙箱外权限运行；若仍受限，请写明需用户本地 CMD 复跑命令。
 
 完成后不要提交 Git，等待顾问窗口复核。
