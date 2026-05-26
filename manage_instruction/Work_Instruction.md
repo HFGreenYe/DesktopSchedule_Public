@@ -53,7 +53,7 @@
 第八轮整体允许修改：
 
 - `src/ui/`
-- `src/ui/components/`（可新增）
+- `src/ui/common/`（可新增；用于后续拆出的共享 UI 小组件，避免与既有 `src/ui/components.py` 冲突）
 - `src/ui/views/`（可新增）
 - `src/ui/dialogs/`（可新增）
 - `src/ui/popups/`（可新增）
@@ -66,6 +66,8 @@
 默认允许新增 UI 包目录和 `__init__.py`，但只有具体小工单明确要求时，才允许移动类或改调用方。
 
 阶段级允许范围不等于每个小工单的实际可改范围。第八轮执行时必须以具体 `8-x` 提示词中的允许清单为准；未在该小工单中明确列出的 UI 文件、主题文件或工具文件不得顺手修改。
+
+禁止创建与现有 `src/ui/*.py` 同名的包目录。例如当前已有 `src/ui/components.py`，因此不得创建 `src/ui/components/`，以免遮蔽既有 `from .components import ...` 导入。
 
 `src/theme/theme_manager.py` 的兼容修正必须由具体小工单明确方法名、修改原因和验收命令；否则默认禁止修改。`src/utils/styles.py` 也必须由具体小工单明确唯一修改点和兼容验收；否则默认禁止修改。
 
@@ -179,7 +181,7 @@ Work_Log 记录：
 
 允许修改：
 
-- `src/ui/components/__init__.py`
+- `src/ui/common/__init__.py`
 - `src/ui/views/__init__.py`
 - `src/ui/dialogs/__init__.py`
 - `src/ui/popups/__init__.py`
@@ -277,7 +279,7 @@ Work_Log 记录：
 
 允许修改：
 
-- `src/ui/components/tooltip.py` 或 `src/ui/components/toast.py`（具体文件由执行提示词写死）
+- `src/ui/common/tooltip.py` 或 `src/ui/common/toast.py`（具体文件由执行提示词写死）
 - 一个明确列出的调用方文件
 - `src/theme/default.qss`（仅在明确需要动态属性规则时）
 - `manage_instruction/Work_Log.md`
@@ -327,8 +329,8 @@ Work_Log 记录：
 允许修改：
 
 - `src/ui/week_window.py`
-- `src/ui/components/week_schedule_card.py` 或 `src/ui/components/day_block.py`（具体文件由执行提示词写死）
-- `src/ui/components/__init__.py`（仅轻量导出，且不触发副作用）
+- `src/ui/common/week_schedule_card.py` 或 `src/ui/common/day_block.py`（具体文件由执行提示词写死）
+- `src/ui/common/__init__.py`（仅轻量导出，且不触发副作用）
 - `manage_instruction/Work_Log.md`
 - `manage_instruction/Work_Task_Prompts.md`（仅在需要维护本轮复核锚点时）
 
@@ -421,8 +423,8 @@ Work_Log 记录：
 允许修改：
 
 - `src/ui/todo_board.py`
-- `src/ui/components/todo_board_cards.py` 或明确的单类文件
-- `src/ui/components/__init__.py`（仅轻量导出）
+- `src/ui/common/todo_board_cards.py` 或明确的单类文件
+- `src/ui/common/__init__.py`（仅轻量导出）
 - `manage_instruction/Work_Log.md`
 - `manage_instruction/Work_Task_Prompts.md`（仅在需要维护本轮复核锚点时）
 
