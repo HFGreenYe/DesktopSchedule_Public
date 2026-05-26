@@ -20,12 +20,12 @@
 
 第七轮：Theme / QSS 接入与样式债务控制，已完成并归档。
 
-第八轮：UI 拆分与样式债务整理，已完成 8-2a（公共 icon loader 静态定位与提取基线），等待顾问窗口复核后进入 8-2b。
+第八轮：UI 拆分与样式债务整理，已完成 8-2b（公共 icon loader 最小提取与 Header 单点替换），等待顾问窗口复核。
 
 ## 当前轮次注意事项
 
 - 第七轮归档内容见 `History_Instruction.md` 与 `History_Log.md`。
-- 第八轮阶段合同已发布，当前已完成 8-0、8-1、8-2a，保持小工单推进。
+- 第八轮阶段合同已发布，当前已完成 8-0、8-1、8-2a、8-2b，保持小工单推进。
 - 第八轮规划应保持小工单策略，避免一次性拆大 UI 文件。
 - 第七轮遗留约束继续有效：基于 `default.qss / skin preset`，不建立 light/dark mode matrix。
 
@@ -455,3 +455,103 @@
   - 不替换任何调用方。
   - 不修改 `assets`。
   - 后续若进入 8-2b，必须只提取一个 helper 并只替换一个低风险调用点。
+
+## 2026-05-26 第八轮 8-2b（公共 icon loader 最小提取与 Header 单点替换）
+
+- 本轮任务名称：第八轮 8-2b（公共 icon loader 最小提取与 Header 单点替换）。
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 25]`
+  - 既有变更：`M manage_instruction/Work_Task_Prompts.md`
+  - 说明：开工前已有管理文档 diff，本轮不视为源码改动。
+- 实际修改文件：
+  - `src/ui/utils/icon_loader.py`（新增）
+  - `src/ui/header.py`
+  - `manage_instruction/Work_Log.md`
+
+- 新增 helper 文件与函数名：
+  - 文件：`src/ui/utils/icon_loader.py`
+  - 函数：`load_colored_svg_pixmap(icon_path, color_hex, width, height, device_pixel_ratio=1.0)`
+
+- helper 签名与职责：
+  - 输入：
+    - `icon_path`：完整 SVG 路径
+    - `color_hex`：颜色字符串
+    - `width/height`：逻辑尺寸
+    - `device_pixel_ratio`：DPR（默认 1.0）
+  - 输出：
+    - `QPixmap`
+  - 行为：
+    - `QSvgRenderer` 渲染 SVG
+    - 按 DPR 生成像素尺寸并 `setDevicePixelRatio`
+    - `CompositionMode_SourceIn` 染色
+
+- helper fallback 行为：
+  - `renderer.isValid()` 为 `False` 时返回空 `QPixmap()`。
+  - 缺失文件路径在 `QSvgRenderer` 无效分支同样返回空 `QPixmap()`。
+
+- 是否依赖 QWidget/self：
+  - 否。helper 为纯 UI 工具函数，不依赖 widget 实例，不读取全局状态，不连接信号。
+
+- `header.py::_load_colored_svg(...)` 兼容性说明：
+  - 方法名、参数、返回语义保持不变。
+  - 仍在 `HeaderBar` 内部通过 `self.devicePixelRatio()` 取 DPR。
+  - 方法体改为单行委托 helper，不改变调用方。
+
+- 确认未修改 `_load_colored_svg(...)` 调用方：
+  - `header.py` 内部调用位置保持不变（按钮图标与天气图标路径未改）。
+
+- 确认未修改 `btn_sync` 试点：
+  - `btn_sync` 的 `role/variant/state` 属性保持：
+    - `windowControl` / `toolbar` / `normal`
+  - `btn_sync` 相关行为与连接未改。
+
+- 验证结果：
+  - helper 定位与替换检查：
+    - `rg -n "load_colored_svg_pixmap|_load_colored_svg|QSvgRenderer|CompositionMode_SourceIn|devicePixelRatio" ...` 命中符合预期。
+  - helper import 验证：
+    - 输出：`icon loader import ok <function load_colored_svg_pixmap ...>`
+  - helper offscreen 渲染验证：
+    - 输出：`pixmap null False size 24 24 dpr 1.0`
+    - 输出：`missing null True`
+    - 结论：有效 SVG 可渲染，缺失路径回空图。
+  - Header import 验证：
+    - 输出：`header import ok <class 'src.ui.header.HeaderBar'>`
+  - Header offscreen 回归：
+    - 输出：`header pixmap null False size 24 24`
+    - 输出：`sync role windowControl`
+    - 输出：`sync variant toolbar`
+    - 输出：`sync state normal`
+  - 旧 `src.ui.components` 导入回归：
+    - 输出：`components import ok <class 'src.ui.components.SharedMoreMenu'> <function get_colored_icon ...>`
+  - 默认启动接入回归：
+    - 输出：`main import ok`
+  - py_compile：
+    - 命令：`python -m py_compile src/ui/utils/icon_loader.py src/ui/header.py main.py`
+    - 结果：通过。
+
+- diff 范围检查结果：
+  - 禁止范围：
+    - `assets`、`src/ui/components.py`、`src/ui/todo_board.py`、`src/ui/schedule_detail_pop.py`、`src/ui/time_picker.py`、`src/ui/time_picker_week.py`、`src/ui/week_window.py`、`src/ui/month_window.py`、`src/theme`、`src/data`、`src/repositories`、`src/services`、`src/controllers`、`src/utils/signals.py`、`src/utils/styles.py`、`main.py`、`requirements.txt`、`schedule.db` 均无 diff。
+  - 允许范围：
+    - `src/ui` 仅命中：
+      - `src/ui/header.py`
+      - `src/ui/utils/icon_loader.py`
+  - 当前总 diff：
+    - `src/ui/header.py`
+    - `src/ui/utils/icon_loader.py`
+    - `manage_instruction/Work_Log.md`
+    - `manage_instruction/Work_Task_Prompts.md`（开工前既有）
+
+- 未完成事项：
+  - 后续若继续 icon 统一，需另开工单，且每次只替换一个调用点。
+
+- 风险或疑点：
+  - `header.py` 仍保留 `QSvgRenderer` 相关 import（当前未影响行为）；后续可在单独清理工单处理，不在本轮扩大范围。
+
+- 特别记录：
+  - 本轮只新增一个 helper。
+  - 本轮只替换 `header.py::_load_colored_svg(...)` 这一个低风险调用边界。
+  - 本轮不统一所有 icon loader。
+  - 本轮不修改 `assets`。
+  - 本轮不处理 `QIcon` 返回路径。
+  - 本轮不处理 `todo_board.py` / `schedule_detail_pop.py` / `time_picker*.py`。

@@ -10,6 +10,7 @@ from ..utils.styles import StyleManager
 from ..config import AppConfig
 from ..utils.win_api import apply_24h2_border_fix
 from src.services.weather_service import WeatherWorker
+from .utils.icon_loader import load_colored_svg_pixmap
 
 import os
 from dotenv import load_dotenv
@@ -135,21 +136,8 @@ class HeaderBar(QWidget):
         self._init_weather_service()
 
     def _load_colored_svg(self, icon_path, color_hex, width, height):
-        renderer = QSvgRenderer(icon_path)
-        if not renderer.isValid():
-            return QPixmap()
         ratio = self.devicePixelRatio()
-        pixel_width = int(width * ratio)
-        pixel_height = int(height * ratio)
-        pixmap = QPixmap(pixel_width, pixel_height)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        pixmap.setDevicePixelRatio(ratio)
-        painter = QPainter(pixmap)
-        renderer.render(painter, QRectF(0, 0, width, height))
-        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-        painter.fillRect(QRectF(0, 0, width, height), QColor(color_hex))
-        painter.end()
-        return pixmap
+        return load_colored_svg_pixmap(icon_path, color_hex, width, height, ratio)
 
     def _init_weather_service(self):
         self.weather_worker = WeatherWorker(self.my_api_key, self.my_api_host)
