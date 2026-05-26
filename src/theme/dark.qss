@@ -1,3 +1,41 @@
-/* Dark theme placeholder.
-   Keep neutral styles in this round to avoid changing current visuals. */
+/* Dark preset baseline.
+   Dynamic-property-only rules for round 7-3 verification.
+   Naming conventions are aligned with light.qss:
+   role/state/variant.
+*/
 
+QPushButton[role="primaryButton"] {
+    background-color: rgba(56, 185, 214, 0.24);
+    color: #d9f7ff;
+    border: 1px solid rgba(56, 185, 214, 0.55);
+    border-radius: 8px;
+    padding: 4px 10px;
+}
+
+QPushButton[role="ghostButton"] {
+    background-color: transparent;
+    color: #d9f7ff;
+    border: 1px solid rgba(148, 220, 238, 0.45);
+    border-radius: 8px;
+    padding: 4px 10px;
+}
+
+QWidget[role="panel"] {
+    background-color: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 10px;
+}
+
+*[state="warning"] {
+    border-color: #ffb84d;
+    color: #ffd799;
+}
+
+*[state="danger"] {
+    border-color: #ff6b6b;
+    color: #ffc9c9;
+}
+
+*[variant="compact"] {
+    padding: 2px;
+}

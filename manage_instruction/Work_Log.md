@@ -18,12 +18,12 @@
 
 第六轮：Controller / Router / EventBus 协调层，已完成并归档。
 
-第七轮：Theme / QSS 接入，已完成 7-2（默认 QSS 启动接入），等待顾问窗口复核与 7-3 工单。
+第七轮：Theme / QSS 接入，已完成 7-3（动态属性命名规范与刷新验证），等待顾问窗口复核与 7-4 工单。
 
 ## 当前轮次注意事项
 
 - 第六轮已归档，历史记录见 `History_Instruction.md` 与 `History_Log.md`。
-- 7-0、7-1、7-2 已完成，默认 preset 已在启动流程接入，尚未进入动态属性试点。
+- 7-0、7-1、7-2、7-3 已完成，动态属性规范与刷新闭环已验证，尚未进入真实业务控件试点。
 - 第七轮后续应保持第六轮回归重点不变：路由决策、添加页来源、三连刷新、`refresh_requested` 并行通知、详情弹窗回流链路。
 
 ## 2026-05-26 第七轮 7-0（主题与样式债务静态审查）
@@ -332,3 +332,79 @@
 
 - 风险或疑点：
   - 读取失败时“应用空样式”在更复杂接入场景下可能清空既有应用级样式；当前因 `light.qss` 可读且接入点位于启动早期，风险可控。
+
+## 2026-05-26 第七轮 7-3（动态属性命名规范与刷新验证）
+
+- 本轮任务名称：第七轮 7-3（动态属性命名规范与刷新验证）。
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 14]`
+  - 既有变更：`M manage_instruction/Work_Task_Prompts.md`
+  - 说明：开工前已有管理文档 diff，本轮不视为源码改动。
+- 实际修改文件：
+  - `src/theme/light.qss`
+  - `src/theme/dark.qss`
+  - `manage_instruction/Work_Log.md`
+
+- 动态属性命名规范：
+  - `role`：组件角色（`primaryButton`、`ghostButton`、`panel`、`input`）
+  - `state`：语义状态（`normal`、`active`、`warning`、`danger`）
+  - `variant`：视觉变体（`compact`、`toolbar`）
+
+- `light.qss` 新增选择器说明（仅动态属性选择器，低侵入）：
+  - `QPushButton[role="primaryButton"]`
+  - `QPushButton[role="ghostButton"]`
+  - `QWidget[role="panel"]`
+  - `*[state="warning"]`
+  - `*[state="danger"]`
+  - `*[variant="compact"]`
+  - 说明：未新增全局 `QWidget/QPushButton/QLabel` 默认规则，避免影响未设置属性的旧 UI。
+
+- `dark.qss` 新增选择器说明（与 light 同名规范）：
+  - `QPushButton[role="primaryButton"]`
+  - `QPushButton[role="ghostButton"]`
+  - `QWidget[role="panel"]`
+  - `*[state="warning"]`
+  - `*[state="danger"]`
+  - `*[variant="compact"]`
+  - 说明：仅用于深色 preset 下的同名属性 smoke，不等于完整深色主题实现。
+
+- 是否修改 `ThemeManager`：
+  - 否。本轮未修改 `src/theme/theme_manager.py`，现有 `refresh_widget_style(...)` 即可完成闭环验证。
+
+- 验证结果：
+  - 选择器定位：
+    - `rg -n "role=|state=|variant=|primaryButton|ghostButton|panel|warning|danger|compact" src/theme/light.qss src/theme/dark.qss` 命中正常。
+  - ThemeManager import：
+    - `theme import ok light.qss ('light.qss', 'dark.qss')`
+  - 临时控件动态属性刷新 smoke（light）：
+    - `dynamic property refresh ok primaryButton warning panel compact`
+  - dark preset 动态属性 smoke：
+    - `dark dynamic refresh ok ghostButton danger True`
+  - 默认启动接入回归：
+    - `main import ok`
+  - py_compile：
+    - `python -m py_compile main.py src/theme/theme_manager.py src/theme/__init__.py` 通过。
+
+- diff 范围检查结果：
+  - `git diff --name-only -- main.py`：无输出。
+  - `git diff --name-only -- src/ui`：无输出。
+  - `git diff --name-only -- src/utils/signals.py`：无输出。
+  - `git diff --name-only -- src/utils/styles.py`：无输出。
+  - `git diff --name-only -- src/data`：无输出。
+  - `git diff --name-only -- src/repositories`：无输出。
+  - `git diff --name-only -- src/services`：无输出。
+  - `git diff --name-only -- src/controllers`：无输出。
+  - `git diff --name-only -- requirements.txt`：无输出。
+  - `git diff --name-only -- schedule.db`：无输出。
+  - 当前总 diff：
+    - `src/theme/light.qss`
+    - `src/theme/dark.qss`
+    - `manage_instruction/Work_Log.md`
+    - `manage_instruction/Work_Task_Prompts.md`（开工前既有）
+
+- 未完成事项：
+  - 7-4 需仅选择一个低风险真实业务控件做试点，避免范围扩散。
+  - 需明确 7-4 是先做 window-control 按钮还是 tooltip 单点试点。
+
+- 风险或疑点：
+  - 当前 `*[state=...]` 规则在未来大范围使用时可能与个别控件已有边框/前景色叠加；本轮仅作为命名规范与闭环验证，未接入真实业务 UI。

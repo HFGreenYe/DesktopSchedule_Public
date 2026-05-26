@@ -1,44 +1,47 @@
-请执行第七轮 7-2：默认 QSS 启动接入。本轮只把默认 skin preset 接入应用启动流程，不实现换肤 UI，不改业务 UI。
+请执行第七轮 7-3：动态属性命名规范与刷新验证。本轮只建立 QSS 动态属性规范，并用临时控件验证刷新闭环，不修改真实业务 UI。
 
 ## 1. 本轮目标
 
-基于第七轮阶段合同、7-0 样式债务审查结论、7-1 ThemeManager 边界结果，在应用启动处接入默认 QSS。
+基于第七轮阶段合同、7-0 样式债务审查结论、7-1 ThemeManager 边界、7-2 默认 QSS 启动接入结果，建立最小动态属性命名规范，并验证 `ThemeManager.refresh_widget_style(...)` 可以刷新动态属性样式。
 
 本轮目标：
 
-- 在 `main.py` 的 QApplication 启动流程中接入 `ThemeManager`。
-- 默认加载 `ThemeManager.DEFAULT_PRESET`，当前应为 `light.qss`。
-- 保持默认视觉尽量不变。
-- 保持应用启动流程可用。
-- 明确 QSS 读取失败时的启动期处理策略。
+- 在 QSS 中建立最小动态属性选择器规范。
+- 推荐属性名：`role`、`state`、`variant`。
+- 用临时 `QWidget` / `QPushButton` 在 offscreen 进程中验证：
+  - `setProperty(...)`
+  - `ThemeManager.refresh_widget_style(...)`
+  - QSS 动态属性选择器可被加载
+- 保持 `ThemeManager` import / apply / refresh 能力可用。
+- 不修改任何真实业务 UI 文件。
+- 不做公共控件试点。
 - 不实现换肤 UI。
-- 不连接 `theme_changed` / `skin_changed`。
-- 不修改任何业务 UI 文件。
 
 本轮不做：
 
-- 不做动态属性试点。
-- 不做公共控件样式迁移。
+- 不修改 `main.py`。
+- 不修改 `src/ui/`。
 - 不批量替换 `setStyleSheet(...)`。
 - 不改 `StyleManager`。
-- 不实现字体/颜色选择闭环。
+- 不连接 `theme_changed` / `skin_changed`。
+- 不做字体/颜色选择闭环。
 
 ## 2. 允许/禁止
 
 本轮允许修改：
 
-- `main.py`
-- `src/theme/theme_manager.py`（仅当启动接入发现必须做极小兼容修正时）
-- `src/theme/light.qss`（仅允许低侵入基础内容或注释整理；如无必要可不改）
+- `src/theme/light.qss`
+- `src/theme/dark.qss`
+- `src/theme/theme_manager.py`（仅当刷新验证发现必须做极小兼容修正时）
 - `manage_instruction/Work_Log.md`
 - `manage_instruction/Work_Task_Prompts.md`（仅在需要维护本轮复核锚点时）
 
 本轮禁止修改：
 
+- `main.py`
 - `src/ui/`
 - `src/utils/signals.py`
 - `src/utils/styles.py`
-- `src/theme/dark.qss`
 - `src/data/`
 - `src/repositories/`
 - `src/services/`
@@ -56,6 +59,7 @@
 - 不改数据库字段。
 - 不改业务逻辑。
 - 不改路由、刷新、picker、详情弹窗回流行为。
+- 不改真实 UI 布局、文案、交互。
 - 不提交 Git。
 
 若开工前已有 diff，需在 `Work_Log.md` 单独记录，不视为本轮新增问题。
@@ -66,34 +70,49 @@
 
     Get-Content -Path manage_instruction\Work_Instruction.md -Encoding UTF8
     Get-Content -Path manage_instruction\Work_Log.md -Encoding UTF8
-    Get-Content -Path main.py -Encoding UTF8
     Get-Content -Path src\theme\theme_manager.py -Encoding UTF8
     Get-Content -Path src\theme\light.qss -Encoding UTF8
+    Get-Content -Path src\theme\dark.qss -Encoding UTF8
 
-2. 在 `main.py` 中最小接入 ThemeManager：
+2. 在 `light.qss` 和 `dark.qss` 中加入低侵入动态属性选择器示例。
 
-    - 保留现有 `QApplication` 创建流程。
-    - 保留现有 `app.setStyle("Fusion")`。
-    - 在 QApplication 创建后、主窗口显示前，调用 ThemeManager 加载默认 preset。
-    - 推荐逻辑：
-      - `from src.theme import ThemeManager`
-      - `theme_manager = ThemeManager()`
-      - `theme_manager.apply_theme(app, ThemeManager.DEFAULT_PRESET)`
+    建议只加入临时验证/未来试点可用的轻量规则，不要影响现有业务 UI 的大面积视觉。
 
-3. QSS 读取失败策略：
+    推荐命名规范：
 
-    - 本轮启动接入阶段采用保守策略：QSS 读取失败不得阻断应用启动。
-    - 当前 `apply_theme` 读取失败会应用 fallback 空字符串；由于本轮只在 QApplication 初始化早期加载默认 QSS，允许该行为作为启动期兜底。
-    - 不新增复杂日志系统。
-    - 如果你认为需要调整 `ThemeManager`，只能做极小兼容修正，并在日志说明原因。
-    - 不要把失败处理扩展成完整主题管理系统。
+    - `role`：组件角色，例如 `primaryButton`、`ghostButton`、`panel`、`input`
+    - `state`：状态，例如 `normal`、`active`、`warning`、`danger`
+    - `variant`：变体，例如 `compact`、`toolbar`
 
-4. `light.qss` 处理：
+    推荐选择器示例：
 
-    - 优先保持现有低侵入内容，不制造视觉突变。
-    - 如需修改，只允许加入基础注释或极低风险基础规则。
-    - 不添加会大面积改变字体、颜色、间距、圆角的规则。
-    - 不修改 `dark.qss`。
+    - `QPushButton[role="primaryButton"]`
+    - `QPushButton[role="ghostButton"]`
+    - `QWidget[role="panel"]`
+    - `*[state="warning"]`
+    - `*[state="danger"]`
+    - `*[variant="compact"]`
+
+    注意：
+
+    - 不要加入会改变全局 `QWidget`、`QPushButton`、`QLabel` 默认样式的大范围规则。
+    - 选择器必须尽量依赖动态属性，避免影响未设置属性的旧 UI。
+    - `dark.qss` 可以加入对应深色 preset 的同名选择器，但不要实现完整深色主题。
+
+3. 只有在确实必要时，才允许极小修改 `ThemeManager.refresh_widget_style(...)`。
+
+    默认预期：不需要修改 `ThemeManager`。
+
+4. 使用临时控件验证刷新闭环：
+
+    - 创建 offscreen `QApplication`。
+    - 加载 `light.qss`。
+    - 创建 `QPushButton`。
+    - 设置 `role="primaryButton"`。
+    - 调用 `refresh_widget_style(button)`。
+    - 再切换 `state` 或 `variant`。
+    - 再次调用 `refresh_widget_style(button)`。
+    - 验证过程不抛异常。
 
 5. 不修改任何 `src/ui/` 文件。
 
@@ -101,25 +120,25 @@
 
 ## 4. 验收命令
 
-读取接入位置：
+定位动态属性选择器：
 
-    rg -n "ThemeManager|apply_theme|DEFAULT_PRESET|setStyle\\(" main.py src/theme/theme_manager.py
+    rg -n "role=|state=|variant=|primaryButton|ghostButton|panel|warning|danger|compact" src/theme/light.qss src/theme/dark.qss
 
 ThemeManager import 验证：
 
-    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.theme import ThemeManager; print('theme import ok', ThemeManager.DEFAULT_PRESET, ThemeManager().resolve_preset(None))"
+    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.theme import ThemeManager; print('theme import ok', ThemeManager.DEFAULT_PRESET, ThemeManager().get_available_presets())"
 
-main import 验证：
+动态属性刷新 smoke：
+
+    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication, QPushButton, QWidget; from src.theme import ThemeManager; app=QApplication([]); tm=ThemeManager(); tm.apply_theme(app, 'light.qss'); btn=QPushButton('test'); btn.setProperty('role','primaryButton'); tm.refresh_widget_style(btn); btn.setProperty('state','warning'); tm.refresh_widget_style(btn); panel=QWidget(); panel.setProperty('role','panel'); panel.setProperty('variant','compact'); tm.refresh_widget_style(panel); print('dynamic property refresh ok', btn.property('role'), btn.property('state'), panel.property('role'), panel.property('variant'))"
+
+dark preset 动态属性 smoke：
+
+    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication, QPushButton; from src.theme import ThemeManager; app=QApplication([]); tm=ThemeManager(); tm.apply_theme(app, 'dark.qss'); btn=QPushButton('test'); btn.setProperty('role','ghostButton'); btn.setProperty('state','danger'); tm.refresh_widget_style(btn); print('dark dynamic refresh ok', btn.property('role'), btn.property('state'), isinstance(app.styleSheet(), str))"
+
+默认启动接入回归：
 
     D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; import main; print('main import ok')"
-
-QApplication 启动接入 smoke：
-
-    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from src.theme import ThemeManager; app=QApplication([]); app.setStyle('Fusion'); before=app.styleSheet(); tm=ThemeManager(); tm.apply_theme(app, ThemeManager.DEFAULT_PRESET); after=app.styleSheet(); print('default preset', ThemeManager.DEFAULT_PRESET); print('before len', len(before)); print('after len', len(after)); print('stylesheet type ok', isinstance(after, str))"
-
-QSS 文件验证：
-
-    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.theme import ThemeManager; tm=ThemeManager(); qss=tm.read_qss_safe(ThemeManager.DEFAULT_PRESET); print('qss len', len(qss)); assert isinstance(qss, str)"
 
 语法检查：
 
@@ -127,10 +146,10 @@ QSS 文件验证：
 
 禁止范围检查：
 
+    git diff --name-only -- main.py
     git diff --name-only -- src/ui
     git diff --name-only -- src/utils/signals.py
     git diff --name-only -- src/utils/styles.py
-    git diff --name-only -- src/theme/dark.qss
     git diff --name-only -- src/data
     git diff --name-only -- src/repositories
     git diff --name-only -- src/services
@@ -145,17 +164,17 @@ QSS 文件验证：
 
 预期：
 
+- `main.py` 无 diff。
 - `src/ui` 无 diff。
 - `signals.py` 无 diff。
 - `styles.py` 无 diff。
-- `dark.qss` 无 diff。
 - `src/data` / `src/repositories` / `src/services` / `src/controllers` 无 diff。
 - `requirements.txt` 无 diff。
 - `schedule.db` 无 tracked diff。
 - 最终只允许：
-  - `main.py`
+  - `src/theme/light.qss`
+  - `src/theme/dark.qss`
   - 必要时 `src/theme/theme_manager.py`
-  - 必要时 `src/theme/light.qss`
   - `manage_instruction/Work_Log.md`
   - 必要时 `manage_instruction/Work_Task_Prompts.md`
 
@@ -163,17 +182,19 @@ QSS 文件验证：
 
 更新 `manage_instruction/Work_Log.md`，至少记录：
 
-- 本轮任务名称：第七轮 7-2（默认 QSS 启动接入）
+- 本轮任务名称：第七轮 7-3（动态属性命名规范与刷新验证）
 - 开工前 git 状态
 - 实际修改文件
-- 默认 skin preset 名称
-- `main.py` 接入位置
+- 动态属性命名规范：
+  - `role`
+  - `state`
+  - `variant`
+- `light.qss` 新增选择器说明
+- `dark.qss` 新增选择器说明
 - 是否修改 `ThemeManager`，如修改需说明原因
-- 是否修改 `light.qss`，如修改需说明内容和视觉风险
-- QSS 读取失败时的启动期处理策略
-- import 验证结果
-- QApplication smoke 结果
-- QSS 文件验证结果
+- 临时控件动态属性刷新验证结果
+- dark preset 动态属性 smoke 结果
+- 默认启动接入回归结果
 - py_compile 结果
 - diff 范围检查结果
 - 未完成事项
