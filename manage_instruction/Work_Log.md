@@ -18,13 +18,112 @@
 
 第六轮：Controller / Router / EventBus 协调层，已完成并归档。
 
-第七轮：Theme / QSS 接入，已完成 7-5（Theme 信号兼容与手动 Skin Preset 切换 smoke），等待顾问窗口复核与 7-6 工单。
+第七轮：Theme / QSS 接入，已完成 7-6（第七轮整体验收与归档准备），等待顾问窗口复核归档。
 
 ## 当前轮次注意事项
 
 - 第六轮已归档，历史记录见 `History_Instruction.md` 与 `History_Log.md`。
-- 7-0、7-1、7-2、7-3、7-3b、7-4、7-5 已完成，已完成信号兼容与手动 preset 切换 smoke，尚未连接真实换肤 UI。
+- 7-0、7-1、7-2、7-3、7-3b、7-4、7-5、7-6 已完成，尚未连接真实换肤 UI。
 - 第七轮后续应保持第六轮回归重点不变：路由决策、添加页来源、三连刷新、`refresh_requested` 并行通知、详情弹窗回流链路。
+
+## 2026-05-26 第七轮 7-6（第七轮整体验收与归档准备）
+
+- 本轮任务名称：第七轮 7-6（第七轮整体验收与归档准备）。
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 18]`
+  - 既有变更：`M manage_instruction/Work_Task_Prompts.md`
+  - 说明：开工前已有管理文档 diff，本轮不视为源码改动。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+
+- 7-0 到 7-5 完成摘要：
+  - 7-0：完成主题与样式债务静态审查。
+  - 7-1：完成 ThemeManager 与 Skin Preset 边界确认。
+  - 7-2：完成默认 QSS 启动接入。
+  - 7-3：完成动态属性命名规范与刷新验证。
+  - 7-3b：完成 Skin Preset 命名语义收口（`default.qss` 为默认 preset）。
+  - 7-4：完成 `src/ui/header.py` 中 `btn_sync` 单控件动态属性试点。
+  - 7-5：完成 Theme signals 兼容与手动 preset 切换 smoke。
+
+- ThemeManager preset 行为验证结果：
+  - 输出：
+    - `default default.qss`
+    - `presets ('default.qss', 'light.qss', 'dark.qss')`
+    - `resolve none default.qss`
+    - `resolve bad default.qss`
+  - 结论：
+    - `ThemeManager.DEFAULT_PRESET == 'default.qss'`。
+    - `resolve_preset(None)` 与非法值均回落到 `default.qss`。
+
+- `default.qss` canonical 默认 skin 结论：
+  - 成立。第七轮默认皮肤 preset 为 `default.qss`。
+
+- `light.qss` / `dark.qss` 兼容/test preset 结论：
+  - 成立。两者保持可读取可 apply，用于兼容/测试，不作为 light/dark mode matrix 的制度依据。
+
+- ThemeManager apply smoke 结果（offscreen）：
+  - 输出：
+    - `apply results [('default.qss', True, 1532), ('light.qss', True, 1166), ('dark.qss', True, 1031)]`
+  - 结论：`default/light/dark` 三个 preset 均可手动 apply，`app.styleSheet()` 类型与长度检查通过。
+
+- 默认启动接入验证结果：
+  - `main import ok`（offscreen）通过。
+
+- signals 兼容验证结果：
+  - 输出：`signals calls ['skin', ('theme', 'default.qss')]`
+  - 结论：
+    - `skin_changed` 无参 emit 正常。
+    - `theme_changed(str)` emit 正常。
+
+- 7-4 `btn_sync` 试点回归结果：
+  - 输出：
+    - `sync role windowControl`
+    - `sync variant toolbar`
+    - `sync state normal`
+  - 结论：试点动态属性保持不变，回归通过。
+
+- py_compile 结果：
+  - 命令：`python -m py_compile main.py src/theme/theme_manager.py src/theme/__init__.py src/utils/signals.py src/ui/header.py`
+  - 结果：通过。
+
+- diff 范围检查结果：
+  - `git diff --name-only -- src`：无输出。
+  - `git diff --name-only -- main.py`：无输出。
+  - `git diff --name-only -- requirements.txt`：无输出。
+  - `git diff --name-only -- schedule.db`：无输出。
+  - 细分检查：
+    - `src/theme`：无输出。
+    - `src/ui`：无输出。
+    - `src/utils`：无输出。
+    - `src/data`：无输出。
+    - `src/repositories`：无输出。
+    - `src/services`：无输出。
+    - `src/controllers`：无输出。
+  - 总 diff：
+    - `manage_instruction/Work_Task_Prompts.md`（开工前既有）
+    - `manage_instruction/Work_Log.md`（本轮）
+
+- 第七轮未完成事项：
+  - 未实现真实换肤 UI 入口与运行期切换链路（按合同留待后续单独工单）。
+  - `theme_color/设置字体` 闭环未纳入第七轮范围，继续留待后续功能轮。
+
+- 第七轮风险或疑点：
+  - 目前 preset 切换仅完成手动 smoke，尚未接入真实 UI 切换入口，后续接入需新增最小回归面。
+  - 大体量页面样式债务（`todo_board.py/week_window.py/month_window.py/add_view.py`）仍在，后续应小批次推进，避免一次性迁移。
+
+- 是否建议归档第七轮：
+  - 建议归档。第七轮目标范围内验收项均通过，且禁止范围无源码 diff。
+
+- 是否建议进入第八轮 UI 拆分规划：
+  - 建议进入。
+  - 第八轮建议继续基于 `default.qss / skin preset` 和 `role/state/variant` 规范，采用小工单策略，不一次性拆大 UI 文件。
+
+- 特别记录：
+  - 第七轮没有实现真实换肤 UI。
+  - 第七轮没有建立 light/dark mode matrix。
+  - 第七轮只做了一个真实控件试点：`src/ui/header.py` 的 `btn_sync`。
+  - 第八轮应继续保持小工单策略，不应一次性拆大 UI 文件。
+  - `theme_color/设置字体` 功能闭环继续留待后续功能轮。
 
 ## 2026-05-26 第七轮 7-0（主题与样式债务静态审查）
 
