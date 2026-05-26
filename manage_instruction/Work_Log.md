@@ -20,12 +20,12 @@
 
 第七轮：Theme / QSS 接入与样式债务控制，已完成并归档。
 
-第八轮：UI 拆分与样式债务整理，已完成 8-0（静态审查与职责地图），等待顾问窗口复核后进入 8-1。
+第八轮：UI 拆分与样式债务整理，已完成 8-1（UI 包目录骨架与导入边界准备），等待顾问窗口复核。
 
 ## 当前轮次注意事项
 
 - 第七轮归档内容见 `History_Instruction.md` 与 `History_Log.md`。
-- 第八轮阶段合同已发布，当前已完成 8-0，只读基线已建立。
+- 第八轮阶段合同已发布，当前已完成 8-0、8-1，保持小工单推进。
 - 第八轮规划应保持小工单策略，避免一次性拆大 UI 文件。
 - 第七轮遗留约束继续有效：基于 `default.qss / skin preset`，不建立 light/dark mode matrix。
 
@@ -202,3 +202,72 @@
   - 不建立 light/dark mode matrix。
   - 不把真实换肤 UI、`theme_color/设置字体` 功能闭环并入本轮。
   - 不直接拆 `todo_board.py` 或 `week_window.py`。
+
+## 2026-05-26 第八轮 8-1（UI 包目录骨架与导入边界准备）
+
+- 本轮任务名称：第八轮 8-1（UI 包目录骨架与导入边界准备）。
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 23]`
+  - 说明：开工前无源码 diff（仅分支 ahead 状态），符合目录骨架工单预期。
+- 实际修改文件：
+  - `src/ui/common/__init__.py`（新增）
+  - `src/ui/views/__init__.py`（新增）
+  - `src/ui/dialogs/__init__.py`（新增）
+  - `src/ui/popups/__init__.py`（新增）
+  - `src/ui/utils/__init__.py`（新增）
+  - `manage_instruction/Work_Log.md`
+
+- 新增目录与 `__init__.py` 清单：
+  - `src/ui/common/`
+  - `src/ui/views/`
+  - `src/ui/dialogs/`
+  - `src/ui/popups/`
+  - `src/ui/utils/`
+  - 每个目录均新增空 `__init__.py`，不含任何副作用代码。
+
+- import 验证结果：
+  - 命令：
+    - `python -c "import src.ui.common, src.ui.views, src.ui.dialogs, src.ui.popups, src.ui.utils; from src.ui.components import SharedMoreMenu; print('ui package skeleton import ok')"`
+  - 结果：
+    - `ui package skeleton import ok`
+  - 结论：
+    - 新包可 import；
+    - 未创建 `src/ui/components/`，未遮蔽既有 `src/ui/components.py` 导入链路。
+
+- py_compile 结果：
+  - 命令：
+    - `python -m py_compile src/ui/common/__init__.py src/ui/views/__init__.py src/ui/dialogs/__init__.py src/ui/popups/__init__.py src/ui/utils/__init__.py`
+  - 结果：通过。
+
+- 无副作用说明：
+  - 未触发 QApplication。
+  - 未连接 signal。
+  - 未迁移任何 UI 类。
+  - 未替换任何调用方 import。
+
+- diff 范围检查结果：
+  - `git diff --name-only -- src/theme`：无输出。
+  - `git diff --name-only -- src/data`：无输出。
+  - `git diff --name-only -- src/repositories`：无输出。
+  - `git diff --name-only -- src/services`：无输出。
+  - `git diff --name-only -- src/controllers`：无输出。
+  - `git diff --name-only -- src/utils/signals.py`：无输出。
+  - `git diff --name-only -- src/utils/styles.py`：无输出。
+  - `git diff --name-only -- main.py`：无输出。
+  - `git diff --name-only -- requirements.txt`：无输出。
+  - `git diff --name-only -- schedule.db`：无输出。
+  - `git status --short --branch`：
+    - `## main...temp/main [ahead 23]`
+    - `?? src/ui/common/`
+    - `?? src/ui/dialogs/`
+    - `?? src/ui/popups/`
+    - `?? src/ui/utils/`
+    - `?? src/ui/views/`
+  - 说明：
+    - 本轮新增文件为未跟踪状态，`git diff --name-only` 对未跟踪文件不显示，最终以 `git status` 为准。
+
+- 未完成事项：
+  - 待顾问窗口复核后进入 8-2（建议先 8-2a 只读基线，再 8-2b 单点替换）。
+
+- 风险或疑点：
+  - 当前仅完成包骨架，尚未处理 `components.py` 与 `todo_board.py` 的导入耦合；后续拆分需继续单边界推进。
