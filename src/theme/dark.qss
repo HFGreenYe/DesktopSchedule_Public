@@ -1,6 +1,8 @@
-/* Dark preset baseline.
+/* Legacy/test preset (historical name: dark).
+   This file is kept for compatibility/testing and does NOT represent
+   a required dark variant for every skin preset.
    Dynamic-property-only rules for round 7-3 verification.
-   Naming conventions are aligned with light.qss:
+   Naming conventions are aligned with default/light:
    role/state/variant.
 */
 

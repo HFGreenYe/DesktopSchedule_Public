@@ -1,7 +1,7 @@
-/* Legacy compatibility preset (historical name: light).
-   This file is kept for backward compatibility and smoke checks.
-   It does NOT imply a per-skin light/dark mode matrix.
-   Dynamic-property-only rules for round 7-3 verification.
+/* Default skin preset baseline.
+   This is the canonical default preset for skin-based theming.
+   It does NOT imply a light/dark mode matrix.
+   Dynamic-property-only rules for round 7-3/7-3b verification.
    Naming conventions:
    - role: component semantic role (primaryButton/ghostButton/panel/input)
    - state: semantic state (normal/active/warning/danger)

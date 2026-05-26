@@ -7,8 +7,8 @@ from PyQt6.QtWidgets import QApplication, QWidget
 
 class ThemeManager:
     """Basic theme helper for reading and applying QSS files."""
-    DEFAULT_PRESET = "light.qss"
-    SUPPORTED_PRESETS = ("light.qss", "dark.qss")
+    DEFAULT_PRESET = "default.qss"
+    SUPPORTED_PRESETS = ("default.qss", "light.qss", "dark.qss")
 
     def __init__(self, theme_dir: str | Path | None = None) -> None:
         default_dir = Path(__file__).resolve().parent

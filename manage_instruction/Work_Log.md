@@ -18,12 +18,12 @@
 
 第六轮：Controller / Router / EventBus 协调层，已完成并归档。
 
-第七轮：Theme / QSS 接入，已完成 7-3（动态属性命名规范与刷新验证），等待顾问窗口复核与 7-4 工单。
+第七轮：Theme / QSS 接入，已完成 7-3b（Skin Preset 命名语义收口），等待顾问窗口复核与 7-4 工单。
 
 ## 当前轮次注意事项
 
 - 第六轮已归档，历史记录见 `History_Instruction.md` 与 `History_Log.md`。
-- 7-0、7-1、7-2、7-3 已完成，动态属性规范与刷新闭环已验证，尚未进入真实业务控件试点。
+- 7-0、7-1、7-2、7-3、7-3b 已完成，默认 preset 语义已收口为 skin preset，尚未进入真实业务控件试点。
 - 第七轮后续应保持第六轮回归重点不变：路由决策、添加页来源、三连刷新、`refresh_requested` 并行通知、详情弹窗回流链路。
 
 ## 2026-05-26 第七轮 7-0（主题与样式债务静态审查）
@@ -408,3 +408,88 @@
 
 - 风险或疑点：
   - 当前 `*[state=...]` 规则在未来大范围使用时可能与个别控件已有边框/前景色叠加；本轮仅作为命名规范与闭环验证，未接入真实业务 UI。
+
+## 2026-05-26 第七轮 7-3b（Skin Preset 命名语义收口）
+
+- 本轮任务名称：第七轮 7-3b（Skin Preset 命名语义收口）。
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 15]`
+  - 既有变更：`M manage_instruction/Work_Task_Prompts.md`
+  - 说明：开工前已有管理文档 diff，本轮不视为源码改动。
+- 实际修改文件：
+  - `src/theme/theme_manager.py`
+  - `src/theme/default.qss`（新增）
+  - `src/theme/light.qss`
+  - `src/theme/dark.qss`
+  - `manage_instruction/Work_Log.md`
+
+- 最终默认 preset 名称：
+  - `default.qss`
+
+- `SUPPORTED_PRESETS` 清单：
+  - `("default.qss", "light.qss", "dark.qss")`
+
+- `light.qss` / `dark.qss` 兼容定位说明：
+  - `light.qss`：legacy compatibility preset（历史命名保留）。
+  - `dark.qss`：legacy/test preset（兼容/测试用途），不代表每个皮肤都需要暗色版本。
+  - 两者均保留读取能力，不删除，避免破坏历史 smoke 与兼容路径。
+
+- 是否新增 `default.qss`：
+  - 是。新增 `src/theme/default.qss` 作为 canonical 默认皮肤 preset。
+  - 内容采用与 7-3 同步的动态属性选择器语义（`role/state/variant`），低侵入，不建立全局样式 matrix。
+
+- 是否修改 `main.py`：
+  - 否。`main.py` 已通过 `ThemeManager.DEFAULT_PRESET` 间接读取默认 preset，不需要硬编码文件名，兼容 7-3b 收口。
+
+- `resolve_preset(None)` 与非法值回落结果：
+  - `resolve_preset(None) -> "default.qss"`
+  - `resolve_preset("bad.qss") -> "default.qss"`
+
+- 默认 QSS 读取验证结果：
+  - `default qss len 1136`
+  - 类型 `str`，长度大于 0，验证通过。
+
+- 兼容 preset 读取验证结果：
+  - `light len 1166`
+  - `dark len 1031`
+  - 两者均可安全读取，类型为 `str`。
+
+- 动态属性刷新回归结果：
+  - offscreen 临时控件验证通过：
+    - `default skin dynamic refresh ok primaryButton warning panel compact`
+
+- 默认启动接入回归结果：
+  - `main import ok`（offscreen）通过。
+
+- py_compile 结果：
+  - `python -m py_compile main.py src/theme/theme_manager.py src/theme/__init__.py` 通过。
+
+- diff 范围检查结果：
+  - `git diff --name-only -- src/ui`：无输出。
+  - `git diff --name-only -- src/utils/signals.py`：无输出。
+  - `git diff --name-only -- src/utils/styles.py`：无输出。
+  - `git diff --name-only -- src/data`：无输出。
+  - `git diff --name-only -- src/repositories`：无输出。
+  - `git diff --name-only -- src/services`：无输出。
+  - `git diff --name-only -- src/controllers`：无输出。
+  - `git diff --name-only -- requirements.txt`：无输出。
+  - `git diff --name-only -- schedule.db`：无输出。
+  - 当前总 diff：
+    - `src/theme/theme_manager.py`
+    - `src/theme/default.qss`
+    - `src/theme/light.qss`
+    - `src/theme/dark.qss`
+    - `manage_instruction/Work_Log.md`
+    - `manage_instruction/Work_Task_Prompts.md`（开工前既有）
+
+- 特别记录（语义收口结论）：
+  - 第七轮采用 Skin Preset 路线。
+  - 本轮不建立 light/dark mode matrix。
+  - `dark.qss` 不代表每个皮肤都需要暗色版本。
+  - 后续 7-4 控件试点应基于默认 skin preset，而不是基于 light/dark 模式切换。
+
+- 未完成事项：
+  - 7-4 仅选择一个低风险真实业务控件做试点，保持改动单点可回滚。
+
+- 风险或疑点：
+  - 当前 `default/light/dark` 三个 preset 规则仍有重复，后续若继续扩展 preset 需要避免重复维护（建议后续再考虑抽取共用片段，但不在本轮执行）。
