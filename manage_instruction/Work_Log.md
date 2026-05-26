@@ -555,3 +555,244 @@
   - 本轮不修改 `assets`。
   - 本轮不处理 `QIcon` 返回路径。
   - 本轮不处理 `todo_board.py` / `schedule_detail_pop.py` / `time_picker*.py`。
+
+## 2026-05-26 第八轮 8-3a（公共 tooltip / toast 边界静态定位）
+
+- 本轮任务名称：第八轮 8-3a（公共 tooltip / toast 边界静态定位）。
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 26]`
+  - 既有变更：`M manage_instruction/Work_Task_Prompts.md`
+  - 说明：开工前已有管理文档 diff，本轮不视为源码改动。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+
+- 本轮执行约束落实：
+  - 本轮只读审查，不改源码。
+  - 未创建 `src/ui/common/tooltip.py`。
+  - 未创建 `src/ui/common/toast.py`。
+  - 未替换任何调用方。
+  - 未修改 QSS、icon loader、assets。
+  - 未清理 `header.py` import 残留（按工单要求保留）。
+
+- tooltip 搜索命令与结果摘要：
+  - 命令：
+    - `rg -n "CustomToolTip|ToolTipFilter|CountdownToolTip|CountdownToolTipFilter|QToolTip|tooltip|toolTip|setToolTip|eventFilter|Enter|Leave|Hover" src/ui`
+  - 结果摘要：
+    - `CustomToolTip` 定义分布在：
+      - `src/ui/header.py`
+      - `src/ui/add_view.py`
+      - `src/ui/add_view_week.py`
+      - `src/ui/list_picker.py`
+      - `src/ui/alarm_picker.py`
+      - `src/ui/alarm_picker_week.py`
+    - `ToolTipFilter` 定义分布在：
+      - `src/ui/header.py`
+      - `src/ui/add_view.py`
+      - `src/ui/add_view_week.py`
+    - `CountdownToolTip` / `CountdownToolTipFilter` 定义在：
+      - `src/ui/components.py`
+    - `ToolTipFilter` 调用分布在：
+      - `header.py`（窗口控制/天气）
+      - `week_window.py`（天气、按钮、日期）
+      - `month_window.py`（天气、挂起按钮）
+      - `todo_board.py::_apply_custom_tooltip(...)`（借用 header 的 ToolTipFilter）
+    - Qt 原生 `setToolTip(...)` 分布在：
+      - `schedule_detail_pop.py`（字段说明）
+      - `suspend_window*.py`
+      - `header.py`（日期、天气）
+  - 备注：
+    - `src/ui/hanging_widget.py` 不存在（`Get-ChildItem src/ui` 未发现该文件），本轮按实际文件集审查。
+
+- toast 搜索命令与结果摘要：
+  - 命令：
+    - `rg -n "show_toast|toast|Toast|toast_label|toast_widget|QTimer|singleShot|hide\(|close\(|临时|提示|成功|失败" src/ui`
+  - 结果摘要：
+    - 明确 `show_toast` 定义分布在：
+      - `src/ui/main_window.py`
+      - `src/ui/week_window.py`
+      - `src/ui/month_window.py`
+      - `src/ui/todo_board.py`
+    - 临时提示（非 `show_toast`）分布在：
+      - `src/ui/list_picker.py::_show_tooltip(...)`
+      - `src/ui/add_view.py` / `src/ui/add_view_week.py`（校验失败气泡）
+      - `src/ui/alarm_picker.py` / `src/ui/alarm_picker_week.py`（参数校验气泡）
+    - `dashboard.py`、`todo.py` 未定义本地 `show_toast`，主要依赖主窗口或其它视图回流。
+
+- tooltip 职责地图：
+  - `src/ui/header.py::CustomToolTip + ToolTipFilter`
+    - 类型：自定义 tooltip widget + eventFilter。
+    - 输入：`text`。
+    - parent 依赖：有（filter 安装到目标 widget）。
+    - timer：`QTimer(singleShot, 400ms)` 控制悬停触发。
+    - 显示位置：`QCursor.pos()`。
+    - 关闭行为：`Leave/MousePress/Hide/FocusOut` 时 `_close_tooltip()`。
+    - 复用情况：被 `todo_board.py` 间接复用，被 `week/month` 直接引用 `ToolTipFilter`。
+    - 风险等级：中（跨文件引用已存在，变更会影响多个窗口）。
+
+  - `src/ui/components.py::CountdownToolTip + CountdownToolTipFilter`
+    - 类型：倒计时 tooltip + eventFilter。
+    - 输入：`schedule_data`，内部解析 `start_time/end_time`。
+    - parent 依赖：中（绑定到卡片 widget）。
+    - timer：
+      - filter 悬停延迟 400ms；
+      - tooltip 内部每秒更新倒计时。
+    - 显示位置：`QCursor.pos() + QPoint(15, 15)`。
+    - 关闭行为：离开/点击/隐藏/失焦 -> stop + close + deleteLater。
+    - 复用情况：`dashboard.py`、`week_window.py` schedule card 复用。
+    - 风险等级：高（涉及倒计时逻辑与生命周期，不宜首轮抽取）。
+
+  - `src/ui/add_view.py` / `src/ui/add_view_week.py::CustomToolTip + ToolTipFilter`
+    - 类型：局部重复实现。
+    - 输入：`text`，`CustomToolTip` 支持 `border_color`。
+    - parent 依赖：有。
+    - timer：
+      - filter 悬停 400ms；
+      - tooltip 自动关闭 500ms。
+    - 显示位置：`QCursor.pos() + QPoint(10, 10)`；校验场景还会指定按钮附近偏移。
+    - 关闭行为：同 header 版本。
+    - 复用情况：仅文件内使用，和 header 版本重复度高。
+    - 风险等级：中（与添加页编辑流程耦合，宜单点替换）。
+
+  - `src/ui/list_picker.py::CustomToolTip + _show_tooltip(...)`
+    - 类型：局部错误提示气泡（非 eventFilter 模式）。
+    - 输入：`text` + `is_error` 控制边框颜色。
+    - parent 依赖：有（以当前 picker 为 parent）。
+    - timer：tooltip 内部 `singleShot(2500ms)` 自动关闭。
+    - 显示位置：基于窗口几何中心计算。
+    - 关闭行为：到时 close。
+    - 复用情况：仅 list picker 删除/新增失败提示。
+    - 风险等级：低（边界独立，适合后续单点提取）。
+
+  - `src/ui/alarm_picker.py` / `src/ui/alarm_picker_week.py::CustomToolTip`
+    - 类型：局部校验提示气泡。
+    - 输入：`text`（固定红色边框）。
+    - parent 依赖：有。
+    - timer：`singleShot(2000ms)`。
+    - 显示位置：窗口中心。
+    - 关闭行为：到时 close。
+    - 复用情况：两文件重复实现。
+    - 风险等级：低到中（纯提示，但涉及两个 picker 文件）。
+
+  - `schedule_detail_pop.py` / `suspend_window*.py` / `header.py` 的 `setToolTip`
+    - 类型：Qt 原生 tooltip 文案。
+    - 依赖：无自定义 timer、无 eventFilter。
+    - 风险等级：低（本身不需要抽取，属于静态说明文案）。
+
+- toast 职责地图：
+  - `src/ui/main_window.py::show_toast(message)`
+    - 创建：`toast_label = QLabel(message, self)`。
+    - 显示位置：主窗口居中。
+    - 持续时间：500ms（最短）。
+    - timer 生命周期：`QTimer.singleShot(500, self.toast_label.close)`。
+    - parent 依赖：`self`（MainWindow）。
+    - 文案来源：视图切换提示、日期限制提示等。
+    - 业务影响：弱（仅展示层）。
+    - 风险等级：低（候选单点提取）。
+
+  - `src/ui/month_window.py::show_toast(message)`
+    - 创建：`toast_label = QLabel(message, self)`。
+    - 显示位置：MonthWindow 居中。
+    - 持续时间：1500ms。
+    - timer 生命周期：`singleShot(1500)`。
+    - parent 依赖：`self`。
+    - 文案来源：添加成功/日期限制等。
+    - 业务影响：弱。
+    - 风险等级：低（候选单点提取）。
+
+  - `src/ui/todo_board.py::show_toast(message)`
+    - 创建：`toast_label = QLabel(message, self)`。
+    - 显示位置：看板窗口居中。
+    - 持续时间：1500ms。
+    - timer 生命周期：`singleShot(1500)`。
+    - parent 依赖：`self`（复杂状态机窗口）。
+    - 文案来源：新增成功、删除反馈、拦截提醒。
+    - 业务影响：中（和 folder/stick 状态流频繁联动）。
+    - 风险等级：中高（不建议首轮抽取）。
+
+  - `src/ui/week_window.py::show_toast(message)`
+    - 创建：`toast_widget(QWidget)` + icon + text 组合。
+    - 显示位置：周视图窗口居中。
+    - 持续时间：1500ms。
+    - timer 生命周期：`singleShot(1500)`。
+    - parent 依赖：`self`。
+    - 文案来源：拖拽拦截、新增/校验提示。
+    - 业务影响：中（含图标与编辑模式背景耦合）。
+    - 风险等级：中高（不建议首轮抽取）。
+
+  - `src/ui/list_picker.py::_show_tooltip(...)`（提示条替代）
+    - 虽名称不是 toast，但承担局部错误反馈。
+    - 风险等级：低（边界独立）。
+
+- parent / timer / eventFilter / 显示位置 / 关闭行为分析：
+  - parent 归属：
+    - tooltip/toast 基本都绑定当前窗口/控件，跨窗口抽取时需保留 parent 语义。
+  - timer 行为：
+    - tooltip 悬停延迟主流为 400ms；
+    - tooltip 自动关闭时长分裂为 500ms / 2000ms / 2500ms；
+    - toast 自动关闭分裂为 500ms（main）与 1500ms（week/month/todo_board）。
+  - eventFilter 行为：
+    - `header/add_view/add_view_week` 的 `ToolTipFilter` 返回值策略相似，但实现分散。
+    - `CountdownToolTipFilter` 明确不吞事件（return False），属于特殊行为，不能与普通 tooltip filter 混抽。
+  - 显示位置：
+    - cursor 附近（header/add_view*）
+    - 窗口中心（list_picker、alarm_picker*、toast）
+    - cursor 偏移 + 动态倒计时（components）
+  - 关闭行为：
+    - `close` + 有些路径 `deleteLater`（components）
+    - 一般 tooltip 仅 `close`，无 deleteLater。
+
+- 低风险候选：
+  - 候选 A：`list_picker.py::_show_tooltip` 相关 `CustomToolTip` 单点提取（局部、无状态机、无写库耦合）。
+  - 候选 B：`main_window.py::show_toast` 单点 helper 化（最短路径、影响面可控）。
+  - 候选 C：`alarm_picker.py` 与 `alarm_picker_week.py` 的 `CustomToolTip`（二选一先单点，不要双替换）。
+
+- 中风险候选：
+  - `add_view.py` / `add_view_week.py` 的 `ToolTipFilter` 统一（需确保编辑流程与校验提示位置不变）。
+  - `month_window.py::show_toast`（可抽，但与 inline add 回流关联，建议先基线）。
+
+- 高风险暂缓项：
+  - `components.py::CountdownToolTipFilter`（倒计时 + 生命周期 + 事件吞吐策略）。
+  - `week_window.py::show_toast`（图标注入 + 模式背景联动）。
+  - `todo_board.py::show_toast`（复杂状态机窗口，联动点多）。
+  - 跨文件统一所有 `ToolTipFilter` / `CustomToolTip`（一次性改动面过大）。
+
+- 是否建议进入 8-3b：
+  - 建议进入，但必须维持“单点提取、单调用方替换”策略。
+
+- 8-3b 建议的唯一单点提取目标：
+  - 建议优先：`src/ui/main_window.py::show_toast` 提取为一个最小 toast helper（只替换 MainWindow 一处）。
+  - 原因：业务耦合最低、无 eventFilter、无倒计时业务语义、回归成本最低。
+  - 明确暂缓：`week_window.py` 与 `todo_board.py` toast，`components.py` 倒计时 tooltip。
+
+- 验证结果：
+  - `Test-Path src\ui\common\tooltip.py`：`False`
+  - `Test-Path src\ui\common\toast.py`：`False`
+  - UI 包骨架 import：
+    - `ui package skeleton import ok`
+  - icon loader import 回归：
+    - `icon loader import ok <function load_colored_svg_pixmap ...>`
+
+- diff 范围检查结果：
+  - `git diff --name-only -- src`：无输出。
+  - `git diff --name-only -- assets`：无输出。
+  - `git diff --name-only -- main.py`：无输出。
+  - `git diff --name-only -- requirements.txt`：无输出。
+  - `git diff --name-only -- schedule.db`：无输出。
+  - 当前总 diff：
+    - `manage_instruction/Work_Task_Prompts.md`（开工前既有）
+    - `manage_instruction/Work_Log.md`（本轮）
+
+- 未完成事项：
+  - 8-3b 工单需锁定单点目标和替换边界（建议只碰 `main_window.py::show_toast`）。
+
+- 风险或疑点：
+  - `hanging_widget.py` 在当前仓库不存在，若后续提示词继续包含该文件，应先确认是否为历史文件名。
+  - `ToolTipFilter` 在 `header/add_view/add_view_week` 三处存在细节差异，8-3b 不建议同时统一三处。
+
+- 特别记录：
+  - 本轮只读审查，不改源码。
+  - 本轮不创建 `tooltip.py` / `toast.py`。
+  - 本轮不替换任何调用方。
+  - 本轮不修改 QSS。
+  - 本轮不处理 icon loader 后续统一。
+  - 本轮不清理 8-2b 遗留的 `header.py` unused import，若需处理必须另开小工单。
