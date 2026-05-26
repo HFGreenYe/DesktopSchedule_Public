@@ -20,12 +20,12 @@
 
 第七轮：Theme / QSS 接入与样式债务控制，已完成并归档。
 
-第八轮：UI 拆分与样式债务整理，已完成 8-1（UI 包目录骨架与导入边界准备），等待顾问窗口复核。
+第八轮：UI 拆分与样式债务整理，已完成 8-2a（公共 icon loader 静态定位与提取基线），等待顾问窗口复核后进入 8-2b。
 
 ## 当前轮次注意事项
 
 - 第七轮归档内容见 `History_Instruction.md` 与 `History_Log.md`。
-- 第八轮阶段合同已发布，当前已完成 8-0、8-1，保持小工单推进。
+- 第八轮阶段合同已发布，当前已完成 8-0、8-1、8-2a，保持小工单推进。
 - 第八轮规划应保持小工单策略，避免一次性拆大 UI 文件。
 - 第七轮遗留约束继续有效：基于 `default.qss / skin preset`，不建立 light/dark mode matrix。
 
@@ -271,3 +271,187 @@
 
 - 风险或疑点：
   - 当前仅完成包骨架，尚未处理 `components.py` 与 `todo_board.py` 的导入耦合；后续拆分需继续单边界推进。
+
+## 2026-05-26 第八轮 8-2a（公共 icon loader 静态定位与提取基线）
+
+- 本轮任务名称：第八轮 8-2a（公共 icon loader 静态定位与提取基线）。
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 24]`
+  - 既有变更：`M manage_instruction/Work_Task_Prompts.md`
+  - 说明：开工前已有管理文档 diff，本轮不视为源码改动。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+
+- 本轮执行约束落实：
+  - 只读审查，不改源码。
+  - 未创建 `src/ui/utils/icon_loader.py`。
+  - 未替换任何调用方。
+  - 未修改 `assets/`。
+
+- 静态搜索命令与关键结果：
+  - `rg -n "get_colored_icon|_get_icon|_load_colored_svg|QSvgRenderer|QPixmap|QIcon|setIcon|setPixmap|assets/icons|assets/weather" src/ui`
+  - `rg -n "def get_colored_icon|def _get_icon|def _load_colored_svg" src/ui`
+  - `rg -n "...(重点文件)..." src/ui/components.py src/ui/header.py src/ui/todo_board.py src/ui/schedule_detail_pop.py src/ui/time_picker.py src/ui/time_picker_week.py src/ui/week_window.py src/ui/month_window.py`
+  - `Get-ChildItem -Path src\\ui\\utils -Force`
+  - 结果摘要：
+    - 明确命中函数 11 处：
+      - `components.py::get_colored_icon`
+      - `todo_board.py::get_colored_icon`
+      - `todo_board.py::TodoBoardWindow._get_icon`
+      - `schedule_detail_pop.py::_get_icon`
+      - `header.py::_load_colored_svg`
+      - `week_window.py::_load_colored_svg`
+      - `month_window.py::_load_colored_svg`
+      - `time_picker.py::_get_colored_icon`
+      - `time_picker_week.py::_get_colored_icon`
+      - `add_view.py::_load_colored_icon`
+      - `add_view_week.py::_load_colored_icon`
+    - `src/ui/utils` 当前仅 `__init__.py`，尚无 `icon_loader.py`（符合本轮约束）。
+
+- icon loader 命中点职责地图（按可提取价值排序）：
+  - `src/ui/components.py::get_colored_icon(icon_name, color, target_size=12)`
+    - 输入：图标名（拼接 `assets/icons/`）、颜色、目标尺寸
+    - 输出：`QPixmap`
+    - 依赖：`QPainter + QSvgRenderer + QImage`
+    - assets：`assets/icons/*`
+    - fallback：文件不存在或 SVG 无效返回空 `QPixmap()`
+    - QWidget/self 依赖：无（纯函数）
+    - 抽取适配：高（最适合作为基础 pure helper）
+    - 风险等级：低
+
+  - `src/ui/todo_board.py::get_colored_icon(icon_name, color, target_size=12)`
+    - 输入/输出/逻辑与 `components.py::get_colored_icon` 基本同构
+    - fallback：同上（空 `QPixmap`)
+    - QWidget/self 依赖：无（纯函数）
+    - 抽取适配：高（重复实现，适合后续复用 helper）
+    - 风险等级：中（文件本体为高耦合状态机，不宜本轮动）
+
+  - `src/ui/todo_board.py::TodoBoardWindow._get_icon(icon_name, color, target_size=16)`
+    - 输入：图标名、颜色、尺寸
+    - 输出：`QPixmap`
+    - 特点：同时支持 SVG 与位图（`QImage` 分支），并做居中缩放
+    - fallback：路径不存在/无效图返回空 `QPixmap`
+    - QWidget/self 依赖：有（成员方法，虽不直接用状态，但在高耦合主类内）
+    - 抽取适配：中（能力更全，但迁移风险高）
+    - 风险等级：高（暂缓）
+
+  - `src/ui/schedule_detail_pop.py::_get_icon(icon_name, color, target_size=16)`
+    - 输入：图标名、颜色、尺寸
+    - 输出：`QPixmap`
+    - 特点：与 `TodoBoardWindow._get_icon` 近似（SVG+位图双分支）
+    - fallback：路径不存在/无效图返回空 `QPixmap`
+    - QWidget/self 依赖：成员方法（位于复杂弹窗）
+    - 抽取适配：中
+    - 风险等级：高（涉及详情弹窗复杂行为，暂缓）
+
+  - `src/ui/header.py::_load_colored_svg(icon_path, color_hex, width, height)`
+    - 输入：完整 SVG 路径、颜色、宽高
+    - 输出：`QPixmap`
+    - 特点：使用 `self.devicePixelRatio()` 渲染高清图，适配 `assets/icons` 与 `assets/weather`
+    - fallback：`renderer` 无效返回空 `QPixmap`
+    - QWidget/self 依赖：有（DPR 读取依赖 widget）
+    - 抽取适配：中（可转为 helper(path,color,w,h,dpr)）
+    - 风险等级：中（可做单点替换候选）
+
+  - `src/ui/week_window.py::_load_colored_svg(icon_path, color_hex, width, height)`
+    - 与 `header.py` 基本同构
+    - 用途：天气图标着色
+    - QWidget/self 依赖：有（DPR）
+    - 抽取适配：中
+    - 风险等级：中高（`week_window.py` 主流程复杂，暂不作为首替换点）
+
+  - `src/ui/month_window.py::_load_colored_svg(icon_path, color_hex, width, height)`
+    - 与 `header.py`/`week_window.py` 同构
+    - 用途：天气图标着色
+    - QWidget/self 依赖：有（DPR）
+    - 抽取适配：中
+    - 风险等级：中高（`month_window.py` 视图逻辑较重，暂不首替换）
+
+  - `src/ui/time_picker.py::_get_colored_icon(icon_path, color_hex)` 与 `src/ui/time_picker_week.py::_get_colored_icon(icon_path, color_hex)`
+    - 输入：完整路径 + 颜色
+    - 输出：`QIcon`（非 `QPixmap`）
+    - 特点：固定 64x64 画布，主要服务日历上下月按钮
+    - fallback：无显式文件/renderer 无效检查（依赖渲染结果）
+    - QWidget/self 依赖：成员方法
+    - 抽取适配：中低（返回类型不同，且存在两文件并行）
+    - 风险等级：中高（建议暂缓）
+
+  - `src/ui/add_view.py::_load_colored_icon(name, color_hex, target_size=18)` 与 `src/ui/add_view_week.py::_load_colored_icon(name, color_hex, target_size=18)`
+    - 输入：图标名、颜色、目标尺寸
+    - 输出：`QPixmap`
+    - 特点：与 `components.py::get_colored_icon` 逻辑高度同构，使用 `assets/icons/{name}`、`QSvgRenderer`、4x 超采样和 `CompositionMode_SourceIn` 染色
+    - fallback：renderer 无效返回空 `QPixmap()`；未显式先 `os.path.exists`
+    - QWidget/self 依赖：成员方法，但逻辑本身不依赖实例状态
+    - 抽取适配：中（重复度高，但处在添加页保存/校验 UI 文件内，首轮不建议替换）
+    - 风险等级：中（建议在 add view 行为基线后再处理）
+
+- 重复逻辑对比（输入/输出/颜色/尺寸/fallback/依赖）：
+  - 输入形态：
+    - A 类（icon_name）：`components.py`、`todo_board.py`、`schedule_detail_pop.py`
+    - B 类（icon_path）：`header/week/month/time_picker/time_picker_week`
+    - C 类（name + member helper）：`add_view/add_view_week::_load_colored_icon`
+  - 输出类型：
+    - `QPixmap`：A 类 + `header/week/month`
+    - `QIcon`：`time_picker*::_get_colored_icon`
+  - 颜色处理：
+    - 全部使用 `CompositionMode_SourceIn + fillRect` 染色
+    - 颜色入参有 `str` 与 `QColor` 双态
+  - 尺寸处理：
+    - `components.py` 与 `todo_board/schedule_detail` 使用 `scale_ratio=4.0` 超采样
+    - `header/week/month` 用 widget DPR 计算 pixel size
+    - `time_picker*` 固定 64x64
+  - fallback 行为：
+    - `components.py`、`todo_board*`、`schedule_detail_pop`、`header/week/month`、`add_view/add_view_week`：存在空 `QPixmap` fallback
+    - `time_picker*`：缺少显式 fallback（相对风险更高）
+  - QWidget/self 依赖：
+    - 纯函数：`components.py::get_colored_icon`、`todo_board.py::get_colored_icon`
+    - 成员方法：其余均依赖类上下文（至少绑定在类中）
+
+- 低风险提取候选：
+  - 候选 1（推荐）：以 `components.py::get_colored_icon` 作为首个抽取基线（纯函数、低耦合、fallback 清晰）。
+  - 候选 2（可选）：`header.py::_load_colored_svg` 单点替换（但需 helper 支持 path+dpr 参数）。
+
+- 中风险候选：
+  - `week_window.py::_load_colored_svg`
+  - `month_window.py::_load_colored_svg`
+  - `add_view.py::_load_colored_icon`
+  - `add_view_week.py::_load_colored_icon`
+  - 原因：代码同构但宿主窗口较重，回归面大于 header 单点。
+
+- 高风险暂缓项：
+  - `todo_board.py::_get_icon`
+  - `schedule_detail_pop.py::_get_icon`
+  - `time_picker.py/_week.py::_get_colored_icon`
+  - 原因：分别位于高耦合状态机/复杂弹窗/返回类型差异路径。
+
+- 是否建议执行 8-2b：
+  - 建议执行，但必须遵守“只提取一个 helper + 只替换一个调用点”。
+
+- 8-2b 建议的唯一替换调用点：
+  - 建议：`header.py::_load_colored_svg`（单文件、无写库、无状态机、回归面最小）。
+  - 抽取来源建议：以 `components.py::get_colored_icon` 的染色流程为核心，扩展为 path 版 helper。
+  - 暂不建议首轮替换 `todo_board.py` / `schedule_detail_pop.py` / `time_picker*`。
+
+- diff 范围检查结果：
+  - `git diff --name-only -- src`：无输出。
+  - `git diff --name-only -- assets`：无输出。
+  - `git diff --name-only -- main.py`：无输出。
+  - `git diff --name-only -- requirements.txt`：无输出。
+  - `git diff --name-only -- schedule.db`：无输出。
+  - 当前总 diff：
+    - `manage_instruction/Work_Log.md`（本轮）
+    - `manage_instruction/Work_Task_Prompts.md`（开工前既有）
+
+- 未完成事项：
+  - 8-2b 具体工单需锁定 helper 签名与唯一替换点（建议 `header.py::_load_colored_svg`）。
+
+- 风险或疑点：
+  - icon helper 若同时兼容 `QPixmap/QIcon` 两种输出，容易扩张边界；8-2b 建议先只输出 `QPixmap`，避免首轮过度抽象。
+  - `components.py` 当前仍直接 import `todo_board.py`，后续若扩大提取范围需同步评估导入边界。
+
+- 特别记录：
+  - 本轮只读审查，不改源码。
+  - 不创建 `src/ui/utils/icon_loader.py`。
+  - 不替换任何调用方。
+  - 不修改 `assets`。
+  - 后续若进入 8-2b，必须只提取一个 helper 并只替换一个低风险调用点。
