@@ -18,12 +18,12 @@
 
 第六轮：Controller / Router / EventBus 协调层，已完成并归档。
 
-第七轮：Theme / QSS 接入，已完成 7-3b（Skin Preset 命名语义收口），等待顾问窗口复核与 7-4 工单。
+第七轮：Theme / QSS 接入，已完成 7-4（低风险真实控件动态属性样式试点），等待顾问窗口复核与 7-5 工单。
 
 ## 当前轮次注意事项
 
 - 第六轮已归档，历史记录见 `History_Instruction.md` 与 `History_Log.md`。
-- 7-0、7-1、7-2、7-3、7-3b 已完成，默认 preset 语义已收口为 skin preset，尚未进入真实业务控件试点。
+- 7-0、7-1、7-2、7-3、7-3b、7-4 已完成，已完成单个真实控件试点，尚未扩大到其他控件或页面。
 - 第七轮后续应保持第六轮回归重点不变：路由决策、添加页来源、三连刷新、`refresh_requested` 并行通知、详情弹窗回流链路。
 
 ## 2026-05-26 第七轮 7-0（主题与样式债务静态审查）
@@ -493,3 +493,96 @@
 
 - 风险或疑点：
   - 当前 `default/light/dark` 三个 preset 规则仍有重复，后续若继续扩展 preset 需要避免重复维护（建议后续再考虑抽取共用片段，但不在本轮执行）。
+
+## 2026-05-26 第七轮 7-4（低风险真实控件动态属性样式试点）
+
+- 本轮任务名称：第七轮 7-4（低风险真实控件动态属性样式试点）。
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 16]`
+  - 既有变更：`M manage_instruction/Work_Task_Prompts.md`
+  - 说明：开工前已有管理文档 diff，本轮不视为源码改动。
+- 实际修改文件：
+  - `src/theme/default.qss`
+  - `src/ui/header.py`
+  - `manage_instruction/Work_Log.md`
+
+- 试点控件：
+  - 文件：`src/ui/header.py`
+  - 控件：`btn_sync`
+
+- 选择该控件原因：
+  - 窗口控制区单点控件，低风险、可回滚。
+  - 不涉及数据库写入、路由切换、详情弹窗回流和复杂刷新链路。
+
+- `default.qss` 新增选择器说明（仅单点试点，不做全局 QToolButton 规则）：
+  - `QToolButton[role="windowControl"][variant="toolbar"]`
+  - `QToolButton[role="windowControl"][variant="toolbar"]:hover`
+  - `QToolButton[role="windowControl"][variant="toolbar"]:pressed`
+  - 样式对齐原窗口控制按钮视觉：`transparent / no border / radius 6 / hover rgba(255,255,255,0.2) / pressed rgba(255,255,255,0.3)`。
+
+- `btn_sync` 动态属性设置：
+  - `role = "windowControl"`
+  - `variant = "toolbar"`
+  - `state = "normal"`
+
+- 是否清除或避免 `btn_sync` 局部 stylesheet：
+  - 是。对 `btn_sync` 单独执行 `setStyleSheet("")`，用于移除 `_create_control_btn(...)` 赋予的局部样式覆盖，让应用级 `default.qss` 动态属性规则生效。
+  - 仅作用于 `btn_sync`，未改 `btn_more` / `btn_close` 逻辑。
+
+- 确认未修改 `btn_more` / `btn_close` 行为：
+  - 未修改 `btn_more` 点击菜单连接。
+  - 未修改 `btn_close` 的 close 连接。
+  - 未修改 header 布局结构。
+
+- 验证结果：
+  - 选择器定位：
+    - `rg -n "windowControl|variant=\"toolbar\"|role=\"windowControl\"|QToolButton\\[role" ...` 命中正常。
+  - 轻量检查：
+    - `git diff --name-only -- src/theme/light.qss`：无输出。
+    - `git diff --name-only -- src/theme/dark.qss`：无输出。
+  - Header import：
+    - `header import ok <class 'src.ui.header.HeaderBar'>`
+  - Header offscreen 实例化与属性验证：
+    - 初次按原命令 `HeaderBar()` 会因 `parent_window=None` 且 `btn_close.clicked.connect(self.parent_window.close)` 引发 `AttributeError`（验证脚本环境问题，不是本轮逻辑回归）。
+    - 使用 `QWidget` 作为 parent 重跑通过：
+      - `has sync True`
+      - `sync role windowControl`
+      - `sync variant toolbar`
+      - `sync state normal`
+  - 默认启动接入回归：
+    - `main import ok`
+  - py_compile：
+    - `python -m py_compile src/ui/header.py main.py src/theme/theme_manager.py src/theme/__init__.py` 通过。
+
+- 特别记录：
+  - 本轮基于 `default.qss / skin preset`。
+  - 本轮不围绕 `light.qss` / `dark.qss` 做模式切换。
+  - 本轮只做单个真实控件试点，不做全局控件样式。
+  - 后续若要扩大范围，必须另开小工单。
+
+- diff 范围检查结果：
+  - `git diff --name-only -- src/theme/light.qss`：无输出。
+  - `git diff --name-only -- src/theme/dark.qss`：无输出。
+  - `git diff --name-only -- src/theme/theme_manager.py`：无输出。
+  - `git diff --name-only -- main.py`：无输出。
+  - `git diff --name-only -- src/utils/signals.py`：无输出。
+  - `git diff --name-only -- src/utils/styles.py`：无输出。
+  - `git diff --name-only -- src/data`：无输出。
+  - `git diff --name-only -- src/repositories`：无输出。
+  - `git diff --name-only -- src/services`：无输出。
+  - `git diff --name-only -- src/controllers`：无输出。
+  - `git diff --name-only -- requirements.txt`：无输出。
+  - `git diff --name-only -- schedule.db`：无输出。
+  - `git diff --name-only -- src/ui`：仅 `src/ui/header.py`。
+  - 当前总 diff：
+    - `src/theme/default.qss`
+    - `src/ui/header.py`
+    - `manage_instruction/Work_Log.md`
+    - `manage_instruction/Work_Task_Prompts.md`（开工前既有）
+
+- 未完成事项：
+  - 若进入 7-5，应做 Theme 信号兼容与手动切换 smoke，不扩大控件范围。
+  - 若进入后续试点，应继续单控件单文件策略，避免跨页面并行改造。
+
+- 风险或疑点：
+  - `header.py` 当前构造函数对 `parent_window` 存在隐式依赖（`btn_close` 连接 close）；离线实例化测试需提供 parent。该问题为既有结构特点，本轮未改变行为。

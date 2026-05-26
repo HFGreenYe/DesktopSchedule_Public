@@ -194,6 +194,11 @@ class HeaderBar(QWidget):
         
         self.btn_sync = self._create_control_btn("assets/icons/sync.png", "云同步")
         self.btn_sync.setIconSize(QSize(16, 16))
+        self.btn_sync.setProperty("role", "windowControl")
+        self.btn_sync.setProperty("variant", "toolbar")
+        self.btn_sync.setProperty("state", "normal")
+        # Clear local stylesheet for this single trial control so app-level QSS can apply.
+        self.btn_sync.setStyleSheet("")
         
         self.btn_close = self._create_control_btn("assets/icons/close.png", "关闭", True)
         self.btn_close.setIconSize(QSize(16, 16))
