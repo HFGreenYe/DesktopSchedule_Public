@@ -20,12 +20,12 @@
 
 第七轮：Theme / QSS 接入与样式债务控制，已完成并归档。
 
-第八轮：UI 拆分与样式债务整理，已完成 8-2b（公共 icon loader 最小提取与 Header 单点替换），等待顾问窗口复核。
+第八轮：UI 拆分与样式债务整理，已完成 8-4a（WeekWindow 低风险类提取候选只读复核），等待顾问窗口复核。
 
 ## 当前轮次注意事项
 
 - 第七轮归档内容见 `History_Instruction.md` 与 `History_Log.md`。
-- 第八轮阶段合同已发布，当前已完成 8-0、8-1、8-2a、8-2b，保持小工单推进。
+- 第八轮阶段合同已发布，当前已完成 8-0、8-1、8-2a、8-2b、8-3a、8-3b、8-4a，保持小工单推进。
 - 第八轮规划应保持小工单策略，避免一次性拆大 UI 文件。
 - 第七轮遗留约束继续有效：基于 `default.qss / skin preset`，不建立 light/dark mode matrix。
 
@@ -926,3 +926,155 @@
   - 本轮不修改 QSS。
   - 本轮不修改 1500ms toast 路径。
   - 本轮不清理 8-2b 遗留的 `header.py` unused import。
+
+## 2026-05-27 第八轮 8-4a（WeekWindow 低风险类提取候选只读复核）
+
+- 本轮任务名称：第八轮 8-4a（WeekWindow 低风险类提取候选只读复核）。
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 28]`
+  - 既有变更：`M manage_instruction/Work_Task_Prompts.md`
+  - 说明：开工前已有管理文档 diff，本轮不视为源码问题。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+  - `manage_instruction/Work_Task_Prompts.md`（开工前既有管理文档 diff，本轮未新增修改）
+
+- 关键静态搜索命令与结果：
+  - `rg -n "^class WeekScheduleCard|^class DayBlock|^class WeekWindow" src/ui/week_window.py`
+    - `WeekScheduleCard`：L28
+    - `DayBlock`：L198
+    - `WeekWindow`：L290
+  - `rg -n "^\\s*\\w+\\s*=\\s*pyqtSignal|clicked = pyqtSignal|scheduleDropped|card_dropped" ...`
+    - `WeekScheduleCard`：`clicked/req_status/req_pin/req_delete`
+    - `DayBlock`：`clicked(QDate)`
+    - `WeekWindow`：`restore_requested/suspend_requested/request_schedule_detail/view_selected/schedule_updated`
+    - `panel.card_dropped.connect(...)`：L605
+  - `rg -n "db_manager|...|show_toast|...|pyqtSignal" src/ui/week_window.py`
+    - 明确 `db_manager` 写库、`show_toast`、拖拽排序写回在 `WeekWindow` 中。
+  - `rg -n "^from |^import " src/ui/week_window.py`
+    - 依赖含 Qt、`db_manager`、`ScheduleQueryService`、`ScheduleSortService`、`ToolTipFilter`、`CountdownToolTipFilter`、`AdaptiveLabel`、`get_colored_icon`、`TodoListContainer`。
+
+- `WeekScheduleCard` 定义范围与职责：
+  - 定义范围：约 L28-L197（下一个类 `DayBlock` 起于 L198）。
+  - 构造参数：`__init__(self, schedule_obj, parent=None)`。
+  - 核心职责：
+    - 渲染单条周日程卡片（标题、时间、优先级圆点、置顶图标）。
+    - 发出详情点击与右键菜单动作信号。
+    - 承担卡片拖拽源行为（`mousePressEvent/mouseMoveEvent/mouseReleaseEvent`）。
+  - signal：
+    - `clicked(object)`
+    - `req_status(int, int)`
+    - `req_pin(int, bool)`
+    - `req_delete(int)`
+  - event handler：
+    - `mousePressEvent`
+    - `mouseMoveEvent`（`QDrag/QMimeData` + 样式临时切换）
+    - `mouseReleaseEvent`
+    - `resizeEvent`（置顶图标定位）
+    - `_show_context_menu`（`ScheduleContextMenu`）
+  - tooltip / style / paint：
+    - 使用 `CountdownToolTipFilter`，`installEventFilter`。
+    - 含内联 `setStyleSheet`；无 `paintEvent`。
+  - 外部依赖：
+    - `AdaptiveLabel`
+    - `CountdownToolTipFilter`
+    - `get_colored_icon`
+    - `ScheduleContextMenu`（函数内延迟 import）
+  - 与 WeekWindow 反向访问点：
+    - `WeekWindow` 在加载卡片时连接 `clicked/req_status/req_pin/req_delete`（L1044-L1047）。
+    - 拖拽流程依赖父容器的 `current_drag_widget` 约定字段。
+  - 生命周期管理点：
+    - `WeekWindow.load_week_schedules_from_db` 中旧卡片 `deleteLater`（L1028）。
+    - 本类未显式清理 `CountdownToolTipFilter`。
+  - 与拖拽/排序/详情/toast/刷新链路关系：
+    - 与拖拽强耦合（拖拽源）。
+    - 间接触发详情弹窗（通过 `clicked -> request_schedule_detail`）。
+    - 右键菜单动作落到 WeekWindow 写库和刷新。
+  - 是否直接访问 db_manager / Repository / Service：
+    - 否（无直接 `db_manager` 调用）。
+  - 提取风险等级：中高。
+    - 原因：拖拽源行为 + 右键菜单信号 + tooltip filter + 父容器约定字段，多边界联动。
+
+- `DayBlock` 定义范围与职责：
+  - 定义范围：约 L198-L289（下一个类 `WeekWindow` 起于 L290）。
+  - 构造参数：`__init__(self, parent=None)`。
+  - 核心职责：
+    - 渲染顶部日期格（阳历日、农历简写）。
+    - 处理选中态/今日态样式。
+    - 维护日期 tooltip（阳历+农历完整文案）。
+    - 点击后发出选日信号。
+  - signal：
+    - `clicked(QDate)`
+  - event handler：
+    - `mouseReleaseEvent`（发出 clicked）。
+    - 无拖拽 `dragEnter/dragMove/drop`。
+  - tooltip / style / paint：
+    - 使用 `ToolTipFilter`，在 `set_data` 中替换旧 filter（`removeEventFilter + deleteLater + installEventFilter`）。
+    - 仅内联 `setStyleSheet`；无 `paintEvent`。
+  - 外部依赖：
+    - `ZhDate`、`datetime/timedelta`（农历计算）
+    - `ToolTipFilter`
+    - `QDate/QLabel/QFrame`
+  - 与 WeekWindow 反向访问点：
+    - `WeekWindow` 创建 `self.day_blocks`，连接 `block.clicked -> _on_day_clicked`（L538-L540）。
+    - `WeekWindow` 在刷新日期条时调用 `set_data/set_selected`（L997-L1001）。
+  - 生命周期管理点：
+    - 自身 tooltip filter 生命周期在 `set_data` 内部自清理并重绑。
+  - 与拖拽/排序/详情/toast/刷新链路关系：
+    - 不参与卡片拖拽排序。
+    - 不直接触发详情弹窗。
+    - 仅通过选日触发周视图刷新链路。
+  - 是否直接访问 db_manager / Repository / Service：
+    - 否。
+  - 是否管理 `WeekScheduleCard` 实例：
+    - 否（仅管理日期展示，不持有卡片容器）。
+  - 提取风险等级：低到中。
+    - 原因：职责单一、无写库、无拖拽排序、信号单一。
+
+- 二者风险对比结论：
+  - `DayBlock` 明显低于 `WeekScheduleCard`。
+  - `WeekScheduleCard` 当前仍耦合拖拽源行为与右键菜单动作信号，不适合作为首个提取试点。
+
+- 8-4b 建议的唯一候选类：
+  - 建议：`DayBlock`（唯一候选）。
+  - 8-4b 范围建议：仅提取 `DayBlock` 到新文件并保持 WeekWindow 调用/行为不变，不触碰 `WeekScheduleCard`。
+
+- 若不建议直接提取的说明：
+  - 对 `WeekScheduleCard` 不建议在 8-4b 同步提取。
+  - 建议后续先补一轮 `WeekScheduleCard` 拖拽/右键菜单/tooltip 生命周期基线后，再评估单独拆分。
+
+- 验证回归结果：
+  - `Test-Path src\ui\common\week_cards.py`：`False`
+  - `Test-Path src\ui\views\week_window.py`：`False`
+  - `Test-Path src\ui\views\week_cards.py`：`False`
+  - WeekWindow import 回归：
+    - `week imports ok <class 'src.ui.week_window.WeekWindow'> <class 'src.ui.week_window.WeekScheduleCard'> <class 'src.ui.week_window.DayBlock'>`
+  - 8-3b toast helper 回归：
+    - `toast helper import ok <function show_center_toast ...>`
+  - 8-2b icon loader 回归：
+    - `icon loader import ok <function load_colored_svg_pixmap ...>`
+
+- diff 范围检查结果：
+  - `git diff --name-only -- src`：无输出。
+  - `git diff --name-only -- assets`：无输出。
+  - `git diff --name-only -- main.py`：无输出。
+  - `git diff --name-only -- requirements.txt`：无输出。
+  - `git diff --name-only -- schedule.db`：无输出。
+  - `git diff --name-only`：`manage_instruction/Work_Task_Prompts.md`（开工前既有）+ `manage_instruction/Work_Log.md`（本轮）。
+  - `git status --short --branch`：
+    - `## main...temp/main [ahead 28]`
+    - `M manage_instruction/Work_Task_Prompts.md`
+    - `M manage_instruction/Work_Log.md`
+
+- 未完成事项：
+  - 等待顾问窗口确认 8-4b 是否按 `DayBlock` 单类提取推进。
+
+- 风险或疑点：
+  - `DayBlock.set_data` 包含农历异常兜底 `except Exception`，虽不影响本轮只读判断，但 8-4b 抽取时需保持原异常策略不变。
+  - `WeekScheduleCard` 与父容器 `current_drag_widget` 的隐式契约较脆弱，后续拆分若处理不当易引入拖拽回归。
+
+- 特别记录：
+  - 本轮只读审查，不改源码。
+  - 本轮不拆 `week_window.py`。
+  - 本轮不新增任何 WeekWindow 组件文件。
+  - 本轮不修改 tooltip/toast/icon loader。
+  - 本轮仅用于为 8-4b 锁定唯一候选类。

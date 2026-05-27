@@ -1,63 +1,45 @@
 # Work Task Prompts
 
-## 第八轮 8-3b：MainWindow toast 单点提取
+## 第八轮 8-4a：WeekWindow 低风险类提取候选只读复核
 
 ```markdown
-请执行第八轮 8-3b：MainWindow toast 单点提取。本轮只提取一个低风险 toast helper，并只替换 `src/ui/main_window.py::show_toast` 这一处调用边界。
+请执行第八轮 8-4a：WeekWindow 低风险类提取候选只读复核。本轮只做静态审查、代码阅读、搜索和日志记录，不改源码。
 
 ## 1. 本轮目标
 
-基于 8-3a 静态审查结论，新增一个最小 toast helper，并让 `MainWindow.show_toast(message)` 保持原方法名、参数和行为语义不变，只把内部创建/显示 QLabel 的逻辑委托给 helper。
+基于第八轮阶段合同和 8-0 结论，对 `src/ui/week_window.py` 中的 `WeekScheduleCard` 与 `DayBlock` 做提取前只读复核，判断哪一个更适合作为 8-4b 的唯一类提取试点。
 
 本轮目标：
 
-- 新增 `src/ui/common/toast.py`。
-- 只实现 MainWindow 当前 toast 需要的最小 helper。
-- 只修改 `src/ui/main_window.py::show_toast(message)`。
-- 保持 MainWindow 对外 `show_toast(message)` 方法不变。
-- 保持原 toast 行为不变：
-  - parent 仍为 `self`
-  - 属性仍为 `self.toast_label`
-  - 已有 toast 显示时先 close
-  - QLabel 文案不变
-  - 样式不变
-  - 居中位置计算不变
-  - `WA_TransparentForMouseEvents` 不变
-  - 自动关闭时间仍为 500ms
-- 不处理 `week_window.py` / `month_window.py` / `todo_board.py` 的 toast。
-- 不处理 tooltip。
-- 不修改 QSS。
-- 不改变 UI 布局、交互、刷新链路、业务逻辑。
+- 只读审查 `WeekScheduleCard`。
+- 只读审查 `DayBlock`。
+- 定位二者的：
+  - 构造参数
+  - public 属性
+  - signal
+  - event handler
+  - paint / style / tooltip 依赖
+  - db_manager / service / repository 依赖
+  - WeekWindow 反向访问点
+  - 生命周期管理点
+  - 与拖拽、排序、详情弹窗、toast、刷新链路的关系
+- 比较 `WeekScheduleCard` 与 `DayBlock` 的提取风险。
+- 锁定 8-4b 唯一候选类，或明确“不适合直接提取，需要继续拆 8-4b 基线”。
+- 不迁移任何类。
+- 不新增文件。
+- 不替换任何 import。
+- 不改变周视图行为。
 
 ## 2. 允许/禁止
 
 本轮允许修改：
 
-- `src/ui/common/toast.py`
-- `src/ui/main_window.py`
 - `manage_instruction/Work_Log.md`
 - `manage_instruction/Work_Task_Prompts.md`（仅在需要维护复核锚点时）
 
 本轮禁止修改：
 
-- `src/ui/week_window.py`
-- `src/ui/month_window.py`
-- `src/ui/todo_board.py`
-- `src/ui/header.py`
-- `src/ui/components.py`
-- `src/ui/list_picker.py`
-- `src/ui/add_view.py`
-- `src/ui/add_view_week.py`
-- `src/ui/alarm_picker.py`
-- `src/ui/alarm_picker_week.py`
-- 除 `src/ui/main_window.py` 与 `src/ui/common/toast.py` 外的任何 `src/ui/` 文件
-- `src/theme/`
-- `src/data/`
-- `src/repositories/`
-- `src/services/`
-- `src/controllers/`
-- `src/utils/signals.py`
-- `src/utils/styles.py`
+- `src/`
 - `assets/`
 - `main.py`
 - `requirements.txt`
@@ -67,11 +49,13 @@
 
 禁止事项：
 
-- 不创建 `src/ui/common/tooltip.py`。
-- 不迁移 `CustomToolTip` / `ToolTipFilter`。
-- 不统一所有 toast。
-- 不修改 1500ms toast 路径。
-- 不修改 MainWindow 除 `show_toast` 必要委托外的其它逻辑。
+- 不新增 `src/ui/views/week_window.py`。
+- 不新增 `src/ui/common/week_cards.py`。
+- 不新增任何 WeekWindow 相关组件文件。
+- 不修改 `src/ui/week_window.py`。
+- 不修改 `src/ui/components.py`。
+- 不修改 `src/ui/header.py`。
+- 不修改 tooltip / toast / icon loader。
 - 不清理 8-2b 遗留的 `header.py` unused import。
 - 不提交 Git。
 
@@ -84,167 +68,165 @@
     Get-Content -Path manage_instruction\Work_Instruction.md -Encoding UTF8
     Get-Content -Path manage_instruction\Work_Log.md -Encoding UTF8
     Get-Content -Path manage_instruction\Work_Task_Prompts.md -Encoding UTF8
-    Get-Content -Path src\ui\main_window.py -Encoding UTF8
+    Get-Content -Path src\ui\week_window.py -Encoding UTF8
 
-2. 新增 `src/ui/common/toast.py`。
+2. 定位 `WeekScheduleCard` 与 `DayBlock` 定义范围：
 
-    建议 helper 函数：
+    rg -n "^class WeekScheduleCard|^class DayBlock|^class WeekWindow" src/ui/week_window.py
 
-    `show_center_toast(parent, message, attr_name="toast_label", duration_ms=500)`
+3. 定位 `WeekScheduleCard` 的依赖与被使用点：
 
-    语义要求：
+    rg -n "WeekScheduleCard|schedule_obj|data\\[|self\\.schedule|card_|_tooltip_filter|CountdownToolTipFilter|mousePressEvent|mouseMoveEvent|paintEvent|contextMenuEvent|deleteLater|removeEventFilter" src/ui/week_window.py
 
-    - 输入：
-      - `parent`：承载 toast 的 QWidget。
-      - `message`：显示文本。
-      - `attr_name`：保存 toast QLabel 的 parent 属性名，默认 `"toast_label"`。
-      - `duration_ms`：自动关闭时间，默认 `500`。
-    - 输出：
-      - 返回创建的 `QLabel`。
-    - 行为：
-      - 若 `parent` 上已有 `attr_name` 且可见，则先 close。
-      - 创建 `QLabel(message, parent)`。
-      - 将 QLabel 设置回 `setattr(parent, attr_name, label)`。
-      - 样式必须与当前 `MainWindow.show_toast` 内联样式一致。
-      - `setAlignment(Qt.AlignmentFlag.AlignCenter)` 保持一致。
-      - `adjustSize()` 保持一致。
-      - `WA_TransparentForMouseEvents` 保持一致。
-      - 居中位置计算保持一致：
-        - `x = (parent.width() - label.width()) // 2`
-        - `y = (parent.height() - label.height()) // 2`
-      - `QTimer.singleShot(duration_ms, label.close)`。
-      - 不依赖 `MainWindow` 类型。
-      - 不连接业务信号。
-      - 不访问 db_manager / Repository / Service。
-      - 不触发 QApplication。
+4. 定位 `DayBlock` 的依赖与被使用点：
 
-3. 修改 `src/ui/main_window.py`。
+    rg -n "DayBlock|date_obj|day_block|add_card|clear_cards|refresh|dragEnterEvent|dropEvent|dragMoveEvent|scheduleDropped|QMimeData|sort_order|card_dropped|date\\(" src/ui/week_window.py
 
-    只允许做以下最小改动：
+5. 定位 `week_window.py` 中写库/排序/拖拽/详情弹窗/tooltip/toast 相关耦合：
 
-    - 从 `src.ui.common.toast` 或相对路径导入 helper。
-    - 保留 `def show_toast(self, message):` 方法名与参数。
-    - 将 `show_toast` 方法体改为委托 helper：
-      - `self.toast_label = show_center_toast(self, message, attr_name="toast_label", duration_ms=500)`
-      - 或等价写法。
-    - 不改变 `show_toast` 的调用方。
-    - 不修改其它 MainWindow 方法。
-    - 不修改视图切换、提醒、挂起、详情弹窗、刷新链路。
+    rg -n "db_manager|update_schedule|delete_schedule|add_schedule|sort_order|drag|drop|show_toast|ToolTipFilter|CountdownToolTipFilter|detail|popup|_show_detail|emit|pyqtSignal" src/ui/week_window.py
 
-4. 更新 `manage_instruction/Work_Log.md`。
+6. 定位 import 依赖：
+
+    rg -n "^from |^import " src/ui/week_window.py
+
+7. 分析 `WeekScheduleCard`：
+
+    记录：
+
+    - 类定义行号范围。
+    - 构造函数签名。
+    - 依赖的外部类/函数。
+    - 是否直接访问 db_manager。
+    - 是否直接调用 WeekWindow。
+    - 是否发出 signal。
+    - 是否安装 eventFilter。
+    - 是否依赖 `CountdownToolTipFilter`。
+    - 是否参与拖拽/排序。
+    - 是否有自定义 paint / style。
+    - 提取到新文件时需要带走哪些 import。
+    - 提取后调用方需要改哪些 import。
+    - 风险等级。
+
+8. 分析 `DayBlock`：
+
+    记录：
+
+    - 类定义行号范围。
+    - 构造函数签名。
+    - 依赖的外部类/函数。
+    - 是否直接访问 db_manager。
+    - 是否直接调用 WeekWindow。
+    - 是否发出 signal。
+    - 是否管理 `WeekScheduleCard` 实例。
+    - 是否参与拖拽/排序。
+    - 是否有自定义 paint / style。
+    - 是否触发详情弹窗或刷新链路。
+    - 提取到新文件时需要带走哪些 import。
+    - 提取后调用方需要改哪些 import。
+    - 风险等级。
+
+9. 给出 8-4b 建议：
+
+    - 若 `WeekScheduleCard` 更低风险，建议 8-4b 只提取 `WeekScheduleCard`。
+    - 若 `DayBlock` 更低风险，建议 8-4b 只提取 `DayBlock`。
+    - 若二者都仍有不清晰耦合，建议 8-4b 继续只读或先做 import/依赖清理，不进行类迁移。
+
+10. 更新 `manage_instruction/Work_Log.md`。
 
 ## 4. 验收命令
 
-定位 helper 与替换：
+类定位：
 
-    rg -n "show_center_toast|show_toast|toast_label|WA_TransparentForMouseEvents|singleShot|500" src/ui/common/toast.py src/ui/main_window.py
+    rg -n "^class WeekScheduleCard|^class DayBlock|^class WeekWindow" src/ui/week_window.py
 
-确认未创建 tooltip 文件：
+WeekScheduleCard 依赖定位：
 
-    Test-Path src\ui\common\tooltip.py
+    rg -n "WeekScheduleCard|schedule_obj|data\\[|self\\.schedule|card_|_tooltip_filter|CountdownToolTipFilter|mousePressEvent|mouseMoveEvent|paintEvent|contextMenuEvent|deleteLater|removeEventFilter" src/ui/week_window.py
 
-helper import 验证：
+DayBlock 依赖定位：
+
+    rg -n "DayBlock|date_obj|day_block|add_card|clear_cards|refresh|dragEnterEvent|dropEvent|dragMoveEvent|scheduleDropped|QMimeData|sort_order|card_dropped|date\\(" src/ui/week_window.py
+
+写库/排序/拖拽/回流耦合定位：
+
+    rg -n "db_manager|update_schedule|delete_schedule|add_schedule|sort_order|drag|drop|show_toast|ToolTipFilter|CountdownToolTipFilter|detail|popup|_show_detail|emit|pyqtSignal" src/ui/week_window.py
+
+import 依赖定位：
+
+    rg -n "^from |^import " src/ui/week_window.py
+
+确认未新增 WeekWindow 拆分文件：
+
+    Test-Path src\ui\common\week_cards.py
+    Test-Path src\ui\views\week_window.py
+    Test-Path src\ui\views\week_cards.py
+
+WeekWindow import 回归：
+
+    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.ui.week_window import WeekWindow, WeekScheduleCard, DayBlock; print('week imports ok', WeekWindow, WeekScheduleCard, DayBlock)"
+
+8-3b toast helper 回归：
 
     D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.ui.common.toast import show_center_toast; print('toast helper import ok', show_center_toast)"
 
-helper offscreen 行为验证：
+8-2b icon loader 回归：
 
-    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication, QWidget; from src.ui.common.toast import show_center_toast; app=QApplication([]); parent=QWidget(); parent.resize(400, 300); label=show_center_toast(parent, 'hello', duration_ms=500); print('label text', label.text()); print('same attr', getattr(parent, 'toast_label') is label); print('visible', label.isVisible()); print('transparent', label.testAttribute(label.WidgetAttribute.WA_TransparentForMouseEvents)); print('pos', label.x(), label.y()); assert label.text() == 'hello'; assert getattr(parent, 'toast_label') is label; assert label.testAttribute(label.WidgetAttribute.WA_TransparentForMouseEvents); label2=show_center_toast(parent, 'world', duration_ms=500); print('new label text', label2.text()); print('old closed or hidden', not label.isVisible()); assert label2.text() == 'world'; assert getattr(parent, 'toast_label') is label2"
-
-MainWindow import 验证：
-
-    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.ui.main_window import MainWindow; print('main window import ok', MainWindow)"
-
-MainWindow offscreen show_toast 回归：
-
-    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from src.ui.main_window import MainWindow; app=QApplication([]); w=MainWindow(); w.resize(500, 400); w.show_toast('toast check'); print('toast attr', hasattr(w, 'toast_label')); print('toast text', w.toast_label.text()); print('toast visible', w.toast_label.isVisible()); print('transparent', w.toast_label.testAttribute(w.toast_label.WidgetAttribute.WA_TransparentForMouseEvents)); assert hasattr(w, 'toast_label'); assert w.toast_label.text() == 'toast check'; assert w.toast_label.testAttribute(w.toast_label.WidgetAttribute.WA_TransparentForMouseEvents)"
-
-确认其它 toast 文件未改：
-
-    git diff --name-only -- src/ui/week_window.py
-    git diff --name-only -- src/ui/month_window.py
-    git diff --name-only -- src/ui/todo_board.py
-    git diff --name-only -- src/ui/header.py
-    git diff --name-only -- src/ui/components.py
-    git diff --name-only -- src/ui/list_picker.py
-    git diff --name-only -- src/ui/add_view.py
-    git diff --name-only -- src/ui/add_view_week.py
-    git diff --name-only -- src/ui/alarm_picker.py
-    git diff --name-only -- src/ui/alarm_picker_week.py
-
-语法检查：
-
-    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src/ui/common/toast.py src/ui/main_window.py main.py
-
-默认入口 import 回归：
-
-    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; import main; print('main import ok')"
+    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.ui.utils.icon_loader import load_colored_svg_pixmap; print('icon loader import ok', load_colored_svg_pixmap)"
 
 范围检查：
 
-    git diff --name-only -- src/theme
-    git diff --name-only -- src/data
-    git diff --name-only -- src/repositories
-    git diff --name-only -- src/services
-    git diff --name-only -- src/controllers
-    git diff --name-only -- src/utils/signals.py
-    git diff --name-only -- src/utils/styles.py
+    git diff --name-only -- src
     git diff --name-only -- assets
     git diff --name-only -- main.py
     git diff --name-only -- requirements.txt
     git diff --name-only -- schedule.db
-    git diff --name-only -- src/ui
-
-预期 `src/ui` diff 仅允许：
-
-    src/ui/common/toast.py
-    src/ui/main_window.py
-
-总范围检查：
-
     git diff --name-only
     git status --short --branch
 
-预期最终只允许：
+预期：
 
-- `src/ui/common/toast.py`
-- `src/ui/main_window.py`
-- `manage_instruction/Work_Log.md`
-- 必要时 `manage_instruction/Work_Task_Prompts.md`
+- `src` 无 diff。
+- `assets` 无 diff。
+- `main.py` 无 diff。
+- `requirements.txt` 无 diff。
+- `schedule.db` 无 diff。
+- 最终只允许：
+  - `manage_instruction/Work_Log.md`
+  - 必要时 `manage_instruction/Work_Task_Prompts.md`
 
 ## 5. Work_Log.md 记录要求
 
 更新 `manage_instruction/Work_Log.md`，至少记录：
 
-- 本轮任务名称：第八轮 8-3b（MainWindow toast 单点提取）
+- 本轮任务名称：第八轮 8-4a（WeekWindow 低风险类提取候选只读复核）
 - 开工前 git 状态
 - 实际修改文件
-- 新增 helper 文件和函数名
-- helper 签名与职责
-- helper 是否依赖 MainWindow
-- helper 是否访问 db_manager / Repository / Service
-- `MainWindow.show_toast(message)` 兼容性说明
-- 确认未修改 `show_toast` 调用方
-- 确认未修改 week/month/todo_board toast
-- 确认未创建 tooltip 文件
-- helper import 验证结果
-- helper offscreen 行为验证结果
-- MainWindow import 验证结果
-- MainWindow offscreen show_toast 回归结果
-- py_compile 结果
-- main import 回归结果
+- `WeekScheduleCard` 定义范围与职责
+- `WeekScheduleCard` 构造参数、signal、event handler、tooltip、拖拽、style、外部依赖
+- `WeekScheduleCard` 是否直接访问 db_manager / Repository / Service
+- `WeekScheduleCard` 提取风险等级
+- `DayBlock` 定义范围与职责
+- `DayBlock` 构造参数、signal、event handler、tooltip、拖拽、style、外部依赖
+- `DayBlock` 是否直接访问 db_manager / Repository / Service
+- `DayBlock` 提取风险等级
+- 二者风险对比
+- 8-4b 建议的唯一候选类
+- 若不建议直接提取，说明原因和下一步只读/清理建议
+- WeekWindow import 回归结果
+- 8-3b toast helper 回归结果
+- 8-2b icon loader 回归结果
 - diff 范围检查结果
 - 未完成事项
 - 风险或疑点
 
 特别记录：
 
-- 本轮只提取 MainWindow toast。
-- 本轮不统一全部 toast。
-- 本轮不处理 tooltip。
-- 本轮不修改 QSS。
-- 本轮不修改 1500ms toast 路径。
-- 本轮不清理 8-2b 遗留的 `header.py` unused import。
+- 本轮只读审查，不改源码。
+- 本轮不拆 `week_window.py`。
+- 本轮不新增任何 WeekWindow 组件文件。
+- 本轮不修改 tooltip/toast/icon loader。
+- 本轮只为 8-4b 锁定唯一候选类。
 
 如果 Python 验证受沙箱权限影响，请申请沙箱外权限运行；若仍受限，请写明需用户本地 CMD 复跑命令。
 
