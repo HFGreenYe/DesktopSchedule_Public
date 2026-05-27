@@ -20,12 +20,12 @@
 
 第七轮：Theme / QSS 接入与样式债务控制，已完成并归档。
 
-第八轮：UI 拆分与样式债务整理，已完成 8-5（TodoBoard 只读基线与低风险拆分候选确认），等待顾问窗口复核。
+第八轮：UI 拆分与样式债务整理，已完成 8-6（TodoBoard AddFolderCard 单类提取试点），等待顾问窗口复核。
 
 ## 当前轮次注意事项
 
 - 第七轮归档内容见 `History_Instruction.md` 与 `History_Log.md`。
-- 第八轮阶段合同已发布，当前已完成 8-0、8-1、8-2a、8-2b、8-3a、8-3b、8-4a、8-4b、8-5，保持小工单推进。
+- 第八轮阶段合同已发布，当前已完成 8-0、8-1、8-2a、8-2b、8-3a、8-3b、8-4a、8-4b、8-5、8-6，保持小工单推进。
 - 第八轮规划应保持小工单策略，避免一次性拆大 UI 文件。
 - 第七轮遗留约束继续有效：基于 `default.qss / skin preset`，不建立 light/dark mode matrix。
 
@@ -1386,3 +1386,134 @@
   - 本轮不修改 tooltip/toast/icon loader。
   - 本轮不修改数据库或服务层。
   - 本轮仅用于为 8-6 判断唯一低风险候选类。
+
+## 2026-05-27 第八轮 8-6（TodoBoard AddFolderCard 单类提取试点）
+
+- 本轮任务名称：第八轮 8-6（TodoBoard AddFolderCard 单类提取试点）。
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 31]`
+  - 既有变更：`M manage_instruction/Work_Task_Prompts.md`
+  - 说明：开工前已有管理文档 diff，本轮不视为源码问题。
+- 实际修改文件：
+  - `src/ui/common/todo_board_add_folder_card.py`（新增）
+  - `src/ui/todo_board.py`
+  - `manage_instruction/Work_Log.md`
+  - `manage_instruction/Work_Task_Prompts.md`（开工前既有管理文档 diff，本轮未新增修改）
+
+- `AddFolderCard` 新文件路径：
+  - `src/ui/common/todo_board_add_folder_card.py`
+
+- `AddFolderCard` 保持兼容内容：
+  - 类名：`AddFolderCard`
+  - signal：`clicked = pyqtSignal()`
+  - 构造函数：`__init__(self, parent=None)`
+  - 方法保留：`mouseReleaseEvent(...)`
+  - 图标加载语义：
+    - 保持调用 `get_colored_icon(...)` 进行 SVG 染色加载
+    - 保持原有参数：`("folder_add.svg", "#FFFFFF", 45)`（与现有代码一致）
+  - 样式字符串保留（透明背景 + hover 轻微高亮）
+  - 点击发射逻辑保留（左键 emit `clicked`）
+  - 鼠标指针设置保留（`PointingHandCursor`）
+
+- `todo_board.py` import 替换说明：
+  - 新增导入：`from .common.todo_board_add_folder_card import AddFolderCard`
+  - 删除原内联 `AddFolderCard` 类定义
+  - `FolderViewContainer` 中 `AddFolderCard` 实例化与 `clicked.connect(...)` 逻辑未改
+
+- 循环导入风险及判断依据：
+  - 新文件未在模块顶层导入 `src.ui.todo_board.get_colored_icon`，而是在 `AddFolderCard.__init__` 内做延迟导入：
+    - `from ..todo_board import get_colored_icon`
+  - 判断依据：
+    - `todo_board.py` 模块导入阶段先定义顶层 `get_colored_icon`，再导入 `AddFolderCard` 文件；
+    - `AddFolderCard` 类本身在导入阶段不触发 `__init__`，不会立即反向导入；
+    - 运行时创建 `AddFolderCard()` 时，`todo_board` 模块已加载完成，导入可解析。
+  - 实际回归结果（见下）验证当前无循环导入异常。
+
+- 确认边界未越界：
+  - 未修改 `FolderCard`
+  - 未修改 `FolderViewContainer` 拖拽/排序/写回逻辑
+  - 未修改 `TodoBoardWindow` 主状态机
+  - 未修改 `TodoBoardWindow.show_toast`
+  - 未修改 `get_colored_icon` 实现
+  - 未修改 `_get_icon` 实现
+  - 未新增 `src/ui/common/todo_board_cards.py` / `src/ui/views/todo_board.py`
+
+- 验收命令结果：
+  - 定位新旧位置：
+    - `rg -n "^class AddFolderCard|from .*todo_board_add_folder_card import AddFolderCard|AddFolderCard" ...`
+    - 结果：`AddFolderCard` 类仅在新文件；`todo_board.py` 保留导入与使用点。
+  - `FolderCard` 未迁移检查：
+    - `rg -n "^class FolderCard|doubleClicked|delete_requested|current_drag_widget|QDrag|QMimeData" src/ui/todo_board.py`
+    - 结果：命中均在 `todo_board.py`，符合“只提取 AddFolderCard”。
+  - 未新增禁止文件：
+    - `Test-Path src\ui\common\todo_board_cards.py`：`False`
+    - `Test-Path src\ui\views\todo_board.py`：`False`
+    - `Test-Path src\ui\views\todo_board_cards.py`：`False`
+  - AddFolderCard import 验证：
+    - `add folder card import ok <class 'src.ui.common.todo_board_add_folder_card.AddFolderCard'>`
+  - TodoBoard import 回归：
+    - `todo board imports ok <class 'src.ui.todo_board.TodoBoardWindow'> <class 'src.ui.todo_board.FolderCard'> <class 'src.ui.common.todo_board_add_folder_card.AddFolderCard'>`
+  - AddFolderCard offscreen 基础实例化验证：
+    - `add folder card created True`
+    - `cursor PointingHandCursor`
+    - `has icon label True`
+    - `has name label True`
+  - TodoBoardWindow offscreen 基础实例化验证：
+    - `todo board created True`
+    - `view mode stick`
+  - 8-4b DayBlock 回归：
+    - `day block import ok <class 'src.ui.common.week_day_block.DayBlock'>`
+  - 8-3b toast helper 回归：
+    - `toast helper import ok <function show_center_toast ...>`
+  - 8-2b icon loader 回归：
+    - `icon loader import ok <function load_colored_svg_pixmap ...>`
+  - 默认入口 import 回归：
+    - `main import ok`
+  - 语法检查：
+    - `python -m py_compile src/ui/common/todo_board_add_folder_card.py src/ui/todo_board.py main.py`
+    - 结果：通过。
+
+- diff 范围检查结果：
+  - 禁止范围均无 diff：
+    - `src/ui/common/todo_board_cards.py`
+    - `src/ui/common/toast.py`
+    - `src/ui/common/week_day_block.py`
+    - `src/ui/utils/icon_loader.py`
+    - `src/ui/components.py`
+    - `src/ui/header.py`
+    - `src/ui/week_window.py`
+    - `src/ui/month_window.py`
+    - `src/ui/main_window.py`
+    - `src/ui/dashboard.py`
+    - `src/ui/add_view.py`
+    - `src/ui/add_view_week.py`
+    - `src/theme` / `src/data` / `src/repositories` / `src/services` / `src/controllers`
+    - `src/utils/signals.py` / `src/utils/styles.py`
+    - `assets` / `main.py` / `requirements.txt` / `schedule.db`
+  - `git diff --name-only -- src/ui`：
+    - 显示：`src/ui/todo_board.py`
+    - 说明：新增文件 `src/ui/common/todo_board_add_folder_card.py` 为未跟踪，`git diff` 不显示，已由 `git status` 确认。
+  - `git status --short --branch`：
+    - `M src/ui/todo_board.py`
+    - `?? src/ui/common/todo_board_add_folder_card.py`
+    - `M manage_instruction/Work_Log.md`
+    - `M manage_instruction/Work_Task_Prompts.md`（开工前既有）
+  - 当前总变更符合本轮允许范围：
+    - `src/ui/common/todo_board_add_folder_card.py`
+    - `src/ui/todo_board.py`
+    - `manage_instruction/Work_Log.md`
+    - `manage_instruction/Work_Task_Prompts.md`（开工前既有）
+
+- 未完成事项：
+  - 等待顾问窗口复核 8-6 结果。
+
+- 风险或疑点：
+  - `AddFolderCard` 在新文件内通过延迟导入复用 `todo_board.get_colored_icon`，当前回归通过，但后续若移动/重命名 `todo_board.py` 需要同步调整该导入路径。
+
+- 特别记录：
+  - 本轮只提取 `AddFolderCard`。
+  - 本轮不提取 `FolderCard`。
+  - 本轮不拆 `TodoBoardWindow` 主状态机。
+  - 本轮不修改待办看板业务行为。
+  - 本轮不修改 tooltip/toast/icon loader。
+  - 本轮不修改数据库或服务层。
