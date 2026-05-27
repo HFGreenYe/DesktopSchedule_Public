@@ -24,6 +24,7 @@ from .week_window import WeekWindow
 from .suspend_window_week import SuspendWindowWeek
 from .suspend_window_month import SuspendWindowMonth
 from .todo import TodoView
+from .common.toast import show_center_toast
 from ..services.reminder_service import ReminderService
 from ..controllers.main_controller import MainController
 from ..controllers.view_router import ViewRouter
@@ -679,35 +680,7 @@ class MainWindow(FramelessMainWindow):
         self.show()
 
     def show_toast(self, message):
-        from PyQt6.QtWidgets import QLabel
-        from PyQt6.QtCore import Qt, QTimer
-        
-        # 如果已经有提示在显示，先关掉
-        if hasattr(self, 'toast_label') and self.toast_label.isVisible():
-            self.toast_label.close()
-            
-        self.toast_label = QLabel(message, self)
-        self.toast_label.setStyleSheet("""
-            background-color: rgba(0, 0, 0, 0.75);
-            color: white;
-            padding: 12px 24px;
-            border-radius: 8px;
-            font-family: 'Microsoft YaHei';
-            font-size: 14px;
-            font-weight: bold;
-        """)
-        self.toast_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.toast_label.adjustSize()
-        self.toast_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents) # 鼠标穿透，不阻挡操作
-        
-        # 让弹窗完美居中在主窗口
-        x = (self.width() - self.toast_label.width()) // 2
-        y = (self.height() - self.toast_label.height()) // 2
-        self.toast_label.move(x, y)
-        self.toast_label.show()
-        
-        # 定时 0.5 秒后自动销毁关闭 (一闪而过)
-        QTimer.singleShot(500, self.toast_label.close)
+        self.toast_label = show_center_toast(self, message, attr_name="toast_label", duration_ms=500)
 
     def switch_to_suspend(self):
         pos = self.pos()

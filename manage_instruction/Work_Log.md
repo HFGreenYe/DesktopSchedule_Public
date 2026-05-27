@@ -796,3 +796,133 @@
   - 本轮不修改 QSS。
   - 本轮不处理 icon loader 后续统一。
   - 本轮不清理 8-2b 遗留的 `header.py` unused import，若需处理必须另开小工单。
+
+## 2026-05-27 第八轮 8-3b（MainWindow toast 单点提取）
+
+- 本轮任务名称：第八轮 8-3b（MainWindow toast 单点提取）。
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 27]`
+  - 既有变更：`M manage_instruction/Work_Task_Prompts.md`
+  - 说明：开工前已有管理文档 diff，本轮不视为源码问题。
+- 实际修改文件：
+  - `src/ui/common/toast.py`（新增）
+  - `src/ui/main_window.py`
+  - `manage_instruction/Work_Log.md`
+  - `manage_instruction/Work_Task_Prompts.md`（开工前既有管理文档 diff，本轮随复核锚点保留）
+
+- 新增 helper 文件和函数名：
+  - 文件：`src/ui/common/toast.py`
+  - 函数：`show_center_toast(parent, message, attr_name="toast_label", duration_ms=500)`
+
+- helper 签名与职责：
+  - 输入：
+    - `parent`：承载 toast 的 QWidget
+    - `message`：显示文本
+    - `attr_name`：保存标签属性名（默认 `toast_label`）
+    - `duration_ms`：自动关闭时长（默认 `500`）
+  - 输出：`QLabel`
+  - 行为：
+    - 若 `parent` 上已有同名 toast 且可见，先 `close()`
+    - 创建 `QLabel(message, parent)` 并回写到 `parent.toast_label`
+    - 使用与 MainWindow 原实现一致的样式字符串
+    - 居中定位规则保持不变
+    - `WA_TransparentForMouseEvents` 保持
+    - `QTimer.singleShot(duration_ms, label.close)`
+
+- helper 是否依赖 MainWindow：
+  - 否。仅依赖传入 `parent` 的 QWidget 基础能力，不引用 MainWindow 类型。
+
+- helper 是否访问 db_manager / Repository / Service：
+  - 否。无数据层、仓储层、服务层依赖。
+
+- `MainWindow.show_toast(message)` 兼容性说明：
+  - 方法名、参数保持不变：`show_toast(self, message)`。
+  - 对外调用方保持不变。
+  - 内部改为单行委托：
+    - `self.toast_label = show_center_toast(self, message, attr_name="toast_label", duration_ms=500)`
+  - 语义保持：
+    - parent 仍为 `self`
+    - 属性仍为 `self.toast_label`
+    - 先关旧 toast
+    - 样式、居中、透明鼠标、500ms 自动关闭保持一致
+
+- 确认未修改 `show_toast` 调用方：
+  - `main_window.py` 其他方法未改，仅 `show_toast` 方法体替换为 helper 委托。
+
+- 确认未修改 week/month/todo_board toast：
+  - `git diff --name-only -- src/ui/week_window.py`：无输出。
+  - `git diff --name-only -- src/ui/month_window.py`：无输出。
+  - `git diff --name-only -- src/ui/todo_board.py`：无输出。
+
+- 确认未创建 tooltip 文件：
+  - `Test-Path src\ui\common\tooltip.py`：`False`。
+
+- helper import 验证结果：
+  - 命令：
+    - `python -c "from src.ui.common.toast import show_center_toast; print(...)" `
+  - 输出：`toast helper import ok <function show_center_toast ...>`
+
+- helper offscreen 行为验证结果：
+  - 先执行了提示词原命令，失败原因：
+    - 原命令使用 `label.WidgetAttribute.WA_TransparentForMouseEvents`，在 PyQt6 中 `QLabel` 不提供该枚举属性，触发 `AttributeError`。
+  - 执行等价修正版（使用 `Qt.WidgetAttribute.WA_TransparentForMouseEvents`）后通过：
+    - `label text hello`
+    - `same attr True`
+    - `transparent True`
+    - `new label text world`
+    - `old closed or hidden True`
+  - 注：offscreen 且 parent 未 show 时 `label.isVisible()` 为 `False`，不影响属性/语义验证。
+
+- MainWindow import 验证结果：
+  - 输出：`main window import ok <class 'src.ui.main_window.MainWindow'>`
+
+- MainWindow offscreen show_toast 回归结果：
+  - 先执行了提示词原命令，失败原因同上（`w.toast_label.WidgetAttribute` 不存在）。
+  - 执行等价修正版（`Qt.WidgetAttribute...`）后通过：
+    - `toast attr True`
+    - `toast text toast check`
+    - `transparent True`
+  - 注：offscreen 且窗口未 show 时 `toast visible False` 属预期环境现象。
+
+- py_compile 结果：
+  - 命令：
+    - `python -m py_compile src/ui/common/toast.py src/ui/main_window.py main.py`
+  - 结果：通过。
+
+- main import 回归结果：
+  - 命令：
+    - `python -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; import main; print('main import ok')"`
+  - 结果：`main import ok`
+
+- diff 范围检查结果：
+  - 禁止范围：
+    - `src/theme` / `src/data` / `src/repositories` / `src/services` / `src/controllers` / `src/utils/signals.py` / `src/utils/styles.py` / `assets` / `main.py` / `requirements.txt` / `schedule.db`：均无 diff。
+    - `src/ui/header.py`、`src/ui/components.py`、`src/ui/list_picker.py`、`src/ui/add_view.py`、`src/ui/add_view_week.py`、`src/ui/alarm_picker.py`、`src/ui/alarm_picker_week.py`：均无 diff。
+  - `git diff --name-only -- src/ui`：
+    - 输出仅 `src/ui/main_window.py`
+    - 说明：`src/ui/common/toast.py` 为未跟踪新文件，`git diff` 不显示，已由 `git status` 确认。
+  - `git status --short --branch`：
+    - `M manage_instruction/Work_Log.md`
+    - `M src/ui/main_window.py`
+    - `?? src/ui/common/toast.py`
+    - `M manage_instruction/Work_Task_Prompts.md`（开工前既有）
+  - 当前总变更：
+    - `src/ui/common/toast.py`
+    - `src/ui/main_window.py`
+    - `manage_instruction/Work_Log.md`
+    - `manage_instruction/Work_Task_Prompts.md`（开工前既有）
+
+- 未完成事项：
+  - 8-3b 顾问窗口复核待完成。
+
+- 风险或疑点：
+  - 提示词中的两条 offscreen 验证命令存在 PyQt6 枚举访问写法问题（`label.WidgetAttribute`），执行窗口已保留失败记录并用等价修正版验证通过。
+  - 未对 1500ms toast 路径做任何改动，符合本轮收口边界。
+
+- 特别记录：
+  - 本轮只提取 MainWindow toast。
+  - 本轮不统一全部 toast。
+  - 本轮不处理 tooltip。
+  - 本轮不修改 QSS。
+  - 本轮不修改 1500ms toast 路径。
+  - 本轮不清理 8-2b 遗留的 `header.py` unused import。
