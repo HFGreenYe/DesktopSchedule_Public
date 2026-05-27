@@ -20,12 +20,12 @@
 
 第七轮：Theme / QSS 接入与样式债务控制，已完成并归档。
 
-第八轮：UI 拆分与样式债务整理，已完成 8-4a（WeekWindow 低风险类提取候选只读复核），等待顾问窗口复核。
+第八轮：UI 拆分与样式债务整理，已完成 8-4b（WeekWindow DayBlock 单类提取试点），等待顾问窗口复核。
 
 ## 当前轮次注意事项
 
 - 第七轮归档内容见 `History_Instruction.md` 与 `History_Log.md`。
-- 第八轮阶段合同已发布，当前已完成 8-0、8-1、8-2a、8-2b、8-3a、8-3b、8-4a，保持小工单推进。
+- 第八轮阶段合同已发布，当前已完成 8-0、8-1、8-2a、8-2b、8-3a、8-3b、8-4a、8-4b，保持小工单推进。
 - 第八轮规划应保持小工单策略，避免一次性拆大 UI 文件。
 - 第七轮遗留约束继续有效：基于 `default.qss / skin preset`，不建立 light/dark mode matrix。
 
@@ -1078,3 +1078,113 @@
   - 本轮不新增任何 WeekWindow 组件文件。
   - 本轮不修改 tooltip/toast/icon loader。
   - 本轮仅用于为 8-4b 锁定唯一候选类。
+
+## 2026-05-27 第八轮 8-4b（WeekWindow DayBlock 单类提取试点）
+
+- 本轮任务名称：第八轮 8-4b（WeekWindow DayBlock 单类提取试点）。
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 29]`
+  - 既有变更：`M manage_instruction/Work_Task_Prompts.md`
+  - 说明：开工前已有管理文档 diff，本轮不视为源码问题。
+- 实际修改文件：
+  - `src/ui/common/week_day_block.py`（新增）
+  - `src/ui/week_window.py`
+  - `manage_instruction/Work_Log.md`
+  - `manage_instruction/Work_Task_Prompts.md`（开工前既有管理文档 diff，本轮未新增修改）
+
+- `DayBlock` 新文件路径：
+  - `src/ui/common/week_day_block.py`
+
+- `DayBlock` 保持兼容内容确认：
+  - 类名：`DayBlock`
+  - signal：`clicked = pyqtSignal(QDate)`
+  - 构造函数：`__init__(self, parent=None)`
+  - 方法保留：`set_data`、`set_selected`、`update_style`、`mouseReleaseEvent`
+  - tooltip 逻辑保留：
+    - `removeEventFilter` / `deleteLater` / `installEventFilter`
+    - `ToolTipFilter` 文案格式保持 `阳历：...\n农历：...`
+  - 农历异常兜底保留：
+    - `except Exception: pass` 原样保留
+  - 样式字符串与控件结构保持不变。
+
+- `week_window.py` import 替换说明：
+  - 新增导入：`from .common.week_day_block import DayBlock`
+  - 删除原文件内联 `DayBlock` 类定义（仅此一段迁移）
+  - `WeekWindow` 对 `DayBlock` 的使用方式未改（`self.day_blocks`、`block.clicked.connect(...)`、`set_data(...)`、`set_selected(...)` 保持原样）。
+
+- 确认边界：
+  - 未修改 `WeekScheduleCard`。
+  - 未修改 `WeekWindow` 拖拽/排序/写库逻辑。
+  - 未修改 `WeekWindow.show_toast`。
+  - 未修改 tooltip 公共实现。
+  - 未修改 icon loader / toast helper。
+
+- 验收命令结果：
+  - 定位新旧位置：
+    - `rg -n "^class DayBlock|from .*week_day_block import DayBlock|DayBlock" ...`
+    - 结果：`DayBlock` 类仅在 `src/ui/common/week_day_block.py`，`week_window.py` 为导入和使用点。
+  - `WeekScheduleCard` 未迁移检查：
+    - `rg -n "^class WeekScheduleCard|CountdownToolTipFilter|current_drag_widget|req_status|req_pin|req_delete" src/ui/week_window.py`
+    - 结果：命中均在 `week_window.py`，符合“只提取 DayBlock”。
+  - 未新增禁止文件：
+    - `Test-Path src\ui\common\week_cards.py`：`False`
+    - `Test-Path src\ui\views\week_window.py`：`False`
+    - `Test-Path src\ui\views\week_cards.py`：`False`
+  - DayBlock import 验证：
+    - `day block import ok <class 'src.ui.common.week_day_block.DayBlock'>`
+  - WeekWindow import 回归：
+    - `week imports ok <class 'src.ui.week_window.WeekWindow'> <class 'src.ui.week_window.WeekScheduleCard'> <class 'src.ui.common.week_day_block.DayBlock'>`
+  - DayBlock offscreen 基础实例化验证：
+    - 提示词原命令失败（命令与现有接口不一致）：
+      - `set_data(QDate.currentDate(), False)` 将 `bool` 传给 `QLabel.setText`，触发 `TypeError`
+      - 并且命令读取 `b.date_obj`，而类原有字段为 `b.date`
+    - 等价兼容回归命令通过（保持类语义不改）：
+      - `set_data(QDate.currentDate(), '初一')`
+      - 校验 `b.date == QDate.currentDate()`
+      - 输出：`day block created True`、`selected true ok`、`selected false ok`
+  - WeekWindow offscreen 基础实例化验证：
+    - 输出：`week window created True`、`day blocks 7`
+  - 8-3b toast helper 回归：
+    - `toast helper import ok <function show_center_toast ...>`
+  - 8-2b icon loader 回归：
+    - `icon loader import ok <function load_colored_svg_pixmap ...>`
+  - main import 回归：
+    - `main import ok`
+  - py_compile：
+    - `python -m py_compile src/ui/common/week_day_block.py src/ui/week_window.py main.py`
+    - 结果：通过。
+
+- diff 范围检查结果：
+  - 禁止范围均无 diff：
+    - `src/ui/components.py`、`src/ui/header.py`、`src/ui/common/toast.py`、`src/ui/utils/icon_loader.py`
+    - `src/ui/todo_board.py`、`src/ui/month_window.py`、`src/ui/main_window.py`、`src/ui/dashboard.py`
+    - `src/ui/add_view.py`、`src/ui/add_view_week.py`
+    - `src/theme`、`src/data`、`src/repositories`、`src/services`、`src/controllers`
+    - `src/utils/signals.py`、`src/utils/styles.py`
+    - `assets`、`main.py`、`requirements.txt`、`schedule.db`
+  - `git diff --name-only -- src/ui`：
+    - 仅显示 `src/ui/week_window.py`（新增文件在 `git diff` 中不显示）
+  - `git status --short --branch`：
+    - `M src/ui/week_window.py`
+    - `?? src/ui/common/week_day_block.py`
+    - `M manage_instruction/Work_Log.md`
+    - `M manage_instruction/Work_Task_Prompts.md`（开工前既有）
+  - 当前总变更符合本轮允许范围：
+    - `src/ui/common/week_day_block.py`
+    - `src/ui/week_window.py`
+    - `manage_instruction/Work_Log.md`
+    - `manage_instruction/Work_Task_Prompts.md`（开工前既有）
+
+- 未完成事项：
+  - 等待顾问窗口复核 8-4b 结果。
+
+- 风险或疑点：
+  - 提示词中的 DayBlock offscreen 命令与既有接口不一致（`bool` 文案参数、`date_obj` 字段名）；执行窗口已保留失败记录并使用等价命令完成行为回归，不对类语义做额外“适配性改造”。
+
+- 特别记录：
+  - 本轮只提取 `DayBlock`。
+  - 本轮不提取 `WeekScheduleCard`。
+  - 本轮不拆 `WeekWindow` 主流程。
+  - 本轮不修改周视图业务行为。
+  - 本轮不修改 tooltip/toast/icon loader。
+  - 本轮不修改数据库或服务层。
