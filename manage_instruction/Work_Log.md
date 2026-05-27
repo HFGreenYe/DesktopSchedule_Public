@@ -20,12 +20,12 @@
 
 第七轮：Theme / QSS 接入与样式债务控制，已完成并归档。
 
-第八轮：UI 拆分与样式债务整理，已完成 8-4b（WeekWindow DayBlock 单类提取试点），等待顾问窗口复核。
+第八轮：UI 拆分与样式债务整理，已完成 8-5（TodoBoard 只读基线与低风险拆分候选确认），等待顾问窗口复核。
 
 ## 当前轮次注意事项
 
 - 第七轮归档内容见 `History_Instruction.md` 与 `History_Log.md`。
-- 第八轮阶段合同已发布，当前已完成 8-0、8-1、8-2a、8-2b、8-3a、8-3b、8-4a、8-4b，保持小工单推进。
+- 第八轮阶段合同已发布，当前已完成 8-0、8-1、8-2a、8-2b、8-3a、8-3b、8-4a、8-4b、8-5，保持小工单推进。
 - 第八轮规划应保持小工单策略，避免一次性拆大 UI 文件。
 - 第七轮遗留约束继续有效：基于 `default.qss / skin preset`，不建立 light/dark mode matrix。
 
@@ -1188,3 +1188,201 @@
   - 本轮不修改周视图业务行为。
   - 本轮不修改 tooltip/toast/icon loader。
   - 本轮不修改数据库或服务层。
+
+## 2026-05-27 第八轮 8-5（TodoBoard 只读基线与低风险拆分候选确认）
+
+- 本轮任务名称：第八轮 8-5（TodoBoard 只读基线与低风险拆分候选确认）。
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 30]`
+  - 既有变更：`M manage_instruction/Work_Task_Prompts.md`
+  - 说明：开工前已有管理文档 diff，本轮不视为源码问题。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+  - `manage_instruction/Work_Task_Prompts.md`（开工前既有管理文档 diff，本轮未新增修改）
+
+- `todo_board.py` 类/函数结构地图：
+  - 顶层 helper：
+    - `get_colored_icon(...)`（L18）
+  - 卡片/容器类：
+    - `StickyNoteCard`（L47）
+    - `DropWidget`（L233）
+    - `StickViewContainer`（L253）
+    - `FolderCard`（L429）
+    - `AddFolderCard`（L571）
+    - `FolderViewContainer`（L617）
+    - `ManageCategoryCard`（L784）
+    - `ManageListView`（L827）
+    - `InlineAddTodoView`（L1006）
+  - 主状态机窗口：
+    - `TodoBoardWindow`（L1216）
+
+- 主状态机字段与职责地图（`TodoBoardWindow`）：
+  - 核心状态字段：
+    - `view_mode`（`stick/folder`）
+    - `current_folder_id`、`current_folder_name`
+    - `view_stack`（`manage_list_view/stick_view/folder_view/empty_placeholder/inline_add_view/page_list`）
+    - `_last_signature`（防闪烁签名）
+    - `list_picker_mode`、`editing_schedule`（编辑清单回流）
+    - `is_pinned`、`_drag_pos`
+  - 核心职责：
+    - 数据刷新与签名短路（`refresh_data`）
+    - 视图模式切换与导航图标状态（`_switch_view/_update_nav_icons`）
+    - 文件夹内外路由（`_open_folder_view/_back_to_folder_view`）
+    - 编辑清单回流（`go_to_list_picker* / on_list_confirmed / back_from_list_picker`）
+    - 详情弹窗借道主面板（`_show_detail_popup`）
+    - 全局刷新通知（`notify_main_window_refresh`）
+    - 一键排序与写回（`_sort_by_priority`）
+
+- 写库调用地图：
+  - 日程写入/更新：
+    - `db_manager.add_schedule`（InlineAddTodoView 保存）
+    - `db_manager.update_schedule_with_repeat`（编辑清单）
+    - `db_manager.update_schedule_status` / `toggle_pin_status` / `delete_schedule`
+    - `db_manager.update_schedule_fields(..., sort_order=...)`（便签排序写回）
+  - 清单写入/删除：
+    - `db_manager.add_category`
+    - `db_manager.check_category_status`
+    - `db_manager.soft_delete_category` / `hard_delete_category`
+    - `db_manager.update_category_fields(..., sort_order=...)`（文件夹排序写回）
+  - 读取：
+    - `db_manager.get_all_schedules`、`get_active_categories`、`get_category`
+
+- 拖拽/排序/写回链路地图：
+  - 便签拖拽：
+    - `StickyNoteCard.mouseMoveEvent` -> `DropWidget.dragMoveEvent/dropEvent` -> `StickViewContainer._handle_drag_move/_reorder_layout/_save_new_order`
+    - 写回：`update_schedule_fields(sort_order=...)`
+  - 文件夹拖拽：
+    - `FolderCard.mouseMoveEvent` -> `FolderViewContainer._handle_drag_move/_reorder_layout/_save_new_order`
+    - 写回：`update_category_fields(sort_order=...)`
+  - 主窗口排序按钮：
+    - `TodoBoardWindow._sort_by_priority` -> 批量 `update_schedule_fields(sort_order=...)`
+
+- toast / tooltip / icon loader 地图：
+  - toast：
+    - `TodoBoardWindow.show_toast`（1500ms，居中，`toast_label`）
+    - `InlineAddTodoView._on_save` 与 `ManageListView` 删除分支借用 `window().show_toast(...)`
+  - tooltip：
+    - `TodoBoardWindow._apply_custom_tooltip` 通过 `header.ToolTipFilter` 绑定顶部按钮
+  - icon loader：
+    - 顶层 `get_colored_icon`（大量卡片/内联视图复用）
+    - `TodoBoardWindow._get_icon`（SVG/位图双分支，导航按钮专用）
+
+- 跨视图与详情弹窗回流地图：
+  - 详情弹窗借道：
+    - `TodoBoardWindow._show_detail_popup` -> `main_win.page_dashboard._show_detail_popup(..., source_view='todo_board')`
+    - 后续遍历 `open_popups` 调整位置
+  - 跨视图刷新：
+    - `notify_main_window_refresh` 直接调用 `parent.page_todo.refresh_data()`
+    - 同时 `parent.page_dashboard.req_refresh_all.emit()`
+  - 初始化连接：
+    - 监听 `parent.page_add.saved`、`parent.page_dashboard.req_refresh_all`、`parent.page_todo.req_refresh_all`
+  - 弹窗数据同步：
+    - `refresh_data` 内遍历 `page_dashboard.open_popups` 并刷新弹窗字段显示
+
+- `FolderCard` 定义范围、职责、依赖、风险等级：
+  - 定义范围：L429-L570
+  - 构造签名：`__init__(self, category_id, category_name, is_empty, parent=None)`
+  - signal：
+    - `clicked(object)`
+    - `doubleClicked(object, str)`
+    - `delete_requested(int, str)`
+  - public 属性：`category_id/category_name/is_empty/icon_label/name_label`
+  - event handler：
+    - `_show_context_menu`
+    - `mouseDoubleClickEvent`
+    - `mousePressEvent/mouseMoveEvent/mouseReleaseEvent`（含 QDrag）
+  - 依赖：
+    - `get_colored_icon`
+    - `QMenu/QAction`
+    - 父容器 `current_drag_widget` 隐式契约
+  - db_manager：无直接调用
+  - 是否直接调用 TodoBoardWindow：无直接调用，但通过父容器拖拽契约和信号与主状态机强耦合
+  - 是否依赖 `view_mode/current_folder_id/view_stack`：不直接依赖
+  - 是否参与拖拽/排序写回：是（文件夹拖拽入口）
+  - 是否依赖 toast / tooltip / icon loader：依赖 icon loader
+  - 提取所需 import：`QFrame/QVBoxLayout/QLabel/QMenu/QAction/QDrag/QMimeData/Qt/pyqtSignal/get_colored_icon`
+  - 提取后调用方改动：`FolderViewContainer` 创建与 `isinstance(FolderCard)` 判断、拖拽类型判断
+  - 风险等级：中（交互较多，拖拽链路敏感）
+
+- `AddFolderCard` 定义范围、职责、依赖、风险等级：
+  - 定义范围：L571-L616
+  - 构造签名：`__init__(self, parent=None)`
+  - signal：`clicked()`
+  - public 属性：`icon_label/name_label`
+  - event handler：`mouseReleaseEvent`（只发 `clicked`）
+  - 依赖：`get_colored_icon`、基础 Qt 组件
+  - db_manager：无
+  - 是否直接调用 TodoBoardWindow：无（仅 signal）
+  - 是否依赖 `view_mode/current_folder_id/view_stack`：无
+  - 是否参与拖拽/排序写回：否
+  - 是否依赖 toast / tooltip / icon loader：仅 icon loader
+  - 提取所需 import：`QFrame/QVBoxLayout/QLabel/Qt/pyqtSignal/get_colored_icon`
+  - 提取后调用方改动：`FolderViewContainer` 中实例化与 `clicked` 连接
+  - 风险等级：低（纯展示+单击信号）
+
+- 其它候选类或 helper 风险等级：
+  - `ManageCategoryCard`：中（右键删除动作链路）
+  - `FolderViewContainer`：中高（拖拽排序写回 + 卡片类型判断）
+  - `StickViewContainer`：高（便签拖拽/排序写回 + 主窗口刷新回流）
+  - `InlineAddTodoView`：高（写库、校验、清单 picker 入口）
+  - `TodoBoardWindow`：高（主状态机，跨视图桥接，弹窗借道，刷新定时器）
+  - 顶层 `get_colored_icon`：中（复用面广，改动需联动验证）
+
+- 高风险暂缓项：
+  - `TodoBoardWindow` 主状态机整体迁移
+  - `view_mode/current_folder_id/view_stack` 状态流迁移
+  - sort_order 写回链路（便签/文件夹）
+  - `go_to_list_picker* / on_list_confirmed / back_from_list_picker`
+  - 详情弹窗借道 `page_dashboard._show_detail_popup`
+  - `notify_main_window_refresh` 跨视图刷新链路
+
+- 8-6 建议的唯一候选类：
+  - 建议唯一候选：`AddFolderCard`
+  - 原因：依赖最少、无拖拽、无写库、无状态机字段、回归成本最低。
+  - 不建议 8-6 直接提取 `FolderCard`（拖拽与上下文菜单交互较多，风险更高）。
+
+- 若不建议直接提取的补充：
+  - 若顾问窗口认为仍需更保守，建议 8-6 先做 `todo_board.py` 局部 import 边界清理（只读/微调）再提取 `AddFolderCard`。
+
+- 验证回归结果：
+  - 未新增 TodoBoard 拆分文件：
+    - `Test-Path src\ui\common\todo_board_cards.py`：`False`
+    - `Test-Path src\ui\views\todo_board.py`：`False`
+    - `Test-Path src\ui\views\todo_board_cards.py`：`False`
+  - TodoBoard import 回归：
+    - `todo board import ok <class 'src.ui.todo_board.TodoBoardWindow'>`
+  - 8-4b DayBlock 回归：
+    - `day block import ok <class 'src.ui.common.week_day_block.DayBlock'>`
+  - 8-3b toast helper 回归：
+    - `toast helper import ok <function show_center_toast ...>`
+  - 8-2b icon loader 回归：
+    - `icon loader import ok <function load_colored_svg_pixmap ...>`
+
+- diff 范围检查结果：
+  - `git diff --name-only -- src`：无输出。
+  - `git diff --name-only -- assets`：无输出。
+  - `git diff --name-only -- main.py`：无输出。
+  - `git diff --name-only -- requirements.txt`：无输出。
+  - `git diff --name-only -- schedule.db`：无输出。
+  - 当前总 diff：
+    - `manage_instruction/Work_Log.md`（本轮）
+    - `manage_instruction/Work_Task_Prompts.md`（开工前既有）
+  - `git status --short --branch`：
+    - `## main...temp/main [ahead 30]`
+    - `M manage_instruction/Work_Task_Prompts.md`
+    - `M manage_instruction/Work_Log.md`
+
+- 未完成事项：
+  - 等待顾问窗口确认 8-6 是否按 `AddFolderCard` 单类提取推进。
+
+- 风险或疑点：
+  - `todo_board.py` 同时存在顶层 `get_colored_icon` 和成员 `_get_icon` 两套图标路径，后续若要统一需要单独小工单，不能与 8-6 类提取并行。
+  - `FolderViewContainer._save_new_order` 依赖 `isinstance(FolderCard)` 与“最后一个 AddFolderCard 保留位”，若后续提取 `FolderCard` 风险高于 `AddFolderCard`。
+
+- 特别记录：
+  - 本轮只读审查，不改源码。
+  - 本轮不拆 `todo_board.py`。
+  - 本轮不新增任何 TodoBoard 组件文件。
+  - 本轮不修改 tooltip/toast/icon loader。
+  - 本轮不修改数据库或服务层。
+  - 本轮仅用于为 8-6 判断唯一低风险候选类。
