@@ -20,12 +20,12 @@
 
 第七轮：Theme / QSS 接入与样式债务控制，已完成并归档。
 
-第八轮：UI 拆分与样式债务整理，已完成 8-7（MainWindow / MonthWindow / AddView 拆分候选复核），等待顾问窗口复核。
+第八轮：UI 拆分与样式债务整理，已完成 8-8（第八轮整体验收与归档准备），结论为第八轮可归档，等待顾问窗口复核。
 
 ## 当前轮次注意事项
 
 - 第七轮归档内容见 `History_Instruction.md` 与 `History_Log.md`。
-- 第八轮阶段合同已发布，当前已完成 8-0、8-1、8-2a、8-2b、8-3a、8-3b、8-4a、8-4b、8-5、8-6、8-7，保持小工单推进。
+- 第八轮阶段合同已发布，当前已完成 8-0、8-1、8-2a、8-2b、8-3a、8-3b、8-4a、8-4b、8-5、8-6、8-7、8-8，保持小工单推进。
 - 第八轮规划应保持小工单策略，避免一次性拆大 UI 文件。
 - 第七轮遗留约束继续有效：基于 `default.qss / skin preset`，不建立 light/dark mode matrix。
 
@@ -1650,3 +1650,124 @@
   - 本轮不修改数据库或服务层。
   - 本轮不一次性拆多个 UI 文件。
   - 本轮用于判断第八轮是否继续提取，或转入归档验收。
+
+## 2026-05-27 第八轮 8-8（第八轮整体验收与归档准备）
+
+- 本轮任务名称：第八轮 8-8（第八轮整体验收与归档准备）。
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 33]`
+  - 既有变更：`M manage_instruction/Work_Task_Prompts.md`
+  - 说明：开工前已有管理文档 diff，本轮不视为源码问题。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+  - `manage_instruction/Work_Task_Prompts.md`（开工前既有管理文档 diff，本轮未新增修改）
+
+- 第八轮完成项汇总（8-0 到 8-7）：
+  - 8-0：完成 UI 大文件静态审查与职责地图，给出拆分风险分级与小工单顺序。
+  - 8-1：完成 `src/ui/common/views/dialogs/popups/utils` 包骨架与 `__init__.py`。
+  - 8-2a：完成 icon loader 重复逻辑只读定位与提取候选基线。
+  - 8-2b：新增 `src/ui/utils/icon_loader.py`，仅替换 `header.py::_load_colored_svg(...)` 内部实现。
+  - 8-3a：完成 tooltip/toast 分布、生命周期与风险分级只读基线。
+  - 8-3b：新增 `src/ui/common/toast.py`，仅替换 `main_window.py::show_toast(...)` 内部委托。
+  - 8-4a：完成 `week_window.py` 候选类只读复核，锁定 `DayBlock` 为低风险提取目标。
+  - 8-4b：新增 `src/ui/common/week_day_block.py`，`week_window.py` 改为导入 `DayBlock`。
+  - 8-5：完成 `todo_board.py` 只读基线，锁定 `AddFolderCard` 为低风险候选。
+  - 8-6：新增 `src/ui/common/todo_board_add_folder_card.py`，`todo_board.py` 改为导入 `AddFolderCard`。
+  - 8-7：完成 MainWindow/MonthWindow/AddView/DetailPop 剩余候选复核，建议转入 8-8 验收归档。
+
+- 新增 UI 包目录：
+  - `src/ui/common/`
+  - `src/ui/views/`
+  - `src/ui/dialogs/`
+  - `src/ui/popups/`
+  - `src/ui/utils/`
+
+- 新增 helper / 组件：
+  - `src/ui/utils/icon_loader.py`
+  - `src/ui/common/toast.py`
+  - `src/ui/common/week_day_block.py`
+  - `src/ui/common/todo_board_add_folder_card.py`
+
+- 已替换调用边界：
+  - `src/ui/header.py::_load_colored_svg(...)` -> 委托 icon loader helper
+  - `src/ui/main_window.py::show_toast(...)` -> 委托 toast helper
+  - `src/ui/week_window.py` -> `DayBlock` 从 `src/ui/common/week_day_block.py` 导入
+  - `src/ui/todo_board.py` -> `AddFolderCard` 从 `src/ui/common/todo_board_add_folder_card.py` 导入
+
+- 第八轮未拆 UI 债务：
+  - `WeekScheduleCard`
+  - `FolderCard`
+  - `TodoBoardWindow`
+  - `month_window.py`
+  - `add_view.py` / `add_view_week.py`
+  - `schedule_detail_pop.py`
+
+- 第八轮推迟项与原因：
+  - 拖拽/排序写回：涉及 `sort_order` 与多容器状态同步，回归面过大。
+  - picker/edit 回流：涉及 MainWindow + WeekWindow + TodoBoard 多分支编辑路径。
+  - detail popup 回流：`source_view` 分支 + `schedule_updated` 事件链耦合高。
+  - 复杂 tooltip / countdown tooltip：eventFilter 与计时器生命周期分散。
+  - 统一 icon loader / toast / QSS 大范围迁移：跨文件影响面过大，不符合单点小工单原则。
+
+- UI 包骨架 import 验证结果：
+  - 命令通过：`ui package skeleton import ok`。
+
+- 第八轮新增模块 import 验证结果：
+  - 命令通过：`round 8 extracted imports ok`。
+
+- 关键 UI import 验证结果：
+  - 命令通过：`key ui imports ok`。
+  - 验证类：`HeaderBar/MainWindow/WeekWindow/MonthWindow/TodoBoardWindow/AddScheduleView/AddScheduleViewWeek/ScheduleDetailPop`。
+
+- 第七轮主题基础验证结果：
+  - `ThemeManager` import 通过。
+  - `ThemeManager.DEFAULT_PRESET == 'default.qss'`。
+  - `SUPPORTED_PRESETS == ('default.qss', 'light.qss', 'dark.qss')`。
+  - `src/theme/default.qss` 存在：`True`。
+
+- 第六轮协调层验证结果：
+  - `MainController/ViewRouter/RefreshCoordinator/global_signals` import 均通过。
+
+- 旧数据路径基础验证结果：
+  - `db_manager` import 通过。
+  - `len(db_manager.get_all_schedules()) == 75`
+  - `len(db_manager.get_active_categories()) == 7`
+
+- main import 验证结果：
+  - `QT_QPA_PLATFORM=offscreen` 下 `main import ok`。
+
+- py_compile 结果：
+  - `python -m py_compile src/ui/utils/icon_loader.py src/ui/common/toast.py src/ui/common/week_day_block.py src/ui/common/todo_board_add_folder_card.py src/ui/header.py src/ui/main_window.py src/ui/week_window.py src/ui/todo_board.py main.py`
+  - 结果：通过。
+
+- diff 范围检查结果：
+  - `git diff --name-only -- src`：无输出（`src` 无 diff）。
+  - `git diff --name-only -- assets`：无输出。
+  - `git diff --name-only -- main.py`：无输出。
+  - `git diff --name-only -- requirements.txt`：无输出。
+  - `git diff --name-only -- schedule.db`：无输出（tracked diff 无）。
+  - `git diff --name-only`：`manage_instruction/Work_Task_Prompts.md`（开工前既有）与 `manage_instruction/Work_Log.md`。
+  - `git status --short --branch`：
+    - `## main...temp/main [ahead 33]`
+    - `M manage_instruction/Work_Task_Prompts.md`
+    - `M manage_instruction/Work_Log.md`
+
+- 第八轮是否可归档：
+  - 结论：第八轮可归档。
+  - 依据：8-0~8-7 目标均完成；新增模块/关键 UI/主题基础/协调层/数据路径/main import 与 py_compile 均通过；源码层无新增未授权 diff。
+
+- 下一轮建议：
+  - 建议进入第九轮规划或按 `Work_Formulation.md` 后续路线继续。
+  - 若继续 UI 拆分，保持“单文件单边界单替换点”策略，优先只读基线后再最小提取。
+
+- 未完成事项：
+  - 本轮无新增未完成事项；等待顾问窗口复核归档结论。
+
+- 风险或疑点：
+  - 第八轮仍保留高耦合 UI 债务（`TodoBoardWindow` 主状态机、`schedule_detail_pop.py` 编辑回流、`add_view*` 重复结构），后续必须继续拆小工单逐步处理。
+
+- 特别记录：
+  - 本轮不改源码。
+  - 本轮不新增 UI 组件。
+  - 本轮不修改数据库。
+  - 本轮只做整体验收与归档判断。
