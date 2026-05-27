@@ -1,57 +1,54 @@
 # Work Task Prompts
 
-## 第八轮 8-6：TodoBoard AddFolderCard 单类提取试点
+## 第八轮 8-7：MainWindow / MonthWindow / AddView 拆分候选复核
 
 ```markdown
-请执行第八轮 8-6：TodoBoard AddFolderCard 单类提取试点。本轮只提取 `AddFolderCard` 一个类，不处理 `FolderCard`，不改 TodoBoard 主状态机。
+请执行第八轮 8-7：MainWindow / MonthWindow / AddView 拆分候选复核。本轮只做静态审查、代码阅读、搜索和日志记录，不改源码。
 
 ## 1. 本轮目标
 
-基于 8-5 只读基线结论，将 `src/ui/todo_board.py` 中的 `AddFolderCard` 类移动到独立文件，并保持 `FolderViewContainer` 对 `AddFolderCard` 的使用行为不变。
+基于第八轮阶段合同和 8-0 到 8-6 的结果，对剩余中高风险 UI 文件做拆分候选复核，明确哪些边界适合第八轮继续小步提取，哪些应推迟到后续轮次。
+
+本轮重点审查：
+
+- `src/ui/main_window.py`
+- `src/ui/month_window.py`
+- `src/ui/add_view.py`
+- `src/ui/add_view_week.py`
+- `src/ui/schedule_detail_pop.py`
 
 本轮目标：
 
-- 新增 `src/ui/common/todo_board_add_folder_card.py`。
-- 将 `AddFolderCard` 类完整移动到该文件。
-- `src/ui/todo_board.py` 从新文件导入 `AddFolderCard`。
-- 保持 `AddFolderCard` 类名、构造函数、signal、方法名、样式、图标加载、点击行为不变。
-- 保持 `FolderViewContainer` 中 `AddFolderCard` 实例化、`clicked.connect(...)`、布局位置不变。
-- 不提取 `FolderCard`。
-- 不修改 `TodoBoardWindow`。
-- 不修改拖拽、排序、写库、toast、tooltip、icon loader。
-- 不改变待办看板 UI 行为。
+- 建立剩余 UI 大文件的职责地图。
+- 定位可拆边界：
+  - toast / tooltip / icon loader
+  - window controls
+  - inline add
+  - picker 回流
+  - detail popup 回流
+  - view selector
+  - refresh / signal / coordinator 调用
+  - 样式债务
+- 判断是否还适合在第八轮继续做一个小提取工单。
+- 输出建议：
+  - 可继续在第八轮处理的低风险项
+  - 需要先做只读基线的中风险项
+  - 应推迟到后续轮次的高风险项
+- 不迁移任何类。
+- 不新增文件。
+- 不替换任何 import。
+- 不改变 UI 行为。
 
 ## 2. 允许/禁止
 
 本轮允许修改：
 
-- `src/ui/common/todo_board_add_folder_card.py`
-- `src/ui/todo_board.py`
 - `manage_instruction/Work_Log.md`
 - `manage_instruction/Work_Task_Prompts.md`（仅在需要维护复核锚点时）
 
 本轮禁止修改：
 
-- `src/ui/common/todo_board_cards.py`
-- `src/ui/common/toast.py`
-- `src/ui/common/week_day_block.py`
-- `src/ui/utils/icon_loader.py`
-- `src/ui/components.py`
-- `src/ui/header.py`
-- `src/ui/week_window.py`
-- `src/ui/month_window.py`
-- `src/ui/main_window.py`
-- `src/ui/dashboard.py`
-- `src/ui/add_view.py`
-- `src/ui/add_view_week.py`
-- 除 `src/ui/todo_board.py` 与 `src/ui/common/todo_board_add_folder_card.py` 外的任何 `src/ui/` 文件
-- `src/theme/`
-- `src/data/`
-- `src/repositories/`
-- `src/services/`
-- `src/controllers/`
-- `src/utils/signals.py`
-- `src/utils/styles.py`
+- `src/`
 - `assets/`
 - `main.py`
 - `requirements.txt`
@@ -61,16 +58,17 @@
 
 禁止事项：
 
-- 不提取 `FolderCard`。
-- 不修改 `FolderCard`。
-- 不修改 `FolderViewContainer` 拖拽/排序/写回逻辑。
-- 不修改 `TodoBoardWindow` 主状态机。
-- 不修改 `TodoBoardWindow.show_toast`。
-- 不修改 `get_colored_icon` 实现。
-- 不修改 `_get_icon` 实现。
-- 不新增 `src/ui/common/todo_board_cards.py`。
-- 不新增 `src/ui/views/todo_board.py`。
-- 不修改 `src/ui/common/__init__.py`，除非确有必要；若修改，只能做轻量导出且必须说明原因。
+- 不修改 `main_window.py`。
+- 不修改 `month_window.py`。
+- 不修改 `add_view.py`。
+- 不修改 `add_view_week.py`。
+- 不修改 `schedule_detail_pop.py`。
+- 不新增 `src/ui/common/` 下的新组件文件。
+- 不修改 `src/ui/common/toast.py`。
+- 不修改 `src/ui/common/week_day_block.py`。
+- 不修改 `src/ui/common/todo_board_add_folder_card.py`。
+- 不修改 `src/ui/utils/icon_loader.py`。
+- 不修改数据层、服务层、控制层。
 - 不提交 Git。
 
 若开工前已有 diff，需在 `Work_Log.md` 单独记录，不视为本轮源码问题。
@@ -82,187 +80,172 @@
     Get-Content -Path manage_instruction\Work_Instruction.md -Encoding UTF8
     Get-Content -Path manage_instruction\Work_Log.md -Encoding UTF8
     Get-Content -Path manage_instruction\Work_Task_Prompts.md -Encoding UTF8
-    Get-Content -Path src\ui\todo_board.py -Encoding UTF8
 
-2. 新增 `src/ui/common/todo_board_add_folder_card.py`。
+2. 定位目标文件体量和类/函数结构：
 
-    将 `AddFolderCard` 类从 `src/ui/todo_board.py` 移入新文件。
+    Get-ChildItem src\ui\main_window.py,src\ui\month_window.py,src\ui\add_view.py,src\ui\add_view_week.py,src\ui\schedule_detail_pop.py | Select-Object Name,Length
+    rg -n "^class |^def |^    def " src/ui/main_window.py src/ui/month_window.py src/ui/add_view.py src/ui/add_view_week.py src/ui/schedule_detail_pop.py
 
-    必须保留：
+3. 定位 toast / tooltip / icon loader 候选：
 
-    - `class AddFolderCard(QFrame)`
-    - `clicked = pyqtSignal()`
-    - `__init__(self, parent=None)`
-    - `mouseReleaseEvent(...)`
-    - 原有控件结构
-    - 原有样式字符串
-    - 原有 `get_colored_icon("plus-circle.svg", "#FFFFFF", 32)` 调用语义
-    - 原有鼠标指针设置
-    - 原有点击发射 `clicked`
+    rg -n "show_toast|toast_label|CustomToolTip|ToolTipFilter|setToolTip|_load_colored|_get_icon|get_colored_icon|QSvgRenderer|setIcon|setPixmap" src/ui/main_window.py src/ui/month_window.py src/ui/add_view.py src/ui/add_view_week.py src/ui/schedule_detail_pop.py
 
-3. 调整 `src/ui/todo_board.py`。
+4. 定位 picker 回流、详情弹窗和跨视图协调：
 
-    只允许做以下最小改动：
+    rg -n "picker|go_to_|back_from|confirm|confirmed|edit|editing|ScheduleDetail|_show_detail|open_popups|ViewRouter|MainController|RefreshCoordinator|global_signals|req_refresh|saved|emit" src/ui/main_window.py src/ui/month_window.py src/ui/add_view.py src/ui/add_view_week.py src/ui/schedule_detail_pop.py
 
-    - 删除原 `AddFolderCard` 类定义。
-    - 从 `src.ui.common.todo_board_add_folder_card` 或相对路径导入 `AddFolderCard`。
-    - 保持 `FolderViewContainer` 中所有 `AddFolderCard` 使用方式不变。
-    - 不修改 `FolderCard`。
-    - 不修改 `FolderViewContainer` 拖拽/排序/写回逻辑。
-    - 不修改 `TodoBoardWindow`。
-    - 不修改其它方法行为。
+5. 定位写库和业务状态调用：
 
-4. 处理 import。
+    rg -n "db_manager|add_schedule|update_schedule|update_schedule_with_repeat|delete_schedule|update_schedule_fields|update_schedule_status|toggle_pin_status|add_category|soft_delete_category|hard_delete_category|check_category_status" src/ui/main_window.py src/ui/month_window.py src/ui/add_view.py src/ui/add_view_week.py src/ui/schedule_detail_pop.py
 
-    - `todo_board_add_folder_card.py` 只导入 `AddFolderCard` 实际需要的依赖。
-    - 如果需要复用 `get_colored_icon`，允许从 `src.ui.todo_board` 导入该函数，但必须评估并记录是否造成循环导入风险。
-    - 更推荐将 `get_colored_icon` 保留在 `todo_board.py`，并在本轮仅做最小可运行导入；不得同时迁移 icon helper。
-    - `todo_board.py` 中如果因移出 `AddFolderCard` 产生明确未使用 import，可以只删除与 `AddFolderCard` 独占相关且确定不再使用的 import。
-    - 不做大范围 import 整理。
-    - 不重排无关 import。
-    - 不改业务逻辑。
+6. 定位样式债务：
 
-5. 更新 `manage_instruction/Work_Log.md`。
+    rg -n "setStyleSheet|StyleManager|get_.*style|role|variant|state|setProperty|default.qss|theme" src/ui/main_window.py src/ui/month_window.py src/ui/add_view.py src/ui/add_view_week.py src/ui/schedule_detail_pop.py
+
+7. 分析 `main_window.py`：
+
+    记录：
+
+    - 主要职责。
+    - 已由第六轮 Controller/Router 承接的边界。
+    - 仍留在 MainWindow 内的展示辅助。
+    - toast 是否已由 8-3b 收口。
+    - 详情弹窗回流风险。
+    - 视图容器/切换/挂起窗口风险。
+    - 是否还有适合第八轮的小提取项。
+    - 风险等级。
+
+8. 分析 `month_window.py`：
+
+    记录：
+
+    - 主要职责。
+    - inline add、calendar、weather、view selector、window controls、toast 的边界。
+    - 是否直接写库。
+    - 是否适合提取单个低风险类或 helper。
+    - 与 `week_window.py` 的相似点和不可直接复用点。
+    - 风险等级。
+
+9. 分析 `add_view.py` 与 `add_view_week.py`：
+
+    记录：
+
+    - 两文件重复结构。
+    - 保存/校验/重复规则/时间提醒/list picker 相关边界。
+    - tooltip/icon loader 重复点。
+    - 是否适合第八轮做单点提取。
+    - 哪些应推迟到后续表单重构轮次。
+    - 风险等级。
+
+10. 分析 `schedule_detail_pop.py`：
+
+    记录：
+
+    - 主要职责。
+    - source_view 分支。
+    - 编辑回流。
+    - 写库调用。
+    - tooltip/icon loader/style 债务。
+    - 为什么是否应继续推迟。
+    - 风险等级。
+
+11. 输出下一步建议：
+
+    - 如果存在一个明确低风险候选，建议下一步编号和唯一目标。
+    - 如果没有低风险候选，建议进入 `8-8` 第八轮整体验收与归档准备。
+    - 不得建议一次性拆多个文件。
+    - 不得建议直接拆高风险主流程。
+
+12. 更新 `manage_instruction/Work_Log.md`。
 
 ## 4. 验收命令
 
-定位 AddFolderCard 新旧位置：
+文件体量和结构：
 
-    rg -n "^class AddFolderCard|from .*todo_board_add_folder_card import AddFolderCard|AddFolderCard" src/ui/todo_board.py src/ui/common/todo_board_add_folder_card.py
+    Get-ChildItem src\ui\main_window.py,src\ui\month_window.py,src\ui\add_view.py,src\ui\add_view_week.py,src\ui\schedule_detail_pop.py | Select-Object Name,Length
+    rg -n "^class |^def |^    def " src/ui/main_window.py src/ui/month_window.py src/ui/add_view.py src/ui/add_view_week.py src/ui/schedule_detail_pop.py
 
-确认 FolderCard 未迁移：
+toast / tooltip / icon loader 定位：
 
-    rg -n "^class FolderCard|doubleClicked|delete_requested|current_drag_widget|QDrag|QMimeData" src/ui/todo_board.py
-    Test-Path src\ui\common\todo_board_cards.py
-    Test-Path src\ui\views\todo_board.py
-    Test-Path src\ui\views\todo_board_cards.py
+    rg -n "show_toast|toast_label|CustomToolTip|ToolTipFilter|setToolTip|_load_colored|_get_icon|get_colored_icon|QSvgRenderer|setIcon|setPixmap" src/ui/main_window.py src/ui/month_window.py src/ui/add_view.py src/ui/add_view_week.py src/ui/schedule_detail_pop.py
 
-AddFolderCard import 验证：
+picker / popup / coordinator 定位：
 
-    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.ui.common.todo_board_add_folder_card import AddFolderCard; print('add folder card import ok', AddFolderCard)"
+    rg -n "picker|go_to_|back_from|confirm|confirmed|edit|editing|ScheduleDetail|_show_detail|open_popups|ViewRouter|MainController|RefreshCoordinator|global_signals|req_refresh|saved|emit" src/ui/main_window.py src/ui/month_window.py src/ui/add_view.py src/ui/add_view_week.py src/ui/schedule_detail_pop.py
 
-TodoBoard import 回归：
+写库调用定位：
 
-    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.ui.todo_board import TodoBoardWindow, FolderCard, AddFolderCard; print('todo board imports ok', TodoBoardWindow, FolderCard, AddFolderCard)"
+    rg -n "db_manager|add_schedule|update_schedule|update_schedule_with_repeat|delete_schedule|update_schedule_fields|update_schedule_status|toggle_pin_status|add_category|soft_delete_category|hard_delete_category|check_category_status" src/ui/main_window.py src/ui/month_window.py src/ui/add_view.py src/ui/add_view_week.py src/ui/schedule_detail_pop.py
 
-AddFolderCard offscreen 基础实例化验证：
+样式债务定位：
 
-    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from src.ui.common.todo_board_add_folder_card import AddFolderCard; app=QApplication([]); c=AddFolderCard(); print('add folder card created', c is not None); print('cursor', c.cursor().shape().name); print('has icon label', hasattr(c, 'icon_label')); print('has name label', hasattr(c, 'name_label')); assert hasattr(c, 'icon_label'); assert hasattr(c, 'name_label')"
+    rg -n "setStyleSheet|StyleManager|get_.*style|role|variant|state|setProperty|default.qss|theme" src/ui/main_window.py src/ui/month_window.py src/ui/add_view.py src/ui/add_view_week.py src/ui/schedule_detail_pop.py
 
-TodoBoardWindow offscreen 基础实例化验证：
+确认本轮未新增源码文件：
 
-    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from src.ui.todo_board import TodoBoardWindow; app=QApplication([]); w=TodoBoardWindow(); print('todo board created', w is not None); print('view mode', getattr(w, 'view_mode', None)); assert w is not None"
-
-8-4b DayBlock 回归：
-
-    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.ui.common.week_day_block import DayBlock; print('day block import ok', DayBlock)"
-
-8-3b toast helper 回归：
-
-    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.ui.common.toast import show_center_toast; print('toast helper import ok', show_center_toast)"
-
-8-2b icon loader 回归：
-
-    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.ui.utils.icon_loader import load_colored_svg_pixmap; print('icon loader import ok', load_colored_svg_pixmap)"
-
-默认入口 import 回归：
-
-    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; import main; print('main import ok')"
-
-语法检查：
-
-    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src/ui/common/todo_board_add_folder_card.py src/ui/todo_board.py main.py
-
-禁止范围检查：
-
-    git diff --name-only -- src/ui/common/todo_board_cards.py
-    git diff --name-only -- src/ui/common/toast.py
-    git diff --name-only -- src/ui/common/week_day_block.py
-    git diff --name-only -- src/ui/utils/icon_loader.py
-    git diff --name-only -- src/ui/components.py
-    git diff --name-only -- src/ui/header.py
-    git diff --name-only -- src/ui/week_window.py
-    git diff --name-only -- src/ui/month_window.py
-    git diff --name-only -- src/ui/main_window.py
-    git diff --name-only -- src/ui/dashboard.py
-    git diff --name-only -- src/ui/add_view.py
-    git diff --name-only -- src/ui/add_view_week.py
-    git diff --name-only -- src/theme
-    git diff --name-only -- src/data
-    git diff --name-only -- src/repositories
-    git diff --name-only -- src/services
-    git diff --name-only -- src/controllers
-    git diff --name-only -- src/utils/signals.py
-    git diff --name-only -- src/utils/styles.py
+    git diff --name-only -- src
     git diff --name-only -- assets
     git diff --name-only -- main.py
     git diff --name-only -- requirements.txt
     git diff --name-only -- schedule.db
 
-允许范围检查：
+已提取组件 import 回归：
 
-    git diff --name-only -- src/ui
+    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.ui.common.toast import show_center_toast; from src.ui.common.week_day_block import DayBlock; from src.ui.common.todo_board_add_folder_card import AddFolderCard; from src.ui.utils.icon_loader import load_colored_svg_pixmap; print('round 8 extracted imports ok')"
 
-预期 `src/ui` diff 仅允许：
+主要 UI import 回归：
 
-    src/ui/todo_board.py
-    src/ui/common/todo_board_add_folder_card.py
+    D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.ui.main_window import MainWindow; from src.ui.month_window import MonthWindow; from src.ui.add_view import AddView; from src.ui.add_view_week import AddViewWeek; from src.ui.schedule_detail_pop import ScheduleDetailPopup; print('target ui imports ok')"
 
-总范围检查：
+范围检查：
 
     git diff --name-only
     git status --short --branch
 
-预期最终只允许：
+预期：
 
-- `src/ui/common/todo_board_add_folder_card.py`
-- `src/ui/todo_board.py`
-- `manage_instruction/Work_Log.md`
-- 必要时 `manage_instruction/Work_Task_Prompts.md`
+- `src` 无 diff。
+- `assets` 无 diff。
+- `main.py` 无 diff。
+- `requirements.txt` 无 diff。
+- `schedule.db` 无 diff。
+- 最终只允许：
+  - `manage_instruction/Work_Log.md`
+  - 必要时 `manage_instruction/Work_Task_Prompts.md`
 
 ## 5. Work_Log.md 记录要求
 
 更新 `manage_instruction/Work_Log.md`，至少记录：
 
-- 本轮任务名称：第八轮 8-6（TodoBoard AddFolderCard 单类提取试点）
+- 本轮任务名称：第八轮 8-7（MainWindow / MonthWindow / AddView 拆分候选复核）
 - 开工前 git 状态
 - 实际修改文件
-- `AddFolderCard` 新文件路径
-- `AddFolderCard` 保持兼容的内容：
-  - 类名
-  - signal
-  - 构造函数
-  - `mouseReleaseEvent`
-  - 图标加载语义
-  - 样式字符串
-  - 点击发射逻辑
-- `todo_board.py` 中 import 替换说明
-- 是否存在循环导入风险及判断依据
-- 确认 `FolderViewContainer` 中 `AddFolderCard` 使用方式未改
-- 确认未修改 `FolderCard`
-- 确认未修改拖拽/排序/写库/toast/icon loader/tooltip 公共实现
-- AddFolderCard import 验证结果
-- TodoBoard import 回归结果
-- AddFolderCard offscreen 基础实例化验证结果
-- TodoBoardWindow offscreen 基础实例化验证结果
-- 8-4b DayBlock 回归结果
-- 8-3b toast helper 回归结果
-- 8-2b icon loader 回归结果
-- main import 回归结果
-- py_compile 结果
+- 文件体量与类/函数结构摘要
+- toast / tooltip / icon loader 候选地图
+- picker / popup / coordinator 回流地图
+- 写库调用地图
+- 样式债务地图
+- `main_window.py` 拆分候选与风险等级
+- `month_window.py` 拆分候选与风险等级
+- `add_view.py` / `add_view_week.py` 拆分候选与风险等级
+- `schedule_detail_pop.py` 拆分候选与风险等级
+- 可继续第八轮处理的低风险项
+- 应推迟的高风险项
+- 下一步建议：继续一个小提取工单，或进入 8-8 整体验收与归档准备
+- 已提取组件 import 回归结果
+- 主要 UI import 回归结果
 - diff 范围检查结果
 - 未完成事项
 - 风险或疑点
 
 特别记录：
 
-- 本轮只提取 `AddFolderCard`。
-- 本轮不提取 `FolderCard`。
-- 本轮不拆 `TodoBoardWindow` 主状态机。
-- 本轮不修改待办看板业务行为。
-- 本轮不修改 tooltip/toast/icon loader。
+- 本轮只读审查，不改源码。
+- 本轮不新增组件文件。
+- 本轮不修改 toast/tooltip/icon loader。
 - 本轮不修改数据库或服务层。
-- 若因 `get_colored_icon` 导入造成循环导入或 import 失败，不要扩大重构；应停止并记录问题，等待复核。
+- 本轮不一次性拆多个 UI 文件。
+- 本轮用于判断第八轮是否还应继续提取，或是否应进入归档验收。
 
 如果 Python 验证受沙箱权限影响，请申请沙箱外权限运行；若仍受限，请写明需用户本地 CMD 复跑命令。
 

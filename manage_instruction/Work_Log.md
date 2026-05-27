@@ -20,12 +20,12 @@
 
 第七轮：Theme / QSS 接入与样式债务控制，已完成并归档。
 
-第八轮：UI 拆分与样式债务整理，已完成 8-6（TodoBoard AddFolderCard 单类提取试点），等待顾问窗口复核。
+第八轮：UI 拆分与样式债务整理，已完成 8-7（MainWindow / MonthWindow / AddView 拆分候选复核），等待顾问窗口复核。
 
 ## 当前轮次注意事项
 
 - 第七轮归档内容见 `History_Instruction.md` 与 `History_Log.md`。
-- 第八轮阶段合同已发布，当前已完成 8-0、8-1、8-2a、8-2b、8-3a、8-3b、8-4a、8-4b、8-5、8-6，保持小工单推进。
+- 第八轮阶段合同已发布，当前已完成 8-0、8-1、8-2a、8-2b、8-3a、8-3b、8-4a、8-4b、8-5、8-6、8-7，保持小工单推进。
 - 第八轮规划应保持小工单策略，避免一次性拆大 UI 文件。
 - 第七轮遗留约束继续有效：基于 `default.qss / skin preset`，不建立 light/dark mode matrix。
 
@@ -1517,3 +1517,136 @@
   - 本轮不修改待办看板业务行为。
   - 本轮不修改 tooltip/toast/icon loader。
   - 本轮不修改数据库或服务层。
+
+## 2026-05-27 第八轮 8-7（MainWindow / MonthWindow / AddView 拆分候选复核）
+
+- 本轮任务名称：第八轮 8-7（MainWindow / MonthWindow / AddView 拆分候选复核）。
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 32]`
+  - 既有变更：`M manage_instruction/Work_Task_Prompts.md`
+  - 说明：开工前已有管理文档 diff，本轮不视为源码问题。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+  - `manage_instruction/Work_Task_Prompts.md`（开工前既有管理文档 diff，本轮未新增修改）
+
+- 文件体量与类/函数结构摘要：
+  - `main_window.py`：`35556` bytes，`MainWindow` 单类承载主路由、picker 回流、提醒轮询、跨视图刷新协调。
+  - `month_window.py`：`34545` bytes，`CalendarCellDelegate` + `InlineAddViewMonth` + `MonthWindow`，窗口级 UI 逻辑混合。
+  - `add_view.py`：`29352` bytes，`CustomToolTip` / `ToolTipFilter` / `AddScheduleView`，表单、校验、图标、样式耦合。
+  - `add_view_week.py`：`26190` bytes，`CustomToolTip` / `ToolTipFilter` / `AddScheduleViewWeek`，与 `add_view.py` 高重复。
+  - `schedule_detail_pop.py`：`36320` bytes，`RepeatConfirmDialog` + `ScheduleDetailPop`，编辑回流与写库耦合最重。
+
+- toast / tooltip / icon loader 候选地图：
+  - `main_window.py`：
+    - 已收口到 `show_center_toast(...)`（8-3b），`show_toast` 仅委托。
+    - 未见本文件本地 tooltip/icon loader 提取点。
+  - `month_window.py`：
+    - 本地 `show_toast`（1500ms）仍内联。
+    - 使用 `ToolTipFilter`、`get_colored_icon`，并含 `_load_colored_svg`。
+  - `add_view.py` / `add_view_week.py`：
+    - 各自内置 `CustomToolTip`、`ToolTipFilter`、`_load_colored_icon`，重复明显。
+  - `schedule_detail_pop.py`：
+    - `_get_icon` 高频调用，`setToolTip` 密集，含多处局部图标/样式逻辑。
+
+- picker / popup / coordinator 回流地图：
+  - `main_window.py`：
+    - 完整 time/alarm/list picker add/edit 回流链路（`go_to_*` / `back_from_*` / `on_*_confirmed`）。
+    - 第六轮接入点仍在：`MainController`、`ViewRouter`、`_refresh_dashboard_todo_week`、`global_signals.refresh_requested`。
+    - `page_dashboard.open_popups` 遍历刷新详情弹窗数据（高耦合回流）。
+  - `month_window.py`：
+    - `InlineAddViewMonth.saved -> MonthWindow._on_schedule_saved`，再触发 toast/refresh。
+    - `view_selected/date_selected/suspend_requested/restore_requested` 信号链路。
+  - `add_view.py` / `add_view_week.py`：
+    - 发射 `saved`、`req_open_time_picker`、`req_open_alarm_picker`、`req_open_list_picker`。
+  - `schedule_detail_pop.py`：
+    - 发射 `req_edit_time/alarm/list` 与 `schedule_updated`，由上层窗口承接回流。
+
+- 写库调用地图：
+  - `main_window.py`：`db_manager.update_schedule_with_repeat(...)`（picker edit 三分支）。
+  - `month_window.py`：`db_manager.add_schedule(...)`（inline add 保存）。
+  - `add_view.py` / `add_view_week.py`：`db_manager.add_schedule(...)`（表单保存）。
+  - `schedule_detail_pop.py`：`update_schedule_fields(...)`、`update_schedule_with_repeat(...)`、`get_category(...)`。
+
+- 样式债务地图：
+  - `month_window.py`、`add_view.py`、`add_view_week.py`、`schedule_detail_pop.py` 仍存在大量 `setStyleSheet(...)` 内联样式。
+  - `month_window.py` 混用 `StyleManager` 与局部样式，风格来源分散。
+  - `add_view*` 两文件存在明显重复样式块和重复结构。
+  - `schedule_detail_pop.py` 样式与编辑状态逻辑交织，拆分风险高。
+
+- `main_window.py` 拆分候选与风险等级：
+  - 低风险：无新的明显低风险可提取点（`show_toast` 已在 8-3b 提取）。
+  - 中风险：视图切换辅助函数再下沉（需防回归）。
+  - 高风险：picker 回流链路、`open_popups` 刷新回流、提醒轮询与多视图联动。
+  - 结论：第八轮不建议继续改动 `main_window.py` 主流程。
+
+- `month_window.py` 拆分候选与风险等级：
+  - 低风险候选：`InlineAddViewMonth`（仅作为后续候选，需单独只读基线先确认依赖边界）。
+  - 中风险：窗口控制区 + view selector 局部样式/helper。
+  - 高风险：calendar delegate、日期切换、suspend/restore、inline add 保存回流。
+  - 结论：可继续做“小单元只读基线”，不建议直接迁移主流程。
+
+- `add_view.py` / `add_view_week.py` 拆分候选与风险等级：
+  - 低风险：两文件重复的 tooltip/filter 与 icon helper（但会同时触碰两文件，超出单点提取）。
+  - 中风险：共用表单展示子块（信息行/属性组）。
+  - 高风险：保存校验、重复规则、picker 请求与返回数据绑定。
+  - 结论：第八轮不建议直接改这两文件，适合后续“表单专项重构轮”。
+
+- `schedule_detail_pop.py` 拆分候选与风险等级：
+  - 低风险：无明确低风险单点（图标/样式虽重复但与编辑状态机耦合）。
+  - 中风险：局部显示刷新函数拆 helper。
+  - 高风险：`source_view` 分支、编辑回流、写库调用、双击编辑状态机。
+  - 结论：应推迟，避免在第八轮触发高耦合回归。
+
+- 可继续第八轮处理的低风险项：
+  - 候选唯一项：`month_window.py::InlineAddViewMonth` 只读基线后，再决定是否单类提取。
+  - 仅可作为“下一小工单候选”，不建议与其他文件并行改造。
+
+- 应推迟的高风险项：
+  - `main_window.py` picker/edit/refresh 主链路
+  - `schedule_detail_pop.py` source_view + 编辑写库回流
+  - `add_view.py` / `add_view_week.py` 保存与重复规则路径
+
+- 下一步建议：
+  - 建议进入 `8-8` 第八轮整体验收与归档准备。
+  - 若顾问窗口坚持继续第八轮代码提取，只建议再开一个单独小工单，且唯一目标为 `InlineAddViewMonth` 的前置只读确认后再决定。
+
+- 已提取组件 import 回归结果：
+  - 命令通过：`from src.ui.common.toast import show_center_toast; from src.ui.common.week_day_block import DayBlock; from src.ui.common.todo_board_add_folder_card import AddFolderCard; from src.ui.utils.icon_loader import load_colored_svg_pixmap`
+  - 输出：`round 8 extracted imports ok`
+
+- 主要 UI import 回归结果：
+  - 按工单原命令失败：
+    - `ImportError: cannot import name 'AddView' from 'src.ui.add_view'`
+    - 原因：当前真实类名为 `AddScheduleView` / `AddScheduleViewWeek` / `ScheduleDetailPop`。
+  - 纠正后命令通过：
+    - `from src.ui.add_view import AddScheduleView`
+    - `from src.ui.add_view_week import AddScheduleViewWeek`
+    - `from src.ui.schedule_detail_pop import ScheduleDetailPop`
+    - 输出：`target ui imports ok ...`
+
+- diff 范围检查结果：
+  - `git diff --name-only -- src`：无输出。
+  - `git diff --name-only -- assets`：无输出。
+  - `git diff --name-only -- main.py`：无输出。
+  - `git diff --name-only -- requirements.txt`：无输出。
+  - `git diff --name-only -- schedule.db`：无输出。
+  - `git diff --name-only`：仅 `manage_instruction/Work_Task_Prompts.md`（开工前既有）与 `manage_instruction/Work_Log.md`。
+  - `git status --short --branch`：
+    - `## main...temp/main [ahead 32]`
+    - `M manage_instruction/Work_Task_Prompts.md`
+    - `M manage_instruction/Work_Log.md`
+
+- 未完成事项：
+  - 等待顾问窗口确认是否直接进入 `8-8` 归档验收，或追加一个极小工单（`InlineAddViewMonth` 前置只读）。
+
+- 风险或疑点：
+  - `month_window.py` 与 `add_view*` 存在样式与小组件重复，但直接动代码容易跨多个文件扩散，不符合当前“小步单点”原则。
+  - `schedule_detail_pop.py` 当前风险仍显著高于第八轮已执行的单类/单helper提取边界。
+
+- 特别记录：
+  - 本轮只读审查，不改源码。
+  - 本轮不新增组件文件。
+  - 本轮不修改 toast/tooltip/icon loader。
+  - 本轮不修改数据库或服务层。
+  - 本轮不一次性拆多个 UI 文件。
+  - 本轮用于判断第八轮是否继续提取，或转入归档验收。
