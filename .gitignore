@@ -2,6 +2,7 @@
 .env
 *.env
 .env.*
+!.env.example
 
 # 2. Python 虚拟环境 (体积大、跨平台不兼容，不需要上传)
 .venv/
@@ -33,3 +34,4 @@ Thumbs.db
 # 7. 自定义忽略文件 (本地打包脚本与项目上下文)
 pack_code.py
 project_context.txt
+manage_instruction/
