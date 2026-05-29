@@ -9,6 +9,7 @@ from ..header import ToolTipFilter
 class DayBlock(QFrame):
     """单独的日期方格"""
     clicked = pyqtSignal(QDate)
+    double_clicked = pyqtSignal(QDate)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -96,3 +97,10 @@ class DayBlock(QFrame):
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit(self.date)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.double_clicked.emit(self.date)
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)

@@ -207,6 +207,7 @@ class WeekWindow(FramelessMainWindow):
     request_schedule_detail = pyqtSignal(object)
     view_selected = pyqtSignal(str)
     schedule_updated = pyqtSignal(object)
+    day_double_clicked = pyqtSignal(QDate)
     def __init__(self):
         super().__init__()
         self.setFixedSize(680, 400) 
@@ -448,6 +449,7 @@ class WeekWindow(FramelessMainWindow):
             
             block = DayBlock()
             block.clicked.connect(self._on_day_clicked)
+            block.double_clicked.connect(self._on_day_double_clicked)
             self.day_blocks.append(block)
             
             col_layout.addWidget(lbl_week)
@@ -1022,6 +1024,10 @@ class WeekWindow(FramelessMainWindow):
     def _on_day_clicked(self, qdate):
         self.current_selected_date = qdate
         self.refresh_week_data()
+
+    def _on_day_double_clicked(self, qdate):
+        self._on_day_clicked(qdate)
+        self.day_double_clicked.emit(qdate)
 
     def mousePressEvent(self, event):
         # 如果视图选择器正开着，点窗口上半部分任何空白处都会关掉它

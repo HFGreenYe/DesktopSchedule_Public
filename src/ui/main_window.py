@@ -99,6 +99,7 @@ class MainWindow(FramelessMainWindow):
         self.week_window.request_schedule_detail.connect(
             lambda data: self.page_dashboard._show_detail_popup(data, source_view="week")
         )
+        self.week_window.day_double_clicked.connect(self.jump_to_date)
         self.week_window.suspend_requested.connect(self.switch_week_to_suspend)
         self.month_window.restore_requested.connect(self.restore_from_month_view)
         self.month_window.suspend_requested.connect(self.switch_month_to_suspend)
@@ -266,23 +267,14 @@ class MainWindow(FramelessMainWindow):
             winsound.PlaySound("SystemHand", winsound.SND_ALIAS | winsound.SND_LOOP | winsound.SND_ASYNC)
 
     # --- 路由跳转逻辑 ---
+    def jump_to_date(self, qdate):
+        py_date = qdate.toPyDate()
+        self.on_calendar_date_picked(py_date)
+        self.switch_view("day")
+
     def jump_to_date_from_month(self, qdate):
         """从月视图点击具体日期，直接跳转到主面板的该日视图"""
-        py_date = qdate.toPyDate()
-        self.page_dashboard.current_date = py_date
-        self.page_dashboard.refresh_data()
-        
-        # 顺便更新一下主面板的顶部日期文字
-        from datetime import datetime
-        today = datetime.now().date()
-        if py_date == today:
-            self.header.lbl_date_info.setText(f"{py_date.strftime('%m月%d日')} 今天")
-        else:
-            week_str = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][py_date.weekday()]
-            self.header.lbl_date_info.setText(f"{py_date.strftime('%m月%d日')} {week_str}")
-
-        # 利用现成的 switch_view 方法切回日视图
-        self.switch_view("day")
+        self.jump_to_date(qdate)
 
     def go_to_time_picker(self, start, end):
         """模式1：从【添加界面】打开时间选择"""
