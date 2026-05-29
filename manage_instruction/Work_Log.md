@@ -1,31 +1,58 @@
-﻿# Work Log
+# Work Log
 
-本文件只记录当前阶段/当前轮次的执行日志。
+用途：记录当前阶段/当前小工单的执行过程、验证结果和风险。
 
-历史日志已归档到 `manage_instruction/History_Log.md`。
+历史日志归档见：
+
+- `History_Log.md`
+
+旧架构改写阶段日志已移入：
+
+- `ReconstructionDolder/History_Log.md`
+
+---
 
 ## 当前状态
 
-第一轮：基建 + repository + db_manager 兼容委托，已完成并归档。
+架构改写主线已经结束。
 
-第二轮：Data 层整理与模型拆分，已完成并归档。
+当前进入功能补充阶段，优先完善月界面功能。暂不优先实现四象限视图。
 
-第三轮：纯业务查询与排序服务，已完成并归档。
+---
 
-第四轮：日程写入与重复规则服务，已完成并归档。
+## 2026-05-29 工作文档重建
 
-第五轮：提醒与运行期状态服务，已完成并归档。
+- 背景：
+  - 旧 `manage_instruction` 文档已由用户移入 `ReconstructionDolder/`。
+  - 当前需要为后续三窗口联动重新建立轻量工作文档。
 
-第六轮：Controller / Router / EventBus 协调层，已完成并归档。
+- 新建/重建文件：
+  - `History_Instruction.md`
+  - `History_Log.md`
+  - `Workflow_Guide.md`
+  - `Work_Formulation.md`
+  - `Work_Instruction.md`
+  - `Work_Log.md`
+  - `Work_Task_Prompts.md`
 
-第七轮：Theme / QSS 接入与样式债务控制，已完成并归档。
+- 不重建文件：
+  - `code_pack.txt`
+  - `Device_Sync_Guide.md`
+  - `Work_Snapshot.md`
+  - `Work_Discussion.md`
 
-第八轮：UI 拆分与样式债务整理，已完成并归档。
+- 当前协作模式：
+  - 主窗口：调度、审核、决策收口、最终提示词输出。
+  - 决策窗口：提出方案供主窗口审核。
+  - 执行窗口：按最终提示词执行具体任务。
 
-当前等待后续阶段合同/规划。
+- 当前阶段规划：
+  - 先完善月界面。
+  - 可穿插处理低风险交互增强，例如周界面日期双击跳转日视图。
+  - 月界面稳定后，再制定后续功能补充规划。
 
-## 当前轮次注意事项
+- 未完成事项：
+  - 尚未发布具体 M-0 / W-1 执行提示词。
 
-- 第八轮归档内容见 `History_Instruction.md` 与 `History_Log.md`。
-- 在后续阶段正式提示词发布前，不得自行开始源码改造、数据库改造、UI 改造或管理文档大范围改写。
-- 若后续阶段继续 UI / 功能改造，应保持小工单策略，并先做只读基线或阶段合同确认。
+- 风险或疑点：
+  - 旧文档移入 `ReconstructionDolder/` 后，Git 当前可能显示旧文件删除和新文件重建，需要主窗口复核 diff 后再提交。
