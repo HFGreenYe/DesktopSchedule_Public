@@ -187,3 +187,92 @@
   - 禁止范围检查：无越界 diff。
 - 复核修正：
   - 原执行日志的总范围漏列 `manage_instruction/Work_Log.md`，已补正；源码未因复核发生额外修改。
+
+## 2026-05-29 右键上下文菜单功能规划
+
+- 本轮任务名称：主界面 / 周界面右键上下文菜单规划。
+- 开工前 git 状态：
+  - 原规划记录时为 `## main...temp/main [ahead 39]`，当时存在 W-1 未提交变更。
+  - 提交前复核时 W-1 已提交：`792ab6c feat: jump to day view on week date double click`。
+  - 当前状态为 `## main...temp/main [ahead 40]`，仅管理文档存在 diff。
+  - 本轮只做管理文档规划，不新增源码修改。
+
+- 读取的历史规划依据：
+  - `manage_instruction/ReconstructionDolder/Work_Formulation.md`
+  - `manage_instruction/ReconstructionDolder/History_Instruction.md`
+  - `manage_instruction/ReconstructionDolder/Workflow_Guide.md`
+  - 关键结论：
+    - 新功能应沿用兼容式渐进路线，不一次性替换旧 UI 流程。
+    - 视图切换和添加页来源应优先复用第六轮 `MainController` / `ViewRouter` 边界。
+    - 新 UI 组件应沿用第七轮 `default.qss / skin preset` 和动态属性方向。
+    - 新公共 UI 组件应沿用第八轮 `src/ui/common/` / `src/ui/utils/` 拆分方向。
+    - 四象限、换肤 UI、排序、筛选等未实现功能不得伪实现。
+
+- 实际修改文件：
+  - `manage_instruction/Work_Formulation.md`
+  - `manage_instruction/Work_Instruction.md`
+  - `manage_instruction/Work_Task_Prompts.md`
+  - `manage_instruction/Work_Log.md`
+
+- 规划结果：
+  - 当前阶段从“月界面优先”扩展为“月界面优先与上下文菜单增强”。
+  - 右键菜单功能拆为：
+    - `CM-0`：右键菜单现状审查与精确边界。
+    - `CM-1`：公共 icon-text 上下文菜单组件试点。
+    - `CM-2`：主界面日程区域右键菜单接入。
+    - `CM-3`：周界面日期空白区域右键菜单接入。
+    - `CM-4`：右键菜单整体验收。
+
+- 主界面右键菜单规划：
+  - 右键区域：主界面日程卡片区、空状态区或日程列表容器区，待 `CM-0` 精确定位。
+  - 菜单项：
+    - 换肤
+    - 视图
+    - 添加
+    - 排序
+    - 筛选
+  - 本阶段先实装：
+    - `视图`
+    - `添加`
+  - 其它项保留占位或禁用。
+
+- 周界面右键菜单规划：
+  - 右键区域：某日期对应的白色空白区域，待 `CM-0` 精确确认 `bottom_panels` 事件边界。
+  - 添加行为：
+    - 使用右键所在日期。
+    - 过去日期不能添加日程。
+  - 视图行为：
+    - 使用与主界面一致的视图子菜单。
+    - 四象限视图暂不实现。
+
+- 菜单视觉规划：
+  - 布局参考现有菜单：左侧图标，右侧文字。
+  - 图标优先复用 `assets/icons/`：
+    - `Skin.svg` / `theme.svg`
+    - `view.svg`
+    - `add.svg`
+    - `sort.svg`
+    - `filter.svg`
+    - `Calendar.svg`
+    - `todo.svg`
+  - 不在本规划阶段新增 assets。
+
+- 架构方向：
+  - 不把完整右键菜单逻辑直接塞入 `MainWindow` 或 `WeekWindow`。
+  - `CM-1` 应根据 `CM-0` 结论，新增或最小复用/扩展公共菜单组件。
+  - 若现有 `SharedMoreMenu` / `ScheduleContextMenu` 不适合作为通用右键菜单，再新增 `src/ui/common/action_context_menu.py`。
+  - 公共菜单组件只负责菜单 UI 和 action 信号，不直接访问数据库，不直接持有大窗口业务状态。
+  - 主界面 / 周界面分别把菜单 action 接入已有动作入口。
+
+- 当前未生成执行提示词：
+  - `Work_Task_Prompts.md` 已重置为“暂无待执行提示词”。
+  - 下一步应先由主窗口生成 `CM-0` 最终提示词。
+
+- 未完成事项：
+  - W-1 已完成并提交：`792ab6c`。
+  - CM-0 提示词尚未生成。
+
+- 风险或疑点：
+  - 主界面右键区域需要防止与日程卡片现有右键菜单冲突。
+  - 周界面白色区域右键需要防止破坏左键选中、双击跳转和拖拽排序。
+  - 视图子菜单若做成紧邻弹窗，需要单独验证焦点、关闭和多菜单生命周期。
