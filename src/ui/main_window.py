@@ -1,0 +1,741 @@
+# src/ui/main_window.py
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QStackedWidget
+from PyQt6.QtCore import Qt, QRectF, QTimer, QEvent
+from PyQt6.QtGui import QPainter, QPainterPath, QBrush, QLinearGradient, QColor
+from qframelesswindow import FramelessMainWindow
+from datetime import datetime, timedelta
+import winsound
+
+from .header import HeaderBar
+from ..utils.win_api import apply_24h2_border_fix
+from ..config import AppConfig
+from .suspend_window import SuspendWindow
+from .add_view import AddScheduleView
+from .dashboard import DashboardView
+from .time_picker import TimePickerView 
+from .alarm_picker import AlarmPickerView 
+from .list_picker import ListPickerView 
+from .reminder_pop import ReminderPop 
+from ..data.database import db_manager 
+from ..utils.styles import StyleManager
+from .month_window import MonthWindow
+from .calendar_pop import CalendarPop
+from .week_window import WeekWindow
+from .suspend_window_week import SuspendWindowWeek
+from .suspend_window_month import SuspendWindowMonth
+from .todo import TodoView
+from .common.toast import show_center_toast
+from ..services.reminder_service import ReminderService
+from ..controllers.main_controller import MainController
+from ..controllers.view_router import ViewRouter
+from ..utils.signals import global_signals
+
+class MainWindow(FramelessMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.main_controller = MainController()
+        
+        self.setFixedWidth(AppConfig.DEFAULT_WIDTH)
+        self.setMinimumHeight(600) 
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window | Qt.WindowType.WindowStaysOnTopHint)
+        self.titleBar.hide()
+
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
+        self.main_layout = QVBoxLayout(self.central_widget)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setSpacing(10)
+
+        self.header = HeaderBar(self)
+        self.main_layout.addWidget(self.header)
+        
+        # --- 页面堆栈 ---
+        self.body_stack = QStackedWidget()
+        self.main_layout.addWidget(self.body_stack)
+
+        # Page 0: 看板
+        self.page_dashboard = DashboardView() 
+        self.body_stack.addWidget(self.page_dashboard)
+
+        # Page 1: 添加页
+        self.page_add = AddScheduleView()
+        self.body_stack.addWidget(self.page_add)
+        
+        # Page 2: 时间选择页
+        self.page_time = TimePickerView()
+        self.body_stack.addWidget(self.page_time)
+
+        # Page 3: 提醒选择页
+        self.page_alarm = AlarmPickerView()
+        self.body_stack.addWidget(self.page_alarm)
+
+        # Page 4: 清单选择页 
+        self.page_list = ListPickerView()
+        self.body_stack.addWidget(self.page_list)
+        
+        self.body_stack.setCurrentIndex(0)
+
+        self.page_dashboard.view_selector.view_selected.connect(self.switch_view)
+
+        self.page_dashboard.req_refresh_all.connect(self._refresh_week_if_visible)
+
+        self.page_todo = TodoView()
+        self.body_stack.addWidget(self.page_todo)
+        self.page_todo.req_change_view.connect(self.switch_view)
+        self.page_todo.req_refresh_all.connect(self.page_dashboard.refresh_data)
+        self.page_dashboard.req_refresh_all.connect(self.page_todo.refresh_data)
+        self.suspend_window = SuspendWindow()
+        self.week_window = WeekWindow()
+        self.month_window = MonthWindow()
+        self.week_window.schedule_updated.connect(self._on_week_schedule_updated)
+        if hasattr(self.header, 'weather_updated'):
+            self.header.weather_updated.connect(self.week_window.update_weather_ui)
+            self.header.weather_updated.connect(self.month_window.update_weather_ui)
+        self.suspend_window_week = SuspendWindowWeek()
+        self.suspend_window_month = SuspendWindowMonth()
+        self.week_window.restore_requested.connect(self.restore_from_week_view)
+        self.week_window.view_selected.connect(self.switch_view)
+        self.week_window.request_schedule_detail.connect(
+            lambda data: self.page_dashboard._show_detail_popup(data, source_view="week")
+        )
+        self.week_window.day_double_clicked.connect(self.jump_to_date)
+        self.week_window.suspend_requested.connect(self.switch_week_to_suspend)
+        self.month_window.restore_requested.connect(self.restore_from_month_view)
+        self.month_window.suspend_requested.connect(self.switch_month_to_suspend)
+        self.month_window.view_selected.connect(self.switch_view)
+        self.month_window.date_selected.connect(self.jump_to_date_from_month)
+        self.suspend_window_week.restore_requested.connect(self.switch_suspend_to_week)
+        self.suspend_window_month.restore_requested.connect(self.switch_suspend_to_month)
+        hwnd = int(self.winId())
+        apply_24h2_border_fix(hwnd)
+
+        # --- 信号连接 ---
+        self.header.suspend_requested.connect(self.switch_to_suspend)
+        self.suspend_window.restore_requested.connect(self.switch_to_normal)
+        self.header.action_requested.connect(self.handle_header_action)
+        # 实例化日历弹窗
+        self.calendar_pop = CalendarPop(self)
+        # 监听日历选中的日期
+        self.calendar_pop.date_selected.connect(self.on_calendar_date_picked)
+        # 监听 Header 发出的打开日历请求
+        self.header.req_open_calendar.connect(self.show_calendar_popup)
+        # 监听 Header 发出的跨天信号
+        self.header.midnight_rollover.connect(self.handle_midnight_rollover)
+        # 为顶部日期文本安装事件过滤器
+        self.header.lbl_date_info.installEventFilter(self)
+        # 软件刚打开时，强制执行一次“选中今天”的逻辑，确保所有UI同步到今天
+        self.on_calendar_date_picked(datetime.now().date())
+        
+        # AddView 逻辑
+        self.page_add.btn_cancel.clicked.connect(
+            lambda: self.body_stack.setCurrentWidget(
+                self.main_controller.resolve_add_return_target(
+                    getattr(self, 'source_view_for_add', None),
+                    self.page_dashboard,
+                )
+            )
+        )
+        self.page_add.saved.connect(self.on_schedule_saved)
+        
+        self.time_picker_mode = 'add'
+        self.editing_schedule = None
+        
+        self.page_add.req_open_time_picker.connect(self.go_to_time_picker)
+        self.page_time.back_requested.connect(self.back_from_time_picker) 
+        self.page_time.confirm_requested.connect(self.on_time_confirmed)
+        self.page_dashboard.req_edit_time.connect(self.go_to_time_picker_for_edit) # 🟢 监听面板传来的修改请求
+
+        self.alarm_picker_mode = 'add'
+        self.page_add.req_open_alarm_picker.connect(self.go_to_alarm_picker)
+        self.page_alarm.back_requested.connect(self.back_from_alarm_picker) # 注意改名
+        self.page_alarm.confirm_requested.connect(self.on_alarm_confirmed)
+        self.page_dashboard.req_edit_alarm.connect(self.go_to_alarm_picker_for_edit) # 监听面板双击
+
+        self.list_picker_mode = 'add'
+        self.page_add.req_open_list_picker.connect(self.go_to_list_picker)
+        self.page_list.back_requested.connect(self.back_from_list_picker) # 注意改名
+        self.page_list.confirm_requested.connect(self.on_list_confirmed)
+        self.page_dashboard.req_edit_list.connect(self.go_to_list_picker_for_edit) # 监听日程面板双击
+        
+        # 监听待办面板双击清单的请求
+        self.page_todo.req_edit_list.connect(self.go_to_list_picker_for_edit)
+        self.page_time.suspend_requested.connect(self.switch_to_suspend)
+        self.page_alarm.suspend_requested.connect(self.switch_to_suspend)
+        self.page_list.suspend_requested.connect(self.switch_to_suspend)
+        self._register_refresh_targets()
+        current_style = self.styleSheet()
+        self.setStyleSheet(current_style + StyleManager.get_tooltip_style())
+
+        # 启动后台提醒监控
+        self._init_scheduler()
+
+    def _init_scheduler(self):
+        self.reminder_service = ReminderService()
+        self.reminder_timer = QTimer(self)
+        self.reminder_timer.timeout.connect(self.check_reminders)
+        self.reminder_timer.start(1000) 
+
+    def _refresh_week_if_visible(self):
+        if hasattr(self, 'week_window') and self.week_window.isVisible():
+            self.week_window.refresh_week_data()
+
+    def _register_refresh_targets(self):
+        self.main_controller.register_refresh_target("dashboard", self.page_dashboard.refresh_data)
+        self.main_controller.register_refresh_target("todo", self.page_todo.refresh_data)
+        self.main_controller.register_refresh_target("week_if_visible", self._refresh_week_if_visible)
+
+    def _refresh_dashboard_todo_week(self):
+        self.main_controller.request_refresh_many(("dashboard", "todo", "week_if_visible"))
+        global_signals.refresh_requested.emit("dashboard_todo_week")
+
+    def show_calendar_popup(self):
+        """在顶栏日期文字下方弹出日历"""
+        # 找到 Header 里的日期标签
+        lbl = self.header.lbl_date_info
+        # 获取其在屏幕上的全局坐标
+        pos = lbl.mapToGlobal(lbl.rect().bottomLeft())
+        # 获取 Dashboard 当前停留的日期
+        current = self.page_dashboard.current_date
+        # 显示弹窗
+        self.calendar_pop.show_at(pos, current)
+
+    def on_calendar_date_picked(self, selected_date):
+        """接收日历选中的日期并更新全局 UI"""
+        # 1. 让看板跳转到这一天并刷新数据
+        self.page_dashboard.current_date = selected_date
+        self.page_dashboard.refresh_data()
+        
+        # 2. 同步更新 Header 上的文字（如果是今天显示"今天"，否则显示日期）
+        today = datetime.now().date()
+        if selected_date == today:
+            self.header.lbl_date_info.setText(f"{selected_date.strftime('%m月%d日')} 今天") 
+        else:
+            week_str = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][selected_date.weekday()]
+            self.header.lbl_date_info.setText(f"{selected_date.strftime('%m月%d日')} {week_str}")
+
+    def eventFilter(self, obj, event):
+        """事件过滤器：专门拦截顶部日期标签的滚轮事件"""
+        if obj == self.header.lbl_date_info and event.type() == QEvent.Type.Wheel:
+            # 获取滚轮滚动的角度差
+            delta = event.angleDelta().y()
+            if delta != 0:
+                current_date = self.page_dashboard.current_date
+                
+                # 滚轮向上滑 (delta > 0) -> 回到前一天
+                if delta > 0:
+                    new_date = current_date - timedelta(days=1)
+                # 滚轮向下滑 (delta < 0) -> 去往后一天
+                else:
+                    new_date = current_date + timedelta(days=1)
+                
+                # 直接调用现成的方法，它会完美处理看板刷新和文字变化
+                self.on_calendar_date_picked(new_date)
+                
+            # 返回 True 意味着“这个事件我处理完了，不需要再传给底层的滚动条”
+            return True 
+            
+        # 其他无关事件交还给父类正常处理
+        return super().eventFilter(obj, event)
+
+    def handle_midnight_rollover(self):
+        """接收到 00:00 跨天信号时，强制把看板重置为新的'今天'"""
+        print("🌃 跨天啦！自动刷新整个看板到新的今天！")
+        new_today = datetime.now().date()
+        self.on_calendar_date_picked(new_today)
+
+    def check_reminders(self):
+        now = datetime.now()
+        schedules = db_manager.get_all_schedules()
+
+        due_schedules = self.reminder_service.collect_due_schedules(schedules, now)
+        for s in due_schedules:
+            self.show_reminder_popup(s)
+            self.reminder_service.mark_triggered(s.id)
+            diff = self.reminder_service.get_reminder_diff_seconds(s, now)
+            if diff is not None:
+                print(f"⏰️ 秒级触发提醒: {s.title} (延迟 {diff:.2f}s)")
+
+    def show_reminder_popup(self, schedule_data):
+        data_dict = self.reminder_service.build_reminder_popup_data(schedule_data)
+        
+        self.current_popup = ReminderPop(data_dict)
+        self.current_popup.show()
+        
+        if schedule_data.is_alarm:
+            print("🎵 播放系统闹钟声音...")
+            winsound.PlaySound("SystemHand", winsound.SND_ALIAS | winsound.SND_LOOP | winsound.SND_ASYNC)
+
+    # --- 路由跳转逻辑 ---
+    def jump_to_date(self, qdate):
+        py_date = qdate.toPyDate()
+        self.on_calendar_date_picked(py_date)
+        self.switch_view("day")
+
+    def jump_to_date_from_month(self, qdate):
+        """从月视图点击具体日期，直接跳转到主面板的该日视图"""
+        self.jump_to_date(qdate)
+
+    def go_to_time_picker(self, start, end):
+        """模式1：从【添加界面】打开时间选择"""
+        self.time_picker_mode = 'add'
+        self.page_time.set_title("设置时间")
+        
+        # 如果是新建日程（没传时间），就把 Dashboard 停留的日期传给它！
+        if not start and not end:
+            dashboard_date = self.page_dashboard.current_date
+            now = datetime.now()
+            # 默认时间设为：看板当前选中的日期 + 现在的真实小时和分钟
+            end = datetime(dashboard_date.year, dashboard_date.month, dashboard_date.day, now.hour, now.minute)
+            
+        self.page_time.set_initial_data(start, end)
+        self.body_stack.setCurrentWidget(self.page_time)
+        self.header.hide() 
+
+    def go_to_time_picker_for_edit(self, schedule_data, source_view="dashboard"):
+        """模式2：从【详情弹窗】打开时间修改"""
+        # 拦截并移交权限给周视图
+        if source_view == "week":
+            self.week_window.go_to_time_picker_for_edit(schedule_data)
+            return
+        self.time_picker_mode = 'edit'
+        self.editing_schedule = schedule_data
+        
+        # 智能截断标题防止 UI 撑爆
+        display_title = schedule_data.title
+        if len(display_title) > 8:
+            display_title = display_title[:7] + "..."
+            
+        self.page_time.set_title(f"修改【{display_title}】日程时间")
+        # 自动回填原有时间，防误触
+        self.page_time.set_initial_data(schedule_data.start_time, schedule_data.end_time)
+        self.body_stack.setCurrentWidget(self.page_time)
+        self.header.hide()
+
+    def back_from_time_picker(self):
+        """统一的返回逻辑：从哪来的回哪去"""
+        if self.time_picker_mode == 'add':
+            self.body_stack.setCurrentWidget(self.page_add)
+        else:
+            self.body_stack.setCurrentWidget(self.page_dashboard)
+        self.header.show()
+
+    def on_time_confirmed(self, start, end):
+        if self.time_picker_mode == 'add':
+            self.page_add.set_time_data(start, end)
+            self.back_from_time_picker()
+        elif self.time_picker_mode == 'edit' and self.editing_schedule:
+            # 闭包接收 update_future 参数
+            def _do_update(update_future):
+                now = datetime.now() 
+                new_data = {'start_time': start, 'end_time': end, 'created_at': now}
+                db_manager.update_schedule_with_repeat(self.editing_schedule.id, new_data, update_future)
+                
+                self.editing_schedule.start_time = start
+                self.editing_schedule.end_time = end
+                self.editing_schedule.created_at = now
+                if not update_future: self.editing_schedule.group_id = None # 同步脱离队伍
+                
+                self._refresh_dashboard_todo_week()
+                for p in self.page_dashboard.open_popups:
+                    if p.data.id == self.editing_schedule.id:
+                        p.refresh_time_display()
+                        p.refresh_created_display() 
+                self.back_from_time_picker()
+            self._check_repeat_and_execute(self.editing_schedule, _do_update)
+
+    def _check_repeat_and_execute(self, schedule_data, update_callback):
+        from PyQt6.QtWidgets import QMessageBox
+        
+        rule = getattr(schedule_data, 'repeat_rule', '')
+        if rule and str(rule).strip() not in ["", "无", "none", "不重复"]:
+            msg = QMessageBox(self)
+            msg.setWindowTitle("修改重复日程")
+            msg.setText(f"当前日程包含【{rule}】的重复规则。\n您的修改将会应用到该系列的所有日程。")
+            
+            msg.setStyleSheet("""
+                QMessageBox { background-color: white; }
+                QPushButton { padding: 6px 15px; border-radius: 4px; background-color: #f0f0f0; font-family: 'Microsoft YaHei'; }
+                QPushButton:hover { background-color: #e0e0e0; }
+            """)
+            
+            btn_all = msg.addButton("修改所有", QMessageBox.ButtonRole.AcceptRole)
+            btn_single = msg.addButton("仅修改本次", QMessageBox.ButtonRole.ActionRole)
+            btn_cancel = msg.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+            
+            msg.exec()
+            
+            if msg.clickedButton() == btn_all:
+                update_callback(True)   # 传 True: 修改未来的所有日程
+            elif msg.clickedButton() == btn_single:
+                update_callback(False)  # 传 False: 脱离队伍，仅修改当前这条
+            else:
+                pass 
+        else:
+            update_callback(False)
+
+    # === 提醒选择路由逻辑 (双模) ===
+    def go_to_alarm_picker(self, target_time, is_alarm, duration):
+        self.alarm_picker_mode = 'add'
+        self.page_alarm.set_title("设置提醒")
+        self.page_alarm.set_initial_data(target_time, is_alarm, duration) 
+        self.body_stack.setCurrentWidget(self.page_alarm)
+        self.header.hide()
+
+    def go_to_alarm_picker_for_edit(self, schedule_data, source_view="dashboard"):
+        if source_view == "week":
+            self.week_window.go_to_alarm_picker_for_edit(schedule_data)
+            return
+        self.alarm_picker_mode = 'edit'
+        self.editing_schedule = schedule_data
+        display_title = schedule_data.title if len(schedule_data.title) <= 8 else schedule_data.title[:7] + "..."
+        self.page_alarm.set_title(f"修改【{display_title}】提醒")
+        
+        target = schedule_data.start_time if schedule_data.start_time else schedule_data.end_time
+        # 如果目标时间没设，默认给个现在的时间
+        if not target: target = datetime.now()
+        
+        self.page_alarm.set_initial_data(target, schedule_data.is_alarm, schedule_data.alarm_duration)
+        self.body_stack.setCurrentWidget(self.page_alarm)
+        self.header.hide()
+
+    def back_from_alarm_picker(self):
+        if self.alarm_picker_mode == 'add':
+            self.body_stack.setCurrentWidget(self.page_add)
+        else:
+            self.body_stack.setCurrentWidget(self.page_dashboard)
+        self.header.show()
+
+    def on_alarm_confirmed(self, remind_dt, is_alarm, duration):
+        if self.alarm_picker_mode == 'add':
+            self.page_add.set_alarm_data(remind_dt, is_alarm, duration)
+            self.back_from_alarm_picker()
+        elif self.alarm_picker_mode == 'edit' and self.editing_schedule:
+            def _do_update(update_future):
+                now = datetime.now() 
+                new_data = {'reminder_time': remind_dt, 'is_alarm': is_alarm, 'alarm_duration': duration, 'created_at': now}
+                db_manager.update_schedule_with_repeat(self.editing_schedule.id, new_data, update_future)
+                
+                self.editing_schedule.reminder_time = remind_dt
+                self.editing_schedule.is_alarm = is_alarm
+                self.editing_schedule.alarm_duration = duration
+                self.editing_schedule.created_at = now
+                if not update_future: self.editing_schedule.group_id = None
+                
+                self._refresh_dashboard_todo_week()
+                for p in self.page_dashboard.open_popups:
+                    if p.data.id == self.editing_schedule.id: 
+                        p.refresh_alarm_display()
+                        p.refresh_created_display() 
+                self.back_from_alarm_picker()
+            self._check_repeat_and_execute(self.editing_schedule, _do_update)
+
+    # === 清单选择路由逻辑 (双模) ===
+    def go_to_list_picker(self, current_category_id, current_type):
+        self.list_picker_mode = 'add'
+        self.page_list.set_title("选择清单")
+        # 把类型参数传给弹窗的 load_data
+        self.page_list.load_data(current_category_id, list_type=current_type)
+        self.body_stack.setCurrentWidget(self.page_list)
+        self.header.hide()
+
+    def go_to_list_picker_for_edit(self, schedule_data, source_view="dashboard"):
+        if source_view == "week":
+            self.week_window.go_to_list_picker_for_edit(schedule_data)
+            return
+        if source_view == "todo_board":
+            if hasattr(self, 'todo_board') and self.todo_board:
+                self.todo_board.go_to_list_picker_for_edit(schedule_data)
+            return
+        self.list_picker_mode = 'edit'
+        # 记住从哪个界面（日程/待办）点进来的
+        self.list_picker_source = source_view 
+        
+        self.editing_schedule = schedule_data
+        display_title = schedule_data.title if len(schedule_data.title) <= 8 else schedule_data.title[:7] + "..."
+        self.page_list.set_title(f"修改【{display_title}】清单")
+        
+        self.page_list.load_data(schedule_data.category_id, list_type=schedule_data.item_type)
+        self.body_stack.setCurrentWidget(self.page_list)
+        self.header.hide()
+
+    def back_from_list_picker(self):
+        if self.list_picker_mode == 'add':
+            self.body_stack.setCurrentWidget(self.page_add)
+        else:
+            # 根据记录的来源动态返回
+            if getattr(self, 'list_picker_source', 'dashboard') == 'todo':
+                self.body_stack.setCurrentWidget(self.page_todo)
+            else:
+                self.body_stack.setCurrentWidget(self.page_dashboard)
+        self.header.show()
+
+    def on_list_confirmed(self, category_id):
+        if self.list_picker_mode == 'add':
+            self.page_add.set_list_data(category_id)
+            self.back_from_list_picker()
+        elif self.list_picker_mode == 'edit' and self.editing_schedule:
+            def _do_update(update_future):
+                now = datetime.now() 
+                new_data = {'category_id': category_id, 'created_at': now}
+                db_manager.update_schedule_with_repeat(self.editing_schedule.id, new_data, update_future)
+                
+                self.editing_schedule.category_id = category_id
+                self.editing_schedule.created_at = now
+                if not update_future: self.editing_schedule.group_id = None
+                
+                self._refresh_dashboard_todo_week() # 为保险起见，清单改变也同步刷新下周视图
+                for p in self.page_dashboard.open_popups:
+                    if p.data.id == self.editing_schedule.id: 
+                        p.refresh_list_display()
+                        p.refresh_created_display() 
+                self.back_from_list_picker()
+            self._check_repeat_and_execute(self.editing_schedule, _do_update)
+    # --- 其他逻辑 ---
+
+    def on_schedule_saved(self):
+        self._refresh_dashboard_todo_week()
+        self.body_stack.setCurrentIndex(0)
+        return_target = self.main_controller.resolve_add_return_target(
+            getattr(self, 'source_view_for_add', None),
+            self.page_dashboard,
+        )
+        self.body_stack.setCurrentWidget(return_target)
+
+    def handle_header_action(self, action_name):
+        if action_name == "add":
+            self.switch_to_add_page()
+        elif action_name == "toggle_pin":
+            self.toggle_pin_mode()
+        elif action_name == "skin":
+            print("这里以后写换肤逻辑")
+        elif action_name == "view":
+            # 动态判断当前在哪个页面，就弹哪个页面的视图选择器
+            current_widget = self.body_stack.currentWidget()
+            
+            if current_widget == self.page_todo:
+                self.page_todo.toggle_view_selector()
+            elif current_widget == self.page_dashboard:
+                self.page_dashboard.toggle_view_selector()
+            else:
+                # 如果在添加页或时间选择页等二级页面，先退回主面板，再弹菜单
+                self.body_stack.setCurrentWidget(self.page_dashboard)
+                self.page_dashboard.toggle_view_selector()
+                
+        elif action_name == "sort":
+            print("这里以后写排序逻辑")
+
+    def toggle_pin_mode(self):
+        current_flags = self.windowFlags()
+        def _do_toggle():
+            if current_flags & Qt.WindowType.WindowStaysOnTopHint:
+                new_flags = current_flags ^ Qt.WindowType.WindowStaysOnTopHint
+                print("状态变更：取消置顶")
+            else:
+                new_flags = current_flags | Qt.WindowType.WindowStaysOnTopHint
+                print("状态变更：开启置顶")
+                
+            self.setWindowFlags(new_flags)
+            self.show()
+            
+            hwnd = int(self.winId())
+            apply_24h2_border_fix(hwnd)
+            QTimer.singleShot(10, self.header.reopen_menu)
+
+        QTimer.singleShot(100, _do_toggle)
+            
+    def switch_to_add_page(self):
+        current_widget = self.body_stack.currentWidget()
+        
+        # 只有在日视图（看板）且日期过期时，才禁止添加
+        today = datetime.now().date()
+        if current_widget == self.page_dashboard and self.page_dashboard.current_date < today:
+            self.show_toast("该日期已过期，无法添加日程")
+            return
+            
+        # 原本的切换逻辑
+        if current_widget == self.page_add:
+            # 如果当前在添加页，再点一次顶栏的 + 号，相当于取消，退回来源页
+            return_target = self.main_controller.resolve_add_return_target(
+                getattr(self, 'source_view_for_add', None),
+                self.page_dashboard,
+            )
+            self.body_stack.setCurrentWidget(return_target)
+        else:
+            self.source_view_for_add = self.main_controller.resolve_add_source(
+                current_widget,
+                self.page_dashboard,
+                self.page_todo,
+                getattr(self, 'source_view_for_add', None),
+            )
+            
+            default_to_schedule = self.main_controller.default_to_schedule_for_add(
+                current_widget,
+                self.page_todo,
+            )
+            self.page_add.reset(default_to_schedule=default_to_schedule)
+            
+            self.body_stack.setCurrentWidget(self.page_add)
+
+    # 处理视图切换
+    def switch_view(self, view_name):
+        route_action = ViewRouter.classify_main_view(view_name)
+
+        # 切换前，先把可能处于打开状态的视图选择菜单隐藏掉
+        if hasattr(self, 'page_dashboard'):
+            self.page_dashboard.view_selector.hide()
+        if hasattr(self, 'page_todo'):
+            self.page_todo.view_selector.hide()
+
+        # 从周视图切走时，让主窗口在周视图当前位置居中出现
+        if route_action != "week" and hasattr(self, 'week_window') and self.week_window.isVisible():
+            geom = self.week_window.geometry()
+            self.move(geom.x() + (geom.width() - self.width()) // 2, geom.y() + (geom.height() - self.height()) // 2)
+            self.week_window.hide()  # 关掉周界面
+            self.show()
+
+        # 从月视图切走时，让主窗口在月视图当前位置居中出现
+        if route_action != "month" and hasattr(self, 'month_window') and self.month_window.isVisible():
+            geom = self.month_window.geometry()
+            self.move(geom.x() + (geom.width() - self.width()) // 2, geom.y() + (geom.height() - self.height()) // 2)
+            self.month_window.hide()  # 关掉月界面
+            self.show()
+        
+        if route_action == "week":
+            # 切换到周视图 
+            self.hide()
+            self.week_window.refresh_week_data()
+            if hasattr(self, 'header') and hasattr(self.header, 'current_weather_data'):
+                if self.header.current_weather_data:
+                    self.week_window.update_weather_ui(self.header.current_weather_data)
+            
+            # 获取主窗口坐标，计算周视图的相对中心位置
+            main_geom = self.geometry()
+            new_x = main_geom.x() + (main_geom.width() - self.week_window.width()) // 2
+            new_y = main_geom.y() + (main_geom.height() - self.week_window.height()) // 2
+            self.week_window.move(new_x, new_y)
+            self.week_window.show()
+
+        elif route_action == "month":
+            # 月视图切换逻辑
+            self.hide()
+            if hasattr(self, 'header') and hasattr(self.header, 'current_weather_data'):
+                if self.header.current_weather_data:
+                    self.month_window.update_weather_ui(self.header.current_weather_data)
+            # 获取主窗口坐标，计算月视图的相对中心位置
+            main_geom = self.geometry()
+            new_x = main_geom.x() + (main_geom.width() - self.month_window.width()) // 2
+            new_y = main_geom.y() + (main_geom.height() - self.month_window.height()) // 2
+            self.month_window.move(new_x, new_y)
+            self.month_window.show()
+            
+        elif route_action == "todo":
+            # 切换到待办视图
+            self.body_stack.setCurrentWidget(self.page_todo)
+            self.page_todo.refresh_data() # 切过去的时候刷新一下数据
+            
+        elif route_action == "day":
+            # 切换回日视图 (主面板)
+            self.body_stack.setCurrentWidget(self.page_dashboard)
+            self.page_dashboard.refresh_data()
+            
+        elif route_action == "priority":
+
+            self.show_toast("准备切换至：四象限视图")
+        else:
+            self.show_toast(f"准备切换至：{view_name}")
+
+    def restore_from_month_view(self):
+        """从大屏月视图恢复到主视图窄屏"""
+        # 计算相对位置，以月视图当前位置为中心，收缩回主窗口
+        month_geom = self.month_window.geometry()
+        new_x = month_geom.x() + (month_geom.width() - self.width()) // 2
+        new_y = month_geom.y() + (month_geom.height() - self.height()) // 2
+        self.move(new_x, new_y)
+
+        self.month_window.hide()
+        self.body_stack.setCurrentWidget(self.page_dashboard) # 确保路由回到看板
+        self.page_dashboard.refresh_data()
+        self.show()
+
+    def restore_from_week_view(self):
+        """从周视图宽屏恢复到主视图窄屏"""
+        # 计算相对位置，以周视图当前位置为中心，收缩回主窗口
+        week_geom = self.week_window.geometry()
+        new_x = week_geom.x() + (week_geom.width() - self.width()) // 2
+        new_y = week_geom.y() + (week_geom.height() - self.height()) // 2
+        self.move(new_x, new_y)
+
+        self.week_window.hide()
+        self.body_stack.setCurrentWidget(self.page_dashboard) # 确保路由回到看板
+        self.page_dashboard.refresh_data()
+        self.show()
+
+    def show_toast(self, message):
+        self.toast_label = show_center_toast(self, message, attr_name="toast_label", duration_ms=500)
+
+    def switch_to_suspend(self):
+        pos = self.pos()
+        self.suspend_window.move(pos)
+        self.hide()
+        self.suspend_window.show()
+
+    def switch_to_normal(self):
+        pos = self.suspend_window.pos()
+        self.move(pos)
+        self.suspend_window.hide()
+        self.show()
+        self.resize(AppConfig.DEFAULT_WIDTH, 600) 
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        path = QPainterPath()
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        path.addRoundedRect(rect, 5.0, 5.0)
+        
+        gradient = QLinearGradient(0, 0, 0, self.height())
+        gradient.setColorAt(0.0, QColor(AppConfig.COLOR_GRADIENT_START))
+        gradient.setColorAt(1.0, QColor(AppConfig.COLOR_GRADIENT_END))
+        painter.fillPath(path, QBrush(gradient))
+
+    def switch_week_to_suspend(self):
+        """周视图 -> 宽版挂起条"""
+        self.week_window.hide()
+        pos = self.week_window.pos()
+        self.suspend_window_week.move(pos.x(), pos.y())
+        self.suspend_window_week.show()
+
+    def switch_suspend_to_week(self):
+        """宽版挂起条 -> 周视图"""
+        self.suspend_window_week.hide()
+        pos = self.suspend_window_week.pos()
+        self.week_window.move(pos.x(), pos.y())
+        self.week_window.show()
+
+    def switch_month_to_suspend(self):
+        """月视图 -> 月视图专属挂起条"""
+        self.month_window.hide()
+        pos = self.month_window.pos()
+        self.suspend_window_month.move(pos.x(), pos.y())
+        self.suspend_window_month.show()
+
+    def switch_suspend_to_month(self):
+        """月视图专属挂起条 -> 月视图"""
+        self.suspend_window_month.hide()
+        pos = self.suspend_window_month.pos()
+        self.month_window.move(pos.x(), pos.y())
+        self.month_window.show()
+
+    def _on_week_schedule_updated(self, updated_schedule):
+        """当周视图完成修改时，顺便把弹窗里的文字刷新一下"""
+        self.page_dashboard.refresh_data()
+        if not updated_schedule:
+            return
+        for p in self.page_dashboard.open_popups:
+            if p.data.id == updated_schedule.id:
+                p.refresh_time_display()
+                p.refresh_alarm_display()  
+                if hasattr(p, 'refresh_list_display'): 
+                    p.refresh_list_display()
+                p.refresh_created_display()

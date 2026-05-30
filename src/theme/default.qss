@@ -1,0 +1,61 @@
+/* Default skin preset baseline.
+   This is the canonical default preset for skin-based theming.
+   It does NOT imply a light/dark mode matrix.
+   Dynamic-property-only rules for round 7-3/7-3b verification.
+   Naming conventions:
+   - role: component semantic role (primaryButton/ghostButton/panel/input)
+   - state: semantic state (normal/active/warning/danger)
+   - variant: visual variant (compact/toolbar)
+*/
+
+QPushButton[role="primaryButton"] {
+    background-color: rgba(12, 192, 223, 0.16);
+    color: #0b4a55;
+    border: 1px solid rgba(12, 192, 223, 0.45);
+    border-radius: 8px;
+    padding: 4px 10px;
+}
+
+QPushButton[role="ghostButton"] {
+    background-color: transparent;
+    color: #0b4a55;
+    border: 1px solid rgba(12, 192, 223, 0.35);
+    border-radius: 8px;
+    padding: 4px 10px;
+}
+
+QWidget[role="panel"] {
+    background-color: rgba(12, 192, 223, 0.08);
+    border: 1px solid rgba(12, 192, 223, 0.20);
+    border-radius: 10px;
+}
+
+*[state="warning"] {
+    border-color: #d99200;
+    color: #9a6400;
+}
+
+*[state="danger"] {
+    border-color: #d33f49;
+    color: #a82733;
+}
+
+*[variant="compact"] {
+    padding: 2px;
+}
+
+QToolButton[role="windowControl"][variant="toolbar"] {
+    background-color: transparent;
+    border: none;
+    border-radius: 6px;
+    margin: 0px;
+    padding: 0px;
+}
+
+QToolButton[role="windowControl"][variant="toolbar"]:hover {
+    background-color: rgba(255, 255, 255, 0.2);
+}
+
+QToolButton[role="windowControl"][variant="toolbar"]:pressed {
+    background-color: rgba(255, 255, 255, 0.3);
+}

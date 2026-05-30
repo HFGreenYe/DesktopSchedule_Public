@@ -1,0 +1,775 @@
+# src/ui/schedule_detail_pop.py
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
+                             QPushButton, QFrame, QGridLayout, QSizePolicy,
+                             QLineEdit, QTextEdit,QComboBox, QListView, QDialog) # 🟢 新增了输入框组件
+from PyQt6.QtCore import Qt, QRectF, QPoint, pyqtSignal, QEvent, QTimer
+from PyQt6.QtGui import QPainter, QPainterPath, QColor, QBrush, QLinearGradient, QIcon, QPen, QPixmap, QImage
+from PyQt6.QtSvg import QSvgRenderer
+from ..data.database import db_manager, Schedule
+from ..utils.win_api import apply_24h2_border_fix
+from ..config import AppConfig 
+import os
+from datetime import datetime
+
+class RepeatConfirmDialog(QDialog):
+    def __init__(self, new_rule, parent=None):
+        super().__init__(parent)
+        self.result_mode = 0  # 0: 取消, 1: 仅此条, 2: 修改未来
+        self.setFixedSize(300, 150)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+        
+        lbl_title = QLabel("修改循环规则")
+        lbl_title.setStyleSheet("color: white; font-size: 16px; font-weight: bold; font-family: 'Microsoft YaHei';")
+        layout.addWidget(lbl_title)
+        
+        lbl_msg = QLabel(f"您将重复规则修改为了【{new_rule}】。\n请选择修改范围：")
+        lbl_msg.setStyleSheet("color: rgba(255,255,255,0.9); font-size: 13px; font-family: 'Microsoft YaHei';")
+        lbl_msg.setWordWrap(True)
+        layout.addWidget(lbl_msg)
+        
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(10)
+        
+        btn_style = """
+            QPushButton {
+                background-color: rgba(255, 255, 255, 0.1); color: white; 
+                border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 5px; 
+                padding: 6px 0px; font-family: 'Microsoft YaHei'; font-size: 12px;
+            }
+            QPushButton:hover { background-color: rgba(255, 255, 255, 0.2); }
+        """
+        btn_style_highlight = """
+            QPushButton {
+                background-color: #0cc0df; color: white; border: none;
+                border-radius: 5px; padding: 6px 0px; font-family: 'Microsoft YaHei'; font-size: 12px; font-weight: bold;
+            }
+            QPushButton:hover { background-color: #11d0f0; }
+        """
+        
+        btn_cancel = QPushButton("取消")
+        btn_cancel.setStyleSheet(btn_style)
+        btn_cancel.clicked.connect(self._on_cancel)
+        
+        btn_only_this = QPushButton("仅此条")
+        btn_only_this.setStyleSheet(btn_style)
+        btn_only_this.clicked.connect(self._on_only_this)
+        
+        btn_future = QPushButton("修改未来")
+        btn_future.setStyleSheet(btn_style_highlight)
+        btn_future.clicked.connect(self._on_future)
+        
+        btn_layout.addWidget(btn_cancel)
+        btn_layout.addWidget(btn_only_this)
+        btn_layout.addWidget(btn_future)
+        layout.addLayout(btn_layout)
+
+    def _on_cancel(self):
+        self.result_mode = 0
+        self.reject()
+        
+    def _on_only_this(self):
+        self.result_mode = 1
+        self.accept()
+        
+    def _on_future(self):
+        self.result_mode = 2
+        self.accept()
+        
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        path = QPainterPath()
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        path.addRoundedRect(rect, 10.0, 10.0)
+        # 绘制高级深灰磨砂背景
+        painter.fillPath(path, QBrush(QColor(40, 44, 52, 245)))
+        painter.setPen(QPen(QColor(255, 255, 255, 40), 1))
+        painter.drawPath(path)
+
+class ScheduleDetailPop(QWidget):
+    schedule_updated = pyqtSignal()
+    req_edit_time = pyqtSignal(object)
+    req_edit_alarm = pyqtSignal(object) 
+    req_edit_list = pyqtSignal(object)  
+
+    def __init__(self, schedule_data, source_view="dashboard", parent=None):
+        super().__init__(parent)
+        self.data = schedule_data
+        self.source_view = source_view
+        self.is_pinned = False
+        self.drag_pos = None
+
+        # 弹窗其他地方的字和图标，必须永远保持白色！
+        self.c_text_main = "white"
+        self.c_text_sub = "rgba(255,255,255,0.9)"
+        self.c_icon = "#FFFFFF"
+        self.c_combo_bg = "rgba(255, 255, 255, 0.2)"
+        self.c_combo_border = "rgba(255, 255, 255, 0.5)"
+        self.c_icon_pin = QColor(255, 255, 255, 255)
+        self.c_icon_pin_off = QColor(255, 255, 255, 150)
+
+        if self.source_view in ["week", "month"]:
+            self.c_desc_bg = "#FFFFFF"         # 周视图：详情框纯白
+            self.c_desc_border = "#FFFFFF"     # 周视图：无感边框
+        else:
+            self.c_desc_bg = "#11c1df"         # 主界面：原本的蓝绿框
+            self.c_desc_border = "rgba(255, 255, 255, 0.6)"
+
+        self.setFixedWidth(320)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.win_id = int(self.winId())
+        apply_24h2_border_fix(self.win_id)
+        
+        self._setup_ui()
+
+    def _get_desc_color(self, has_text):
+        """动态获取详情框里文字的颜色"""
+        if self.source_view in ["week", "month"]:
+            # 周视图：白底详情框里，有字显示青色！没字(占位符)显示灰字
+            return "#666666" if has_text else "#999999" 
+        else:
+            # 主界面：深底详情框里，保持白色文字
+            return "rgba(255, 255, 255, 0.9)" if has_text else "rgba(255, 255, 255, 0.6)"
+
+    def _get_icon(self, icon_name, color, target_size=16):
+        path = f"assets/icons/{icon_name}"
+        if not os.path.exists(path): return QPixmap()
+        
+        scale_ratio = 4.0
+        high_res_size = int(target_size * scale_ratio)
+        image = QImage(high_res_size, high_res_size, QImage.Format.Format_ARGB32)
+        image.fill(Qt.GlobalColor.transparent)
+        
+        painter = QPainter(image)
+        if icon_name.lower().endswith('.svg'):
+            renderer = QSvgRenderer(path)
+            if renderer.isValid(): renderer.render(painter)
+        else:
+            src_img = QImage(path)
+            if not src_img.isNull():
+                src_img = src_img.scaled(high_res_size, high_res_size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                x = (high_res_size - src_img.width()) // 2
+                y = (high_res_size - src_img.height()) // 2
+                painter.drawImage(x, y, src_img)
+        painter.end()
+
+        painter = QPainter(image)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+        if isinstance(color, str): color_obj = QColor(color)
+        else: color_obj = color
+            
+        painter.fillRect(image.rect(), color_obj)
+        painter.end()
+        
+        pixmap = QPixmap.fromImage(image)
+        pixmap.setDevicePixelRatio(scale_ratio)
+        return pixmap
+
+    def _setup_ui(self):
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(15)
+
+        # === 顶部控制栏 (标题 + 输入框切换) ===
+        top_row = QHBoxLayout()
+        top_row.setContentsMargins(0, 0, 60, 0)
+        top_row.setSpacing(3) 
+
+        # 如果是从“待办看板”打开的弹窗，加一个便签图标以示区分
+        if self.source_view == "todo_board":
+            self.lbl_source_icon = QLabel()
+            self.lbl_source_icon.setFixedSize(24, 24)
+            pix = self._get_icon("stick_view.svg", "#FFFFFF", 20)
+            if not pix.isNull():
+                self.lbl_source_icon.setPixmap(pix)
+            self.lbl_source_icon.setStyleSheet("margin-top: 5px; background: transparent;")
+            self.lbl_source_icon.setToolTip("待办看板 - 便签模式")
+            top_row.addWidget(self.lbl_source_icon, 0, Qt.AlignmentFlag.AlignTop)
+
+        # 标题显示标签
+        self.lbl_title = QLabel(self.data.title)
+        self.lbl_title.setStyleSheet("color: white; font-size: 20px; font-weight: bold; font-family: 'Microsoft YaHei';")
+        self.lbl_title.setWordWrap(True)
+        self.lbl_title.installEventFilter(self) # 监听双击
+
+        # 标题编辑框 (默认隐藏)
+        self.edit_title = QLineEdit(self.data.title)
+        self.edit_title.setStyleSheet("""
+            QLineEdit {
+                background: transparent; color: white;
+                border: none;
+                font-size: 20px; font-weight: bold; font-family: 'Microsoft YaHei'; padding: 0px;
+            }
+        """)
+        self.edit_title.hide()
+        self.edit_title.installEventFilter(self)
+
+        top_row.addWidget(self.lbl_title, stretch=1)
+        top_row.addWidget(self.edit_title, stretch=1)
+        main_layout.addLayout(top_row)
+
+        # 固钉按钮
+        # 固钉按钮
+        self.btn_pin = QPushButton(self) 
+        self.btn_pin.setFixedSize(30, 30) 
+        self.btn_pin.setCursor(Qt.CursorShape.PointingHandCursor)
+        pin_icon = self._get_icon("pin.svg", QColor(255, 255, 255, 150), 16)
+        if not pin_icon.isNull(): self.btn_pin.setIcon(QIcon(pin_icon))
+        else: self.btn_pin.setText("📌")
+        
+        # 加上 hover 态的背景变色逻辑
+        self.btn_pin.setStyleSheet("""
+            QPushButton { background: transparent; border: none; }
+            QPushButton:hover { background-color: rgba(255, 255, 255, 0.2); border-radius: 4px; }
+        """)
+        
+        self.btn_pin.clicked.connect(self._toggle_pin)
+        self.btn_pin.move(self.width() - 60, 0)
+
+        # 关闭按钮
+        self.btn_close = QPushButton(self) 
+        self.btn_close.setFixedSize(30, 30) 
+        self.btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_icon = self._get_icon("close.png", "#FFFFFF", 12)
+        if not close_icon.isNull(): self.btn_close.setIcon(QIcon(close_icon))
+        else: self.btn_close.setText("✕")
+        self.btn_close.setStyleSheet("QPushButton { background: transparent; border: none; border-top-right-radius: 10px; } QPushButton:hover { background: #ff4d4f; }")
+        self.btn_close.clicked.connect(self.close)
+        self.btn_close.move(self.width() - 30, 0)
+
+        # === 详情内容框 (强制存在，无内容时提示添加) ===
+        desc_frame = QFrame()
+        desc_frame.setStyleSheet(f"""
+            QFrame {{ border: 1px solid {self.c_desc_border}; border-radius: 8px; background-color: {self.c_desc_bg}; }}
+        """)
+        desc_layout = QVBoxLayout(desc_frame)
+        desc_layout.setContentsMargins(12, 12, 12, 12)
+        
+        # 详情显示标签
+        desc_text = self.data.description if self.data.description else "暂无详情，双击添加..."
+        desc_color = self._get_desc_color(bool(self.data.description))
+        self.lbl_desc = QLabel(desc_text)
+        self.lbl_desc.setWordWrap(True)
+        self.lbl_desc.setStyleSheet(f"color: {desc_color}; border: none; background: transparent; font-size: 13px; font-family: 'Microsoft YaHei'; line-height: 1.5;")
+        self.lbl_desc.installEventFilter(self) # 监听双击
+        
+        # 详情编辑框 (默认隐藏)
+        self.edit_desc = QTextEdit(self.data.description or "")
+        self.edit_desc.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff) # 隐藏垂直滚动条
+        self.edit_desc.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff) # 彻底隐藏水平滚动条！
+        self.edit_desc.document().setDocumentMargin(0) # 消除内部边距，和标签文本完全对齐
+        self.edit_desc.setStyleSheet(f"""
+            QTextEdit {{
+                background: transparent; color: {self._get_desc_color(True)};
+                border: none;
+                font-size: 13px; font-family: 'Microsoft YaHei'; padding: 0px;
+            }}
+        """)
+        self.edit_desc.hide()
+        self.edit_desc.installEventFilter(self)
+        self.edit_desc.textChanged.connect(self._adjust_desc_height) # 文字变动时自动撑开弹窗高度
+        
+        desc_layout.addWidget(self.lbl_desc)
+        desc_layout.addWidget(self.edit_desc)
+        main_layout.addWidget(desc_frame)
+
+        # === 3. 底部信息网格 ===
+        grid = QGridLayout()
+        grid.setSpacing(10)
+        grid.setContentsMargins(0, 5, 0, 0)
+
+        def create_info_item(icon_source, content):
+            # 加上 self，防止我们后面隐藏它时，它变成游离的幽灵窗口
+            w = QWidget(self) 
+            l = QHBoxLayout(w)
+            l.setContentsMargins(0, 0, 0, 0)
+            l.setSpacing(6)
+            
+            # 图标支持传入字符串(生成静态图标) 或 QLabel(生成动态图标)
+            if isinstance(icon_source, str):
+                icon_lbl = QLabel()
+                icon_lbl.setFixedSize(16, 16)
+                pix = self._get_icon(icon_source, "#FFFFFF", 16)
+                if not pix.isNull(): icon_lbl.setPixmap(pix)
+                l.addWidget(icon_lbl)
+            else:
+                l.addWidget(icon_source)
+            
+            if isinstance(content, str):
+                text_lbl = QLabel(content)
+                text_lbl.setStyleSheet("color: rgba(255,255,255,0.9); font-size: 12px; font-family: 'Microsoft YaHei';")
+                l.addWidget(text_lbl)
+            else:
+                l.addWidget(content)
+                
+            l.addStretch()
+            return w
+
+        # 数据准备
+        # (1) 将时间做成独立 Label 并监听双击
+        self.lbl_time_info = QLabel()
+        self.lbl_time_info.setStyleSheet("color: rgba(255,255,255,0.9); font-size: 12px; font-family: 'Microsoft YaHei';")
+        self.lbl_time_info.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.lbl_time_info.setToolTip("双击修改时间")
+        self.lbl_time_info.installEventFilter(self)
+        self.refresh_time_display() # 调用刷新方法填充文字
+
+        # (2) 将提醒做成独立 Label 并监听双击
+        self.lbl_alarm_info = QLabel()
+        self.lbl_alarm_info.setStyleSheet("color: rgba(255,255,255,0.9); font-size: 12px; font-family: 'Microsoft YaHei';")
+        self.lbl_alarm_info.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.lbl_alarm_info.setToolTip("双击修改提醒")
+        self.lbl_alarm_info.installEventFilter(self)
+        self.refresh_alarm_display()
+
+        # (3) 将清单做成独立 Label 并监听双击
+        self.lbl_list_info = QLabel()
+        self.lbl_list_info.setStyleSheet("color: rgba(255,255,255,0.9); font-size: 12px; font-family: 'Microsoft YaHei';")
+        self.lbl_list_info.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.lbl_list_info.setToolTip("双击修改所属清单")
+        self.lbl_list_info.installEventFilter(self)
+        self.refresh_list_display()
+
+        self.lbl_created_info = QLabel()
+        self.lbl_created_info.setStyleSheet("color: rgba(255,255,255,0.9); font-size: 12px; font-family: 'Microsoft YaHei';")
+        self.lbl_created_info.setToolTip("最后修改时间")
+        self.refresh_created_display()
+
+        # 下拉框统一无痕样式
+        combo_style = """
+            QComboBox { background-color: rgba(255, 255, 255, 0.2); border: 1px solid rgba(255, 255, 255, 0.5); color: #ffffff; border-radius: 4px; padding: 0px 4px; font-family: 'Microsoft YaHei'; font-size: 12px; }
+            QComboBox::drop-down { border: none; width: 0px; }
+            QListView { background-color: #ffffff; color: #333333; border: 1px solid #dddddd; outline: 0px; }
+            QListView::item { background-color: #ffffff; color: #333333; padding: 4px 8px; }
+            QListView::item:selected { background-color: #0cc0df; color: #ffffff; }
+            QListView::item:hover { background-color: #f0f0f0; color: #333333; }
+        """
+
+        # --- (4) 紧急性 Label + ComboBox ---
+        self.lbl_priority = QLabel()
+        self.lbl_priority.setStyleSheet("color: rgba(255,255,255,0.9); font-size: 12px; font-family: 'Microsoft YaHei';")
+        self.lbl_priority.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.lbl_priority.setToolTip("双击修改紧急性")
+        self.lbl_priority.installEventFilter(self)
+
+        self.combo_priority = QComboBox()
+        self.combo_priority.addItems(["低重要性", "中重要性", "高重要性"])
+        self.combo_priority.setView(QListView())
+        self.combo_priority.setStyleSheet(combo_style)
+        self.combo_priority.setFixedHeight(20)
+        self.combo_priority.hide()
+        self.combo_priority.activated.connect(self._finish_edit_priority)
+
+        pri_container = QWidget()
+        pri_layout = QHBoxLayout(pri_container)
+        pri_layout.setContentsMargins(0, 0, 0, 0)
+        pri_layout.addWidget(self.lbl_priority)
+        pri_layout.addWidget(self.combo_priority)
+
+        # --- (5) 重复 Label + ComboBox ---
+        self.lbl_repeat = QLabel()
+        self.lbl_repeat.setStyleSheet("color: rgba(255,255,255,0.9); font-size: 12px; font-family: 'Microsoft YaHei';")
+        self.lbl_repeat.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.lbl_repeat.setToolTip("双击修改重复规则")
+        self.lbl_repeat.installEventFilter(self)
+
+        self.combo_repeat = QComboBox()
+        self.combo_repeat.addItems(["不重复", "每天", "每周", "每月"])
+        rep_view = QListView()
+        rep_view.setMouseTracking(True)
+        self.combo_repeat.setView(rep_view)
+        self.combo_repeat.setStyleSheet(combo_style)
+        self.combo_repeat.setFixedHeight(20)
+        self.combo_repeat.hide()
+        self.combo_repeat.activated.connect(self._finish_edit_repeat)
+        rep_view.entered.connect(lambda idx: self._on_repeat_rule_changed(self.combo_repeat.itemText(idx.row())))
+
+        self.icon_repeat = QLabel() 
+        self.icon_repeat.setFixedSize(16, 16)
+
+        rep_container = QWidget()
+        rep_layout = QHBoxLayout(rep_container)
+        rep_layout.setContentsMargins(0, 0, 0, 0)
+        rep_layout.addWidget(self.lbl_repeat)
+        rep_layout.addWidget(self.combo_repeat)
+
+        self.refresh_priority_display()
+        self.refresh_repeat_display()
+
+        # 先把所有信息的容器对象拿到手里
+        w_time = create_info_item("time.svg", self.lbl_time_info)
+        w_alarm = create_info_item("alarm.svg", self.lbl_alarm_info)
+        w_list = create_info_item("list.svg", self.lbl_list_info)
+        w_created = create_info_item("edit_time.svg", self.lbl_created_info)
+        w_priority = create_info_item("importance.svg", pri_container)
+        w_repeat = create_info_item(self.icon_repeat, rep_container)
+
+        is_todo = getattr(self.data, 'item_type', 'schedule') == 'todo'
+
+        if is_todo:
+            # 待办模式：将不需要的【整个容器】隐藏
+            w_time.hide()
+            w_alarm.hide()
+            w_repeat.hide()
+            
+            # 将剩下的排进网格，只有两行
+            grid.addWidget(w_priority, 0, 0)
+            grid.addWidget(w_list, 0, 1)
+            grid.addWidget(w_created, 1, 0)
+        else:
+            # 日程模式：全量显示的六宫格
+            grid.addWidget(w_time, 0, 0)
+            grid.addWidget(w_alarm, 0, 1)
+            grid.addWidget(w_list, 1, 0)
+            grid.addWidget(w_created, 1, 1)
+            grid.addWidget(w_priority, 2, 0)
+            grid.addWidget(w_repeat, 2, 1)
+
+        main_layout.addLayout(grid)
+        
+        # 1. 将原本单一的文本标签替换为 图标+文字 的组合容器
+        self.repeat_status_widget = QWidget()
+        status_layout = QHBoxLayout(self.repeat_status_widget)
+        status_layout.setContentsMargins(0, 0, 0, 0)
+        status_layout.setSpacing(6)
+
+        # 左侧 SVG 图标
+        self.icon_repeat_status = QLabel()
+        self.icon_repeat_status.setFixedSize(14, 14)
+        self.icon_repeat_status.setScaledContents(True)
+
+        # 右侧 提示文字
+        self.lbl_repeat_status = QLabel()
+        self.lbl_repeat_status.setStyleSheet("color: rgba(255, 255, 255, 0.7); font-size: 11px; font-family: 'Microsoft YaHei';")
+        self.lbl_repeat_status.setWordWrap(True)
+
+        # 让图标和文字都在顶部对齐，防止文字换行时图标居中显得突兀
+        status_layout.addWidget(self.icon_repeat_status, 0, Qt.AlignmentFlag.AlignTop)
+        status_layout.addWidget(self.lbl_repeat_status, 1, Qt.AlignmentFlag.AlignTop)
+
+        self.repeat_status_widget.hide() 
+        main_layout.addWidget(self.repeat_status_widget)
+        
+        self.adjustSize()
+
+    def _on_repeat_rule_changed(self, current_text):
+        """处理鼠标悬停下拉框时的实时文字预览"""
+        current_text = current_text.strip()
+        self.repeat_status_widget.show() # 显示新的组合容器
+        
+        # 统一设置文字为灰白色
+        self.lbl_repeat_status.setStyleSheet("color: rgba(255, 255, 255, 0.7); font-size: 11px; font-family: 'Microsoft YaHei';")
+
+        if current_text in ('none', '无', '不重复', ''):
+            if getattr(self.data, 'group_id', None):
+                self.lbl_repeat_status.setText("保存后，此日程将脱离原循环组，变为单次日程。")
+                pix = self._get_icon("warning_red.svg", "#FF4D4F", 14)
+                self.icon_repeat_status.setPixmap(pix)
+            else:
+                self.lbl_repeat_status.setText("当前为单次独立日程。")
+                pix = self._get_icon("warning_yellow.svg", "#FAAD14", 14)
+                self.icon_repeat_status.setPixmap(pix)
+        elif current_text == '每天':
+            self.lbl_repeat_status.setText("保存后，将以今天为基准向未来生成 365 条每日日程。")
+            pix = self._get_icon("warning_yellow.svg", "#FAAD14", 14)
+            self.icon_repeat_status.setPixmap(pix)
+        elif current_text == '每周':
+            self.lbl_repeat_status.setText("保存后，将以今天为基准向未来生成 52 条每周日程。")
+            pix = self._get_icon("warning_yellow.svg", "#FAAD14", 14)
+            self.icon_repeat_status.setPixmap(pix)
+        elif current_text == '每月':
+            self.lbl_repeat_status.setText("保存后，将以今天为基准向未来生成 12 条每月日程。")
+            pix = self._get_icon("warning_yellow.svg", "#FAAD14", 14)
+            self.icon_repeat_status.setPixmap(pix)
+            
+        QTimer.singleShot(0, lambda: self.adjustSize())
+
+    def _adjust_desc_height(self):
+        """终极精准高度计算：抛弃不稳定的测算，使用绝对宽度"""
+        if self.edit_desc.isVisible():
+            # 弹窗固定宽 320 - 主边距 40 - 内边距 24 = 绝对内容宽度 256
+            self.edit_desc.document().setTextWidth(256)
+            doc_height = self.edit_desc.document().size().height()
+            
+            # 紧凑贴合，只给光标留 2px 呼吸空间
+            self.edit_desc.setFixedHeight(int(doc_height) + 2)
+            self.adjustSize()
+
+    def refresh_time_display(self):
+        """根据最新数据重新生成时间文字"""
+        st, et = self.data.start_time, self.data.end_time
+        if st and et:
+            if st.date() == et.date(): time_str = f"{st.strftime('%m-%d %H:%M')} - {et.strftime('%H:%M')}"
+            else: time_str = f"{st.strftime('%m-%d %H:%M')} - {et.strftime('%m-%d %H:%M')}"
+        elif et: time_str = f"{et.strftime('%m-%d')} 截止: {et.strftime('%H:%M')}"
+        else: time_str = "全天"
+        self.lbl_time_info.setText(time_str)
+
+    def refresh_alarm_display(self):
+        """根据最新数据重新生成提醒文字"""
+        reminder_str = self.data.reminder_time.strftime("%m-%d %H:%M") if self.data.reminder_time else "无提醒"
+        self.lbl_alarm_info.setText(reminder_str)
+        
+    def refresh_list_display(self):
+        """根据最新数据重新生成清单文字"""
+        list_str = "未选择"
+        if self.data.category_id:
+            cat = db_manager.get_category(self.data.category_id)
+            if cat:
+                suffix = " (已删除)" if cat.is_deleted else ""
+                list_str = f"#{cat.id:03d} {cat.name}{suffix}"
+        self.lbl_list_info.setText(list_str)
+
+    def refresh_priority_display(self):
+        """刷新优先级展示"""
+        p_map = {0: "低重要性", 1: "中重要性", 2: "高重要性"}
+        self.lbl_priority.setText(p_map.get(self.data.priority, "低重要性"))
+        self.combo_priority.setCurrentIndex(self.data.priority)
+
+    def refresh_repeat_display(self):
+        """刷新重复规则展示及图标"""
+        rep = self.data.repeat_rule.strip()
+        if not rep or rep in ("none", "无"):
+            self.lbl_repeat.setText("不重复")
+            self.combo_repeat.setCurrentText("不重复")
+            pix = self._get_icon("repeat_off.svg", "#FFFFFF", 16)
+        else:
+            self.lbl_repeat.setText(rep)
+            self.combo_repeat.setCurrentText(rep)
+            pix = self._get_icon("repeat.svg", "#FFFFFF", 16)
+        
+        if hasattr(self, 'icon_repeat'):
+            self.icon_repeat.setPixmap(pix)
+
+    def refresh_created_display(self):
+        """刷新最后修改时间显示"""
+        created_str = self.data.created_at.strftime("%m-%d %H:%M")
+        self.lbl_created_info.setText(created_str)
+
+    def _finish_edit_priority(self, index):
+        """下拉框选中后自动保存"""
+        if self.data.priority != index:
+            self.data.priority = index
+            self.data.created_at = datetime.now() # 更新修改时间
+            db_manager.update_schedule_fields(self.data.id, priority=index, created_at=self.data.created_at)
+            self.refresh_priority_display()
+            self.refresh_created_display() # 刷新时间UI
+            self.schedule_updated.emit()
+        self.combo_priority.hide()
+        self.lbl_priority.show()
+        QTimer.singleShot(0, lambda: self.adjustSize())
+
+    def _finish_edit_repeat(self, index):
+        text = self.combo_repeat.itemText(index) # 获取实际点击的文本
+        val = "无" if text == "不重复" else text
+        
+        if self.data.repeat_rule != val:
+            update_future = False
+            has_group = bool(getattr(self.data, 'group_id', None))
+            
+            # 弹窗询问
+            if has_group:
+                dialog = RepeatConfirmDialog(val, self)
+                dialog.exec()
+                
+                if dialog.result_mode == 0:  # 选择了 取消
+                    self.combo_repeat.setCurrentText(self.data.repeat_rule)
+                    self.combo_repeat.hide()
+                    self.lbl_repeat.show()
+                    if hasattr(self, 'lbl_repeat_status'):
+                        self.lbl_repeat_status.hide()
+                    return
+                elif dialog.result_mode == 2:  # 选择了 修改未来
+                    update_future = True
+                elif dialog.result_mode == 1:  # 选择了 仅此条
+                    update_future = False
+            else:
+                if val != "无": update_future = True
+
+            self.data.repeat_rule = val
+            self.data.created_at = datetime.now()
+
+            db_manager.update_schedule_with_repeat(
+                self.data.id, 
+                {'repeat_rule': val, 'created_at': self.data.created_at}, 
+                update_future
+            )
+            self.data = Schedule.get_by_id(self.data.id)
+            self.refresh_repeat_display()
+            self.refresh_created_display() 
+            self.schedule_updated.emit()
+            
+        self.combo_repeat.hide()
+        self.lbl_repeat.show()
+        if hasattr(self, 'repeat_status_widget'):
+            self.repeat_status_widget.hide() # 隐藏整个容器
+            
+        QTimer.singleShot(0, lambda: self.adjustSize())
+
+    # 事件过滤器 (捕获双击、焦点丢失、回车)
+    def eventFilter(self, obj, event):
+        # 1. 拦截双击事件，进入编辑模式
+        if event.type() == QEvent.Type.MouseButtonDblClick:
+            if obj == getattr(self, 'lbl_time_info', None):
+                self.req_edit_time.emit(self.data) # 发出修改时间信号
+                return True
+            elif obj == getattr(self, 'lbl_alarm_info', None):
+                self.req_edit_alarm.emit(self.data) 
+                return True
+            elif obj == getattr(self, 'lbl_list_info', None):
+                self.req_edit_list.emit(self.data) 
+                return True
+            # 拦截优先级双击
+            elif obj == getattr(self, 'lbl_priority', None):
+                self.lbl_priority.hide()
+                self.combo_priority.show()
+                self.combo_priority.showPopup()
+                return True
+            # 拦截重复规则双击
+            elif obj == getattr(self, 'lbl_repeat', None):
+                self.lbl_repeat.hide()
+                self.combo_repeat.show()
+                self._on_repeat_rule_changed(self.combo_repeat.currentText())
+                self.combo_repeat.showPopup()
+                return True
+            elif obj == self.lbl_title:
+                self.lbl_title.hide()
+                self.edit_title.setText(self.lbl_title.text())
+                self.edit_title.show()
+                self.edit_title.setFocus()
+                self.edit_title.selectAll()
+                return True
+            elif obj == getattr(self, 'lbl_desc', None):
+                # 1. 记住当前文本标签的完美高度
+                base_height = self.lbl_desc.height()
+                self.lbl_desc.hide()
+                
+                # 2. 阻断信号！防止它在 0 宽度时去瞎算高度
+                self.edit_desc.blockSignals(True)
+                self.edit_desc.setPlainText(self.data.description or "")
+                self.edit_desc.blockSignals(False)
+                
+                # 3. 先借用标签的高度撑住场面，防止瞬间闪烁
+                self.edit_desc.setFixedHeight(base_height + 2)
+                
+                self.edit_desc.show()
+                self.edit_desc.setFocus()
+                cursor = self.edit_desc.textCursor()
+                cursor.movePosition(cursor.MoveOperation.End) 
+                self.edit_desc.setTextCursor(cursor)
+                
+                QTimer.singleShot(50, self._adjust_desc_height)
+                return True
+                
+        # 2. 拦截回车按键 (仅限单行文本框 title)
+        elif event.type() == QEvent.Type.KeyPress:
+            if obj == self.edit_title and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                self._finish_edit_title()
+                return True
+                
+        # 3. 拦截焦点丢失 (点击其他区域)，完成编辑
+        elif event.type() == QEvent.Type.FocusOut:
+            if obj == self.edit_title and self.edit_title.isVisible():
+                self._finish_edit_title()
+                return True
+            elif obj == self.edit_desc and self.edit_desc.isVisible():
+                self._finish_edit_desc()
+                return True
+
+        return super().eventFilter(obj, event)
+
+    # 结束标题编辑并保存
+    def _finish_edit_title(self):
+        new_title = self.edit_title.text().strip()
+        if new_title and new_title != self.data.title:
+            self.data.title = new_title
+            self.data.created_at = datetime.now() # 更新修改时间
+            self.lbl_title.setText(new_title)
+            db_manager.update_schedule_fields(self.data.id, title=new_title, created_at=self.data.created_at)
+            self.refresh_created_display() # 刷新时间UI
+            self.schedule_updated.emit()
+        elif not new_title:
+            self.edit_title.setText(self.data.title)
+
+        self.edit_title.hide()
+        self.lbl_title.show()
+        QTimer.singleShot(0, lambda: self.adjustSize())
+
+    # 结束详情编辑并保存
+    def _finish_edit_desc(self):
+        new_desc = self.edit_desc.toPlainText().strip()
+        if new_desc != (self.data.description or ""):
+            self.data.description = new_desc
+            self.data.created_at = datetime.now() # 更新修改时间
+            self.lbl_desc.setText(new_desc if new_desc else "暂无详情，双击添加...")
+            desc_color = self._get_desc_color(bool(new_desc))
+            self.lbl_desc.setStyleSheet(f"color: {desc_color}; border: none; background: transparent; font-size: 13px; font-family: 'Microsoft YaHei'; line-height: 1.5;")
+            db_manager.update_schedule_fields(self.data.id, description=new_desc, created_at=self.data.created_at)
+            self.refresh_created_display() # 刷新时间UI
+            self.schedule_updated.emit()
+
+        self.edit_desc.hide()
+        self.lbl_desc.show()
+        QTimer.singleShot(0, lambda: self.adjustSize())
+
+    def _toggle_pin(self):
+        self.is_pinned = not self.is_pinned
+        flags = self.windowFlags()
+        if self.is_pinned:
+            self.setWindowFlags(flags | Qt.WindowType.WindowStaysOnTopHint)
+            pin_icon = self._get_icon("pin.svg", QColor(255, 255, 255, 255), 16)
+        else:
+            self.setWindowFlags(flags & ~Qt.WindowType.WindowStaysOnTopHint)
+            pin_icon = self._get_icon("pin.svg", QColor(255, 255, 255, 150), 16)
+            
+        if not pin_icon.isNull(): 
+            self.btn_pin.setIcon(QIcon(pin_icon))
+            
+        self.show()
+        apply_24h2_border_fix(int(self.winId()))
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        path = QPainterPath()
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        path.addRoundedRect(rect, 10.0, 10.0)
+        
+        gradient = QLinearGradient(0, 0, 0, self.height())
+        gradient.setColorAt(0.0, QColor(AppConfig.COLOR_GRADIENT_START))
+        gradient.setColorAt(1.0, QColor(AppConfig.COLOR_GRADIENT_END))
+        painter.fillPath(path, QBrush(gradient))
+        
+    def mousePressEvent(self, event):
+        if hasattr(self, 'edit_title') and self.edit_title.isVisible():
+            self.edit_title.clearFocus()
+        if hasattr(self, 'edit_desc') and self.edit_desc.isVisible():
+            self.edit_desc.clearFocus()
+            
+        # 如果下拉框开着没选，点空白处直接变回 Label
+        if hasattr(self, 'combo_priority') and self.combo_priority.isVisible():
+            self.combo_priority.hide()
+            self.lbl_priority.show()
+        if hasattr(self, 'combo_repeat') and self.combo_repeat.isVisible():
+            self.combo_repeat.hide()
+            self.lbl_repeat.show()
+        if hasattr(self, 'repeat_status_widget'):
+            self.repeat_status_widget.hide()
+
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.drag_pos = event.globalPosition().toPoint() - self.pos()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if self.drag_pos:
+            self.move(event.globalPosition().toPoint() - self.drag_pos)
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        self.drag_pos = None

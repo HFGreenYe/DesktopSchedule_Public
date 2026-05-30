@@ -1,0 +1,94 @@
+"""Pure reminder decision helpers for reminder scan flow."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any, Optional
+
+
+class ReminderService:
+    """Reminder-time checks with runtime-only dedup state."""
+
+    def __init__(self) -> None:
+        # Runtime-only state, cleared with a new service instance.
+        self._triggered_ids: set[int] = set()
+
+    @staticmethod
+    def has_reminder_time(schedule: Any) -> bool:
+        """Return True when schedule has a non-empty reminder_time."""
+        return getattr(schedule, "reminder_time", None) is not None
+
+    @staticmethod
+    def get_reminder_diff_seconds(schedule: Any, now: datetime) -> Optional[float]:
+        """Return (now - reminder_time).total_seconds() or None when no reminder_time."""
+        reminder_time = getattr(schedule, "reminder_time", None)
+        if reminder_time is None:
+            return None
+        return (now - reminder_time).total_seconds()
+
+    @staticmethod
+    def is_in_trigger_window(diff_seconds: Optional[float]) -> bool:
+        """Legacy trigger window: 0 <= diff < 60."""
+        if diff_seconds is None:
+            return False
+        return 0 <= diff_seconds < 60
+
+    def should_trigger(self, schedule: Any, now: datetime) -> bool:
+        """Return whether schedule should trigger at `now` (without dedup state)."""
+        if not self.has_reminder_time(schedule):
+            return False
+        diff_seconds = self.get_reminder_diff_seconds(schedule, now)
+        return self.is_in_trigger_window(diff_seconds)
+
+    @staticmethod
+    def _get_schedule_id(schedule: Any) -> Optional[int]:
+        """Read schedule.id from a lightweight object."""
+        schedule_id = getattr(schedule, "id", None)
+        if isinstance(schedule_id, int):
+            return schedule_id
+        return None
+
+    def is_triggered(self, schedule_id: Optional[int]) -> bool:
+        """Return whether `schedule_id` has been marked in current runtime."""
+        if schedule_id is None:
+            return False
+        return schedule_id in self._triggered_ids
+
+    def mark_triggered(self, schedule_id: Optional[int]) -> None:
+        """Mark `schedule_id` as triggered in current runtime."""
+        if schedule_id is None:
+            return
+        self._triggered_ids.add(schedule_id)
+
+    def collect_due_schedules(self, schedules: Any, now: datetime) -> list[Any]:
+        """
+        Return schedules that are due now and not yet marked triggered.
+
+        This method does not mutate trigger state.
+        """
+        due: list[Any] = []
+        for schedule in schedules:
+            schedule_id = self._get_schedule_id(schedule)
+            if schedule_id is None:
+                continue
+            if self.is_triggered(schedule_id):
+                continue
+            if self.should_trigger(schedule, now):
+                due.append(schedule)
+        return due
+
+    @staticmethod
+    def select_target_time(schedule: Any):
+        """Legacy target_time selector: start_time first, then end_time, else None."""
+        start_time = getattr(schedule, "start_time", None)
+        if start_time is not None:
+            return start_time
+        return getattr(schedule, "end_time", None)
+
+    def build_reminder_popup_data(self, schedule: Any) -> dict[str, Any]:
+        """Build popup payload with legacy keys and value semantics."""
+        return {
+            "title": schedule.title,
+            "is_alarm": schedule.is_alarm,
+            "target_time": self.select_target_time(schedule),
+        }
