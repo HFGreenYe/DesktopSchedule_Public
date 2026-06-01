@@ -1,8 +1,10 @@
 import os
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtWidgets import QMenu
+
+from src.utils.styles import StyleManager
 
 
 class ActionContextMenu(QMenu):
@@ -13,6 +15,7 @@ class ActionContextMenu(QMenu):
         super().__init__(parent)
         self.actions_by_id = {}
         self.view_actions_by_id = {}
+        self._apply_menu_style(self)
         self._build_menu()
 
     def _build_menu(self):
@@ -25,6 +28,7 @@ class ActionContextMenu(QMenu):
         self.actions_by_id["skin"] = skin_action
 
         self.view_menu = QMenu("视图", self)
+        self._apply_menu_style(self.view_menu)
         self._create_view_action("day", "日视图", ("Calendar.svg",))
         self._create_view_action("week", "周视图", ("week_top_color.svg", "view.svg"))
         self._create_view_action("month", "月视图", ("Calendar.svg",))
@@ -87,6 +91,16 @@ class ActionContextMenu(QMenu):
             if os.path.exists(path):
                 return QIcon(path)
         return QIcon()
+
+    @staticmethod
+    def _apply_menu_style(menu):
+        menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        menu.setWindowFlags(
+            Qt.WindowType.Popup
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.NoDropShadowWindowHint
+        )
+        menu.setStyleSheet(StyleManager.get_menu_style())
 
     def get_action(self, action_id):
         return self.actions_by_id.get(action_id)
