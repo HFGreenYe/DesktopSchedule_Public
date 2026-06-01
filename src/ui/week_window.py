@@ -25,6 +25,7 @@ from .header import ToolTipFilter
 from .dashboard import AdaptiveLabel 
 from .components import CountdownToolTipFilter, get_colored_icon
 from .common.week_day_block import DayBlock
+from .common.action_context_menu import ActionContextMenu
 
 class WeekScheduleCard(QFrame):
     """周视图中的单条日程小卡片"""
@@ -1029,6 +1030,13 @@ class WeekWindow(FramelessMainWindow):
         self._on_day_clicked(qdate)
         self.day_double_clicked.emit(qdate)
 
+    def _handle_week_context_action(self, action_name):
+        if action_name == "add":
+            self.switch_to_add_page()
+
+    def _handle_week_context_view(self, view_name):
+        self._on_view_selected(view_name)
+
     def mousePressEvent(self, event):
         # 如果视图选择器正开着，点窗口上半部分任何空白处都会关掉它
         if hasattr(self, 'view_selector_container') and self.view_selector_container.isVisible():
@@ -1043,6 +1051,24 @@ class WeekWindow(FramelessMainWindow):
         
         # 拦截底层 7 个面板的鼠标事件
         if hasattr(self, 'bottom_panels') and obj in self.bottom_panels:
+            if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.RightButton:
+                child = obj.childAt(event.pos())
+                current = child
+                while current is not None:
+                    if isinstance(current, WeekScheduleCard):
+                        return False
+                    current = current.parentWidget()
+
+                index = self.bottom_panels.index(obj)
+                target_date = self.current_monday.addDays(index)
+                self._on_day_clicked(target_date)
+
+                menu = ActionContextMenu(self)
+                menu.action_requested.connect(self._handle_week_context_action)
+                menu.view_requested.connect(self._handle_week_context_view)
+                menu.exec(obj.mapToGlobal(event.pos()))
+                return True
+
             if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
                 
                 # 如果视图选择器正开着，点下半部分也会关掉它，并且不触发进入这一天的操作

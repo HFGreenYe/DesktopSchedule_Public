@@ -685,3 +685,117 @@
 
 - 风险或疑点：
   - 当前仅接入 `lbl_empty` 与 `scroll_content`。后续 `CM-3` 在周界面接入时需单独复核右键与拖拽/卡片右键冲突。
+
+## 2026-06-01 CM-3（周界面日期空白区域右键菜单接入）
+
+- 本轮任务名称：`CM-3（周界面日期空白区域右键菜单接入）`
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 45]`
+  - 开工前已有管理文档 diff：`manage_instruction/Work_Task_Prompts.md`（既有状态，非本轮产生）。
+- 实际修改文件：
+  - `src/ui/week_window.py`
+  - `manage_instruction/Work_Log.md`
+  - `manage_instruction/Work_Task_Prompts.md`（开工前既有 diff；复核时修正 stale 锚点）
+
+- 周界面右键接入区域：
+  - `bottom_panels` 白色空白区域（`WeekWindow.eventFilter` 中 `obj in bottom_panels` 分支）。
+
+- 日期映射方式：
+  - `index = self.bottom_panels.index(obj)`
+  - `target_date = self.current_monday.addDays(index)`
+
+- 是否排除 `WeekScheduleCard` 本体：
+  - 是。
+  - 右键分支通过 `obj.childAt(event.pos())` + 父链 `isinstance(..., WeekScheduleCard)` 过滤；
+  - 命中卡片则 `return False`，保持卡片右键菜单链路。
+
+- 是否保持 `WeekScheduleCard._show_context_menu(...)` 未改：
+  - 是，未修改卡片右键菜单实现。
+
+- 是否保持卡片拖拽排序未改：
+  - 是，未修改 `_handle_card_drop(...)` 与 `card_dropped` 相关逻辑。
+
+- 是否保持 `DayBlock.clicked` / `double_clicked` / `_on_day_clicked` / `_on_day_double_clicked` 未改：
+  - `DayBlock.clicked`、`DayBlock.double_clicked` 未改。
+  - `_on_day_clicked(...)`、`_on_day_double_clicked(...)` 方法体未改。
+
+- `ActionContextMenu -> WeekWindow` 信号链路：
+  - 右键空白区创建 `ActionContextMenu(self)`（每次新建实例）。
+  - `menu.action_requested -> _handle_week_context_action`
+  - `menu.view_requested -> _handle_week_context_view`
+  - `menu.exec(obj.mapToGlobal(event.pos()))` 后 `return True`。
+
+- `添加` 是否复用 `WeekWindow.switch_to_add_page()`：
+  - 是，`_handle_week_context_action` 仅处理 `add`，调用 `switch_to_add_page()`。
+
+- 过去日期禁止添加是否仍由 `switch_to_add_page()` 处理：
+  - 是，沿用 `switch_to_add_page()` 现有 `current_selected_date < today` 判断。
+
+- `视图` 是否复用 `_on_view_selected(...)` 或 `view_selected.emit(...)`：
+  - 是，`_handle_week_context_view` 直接复用 `_on_view_selected(view_name)`。
+  - `week` 仍走 `_on_view_selected('week')` 的 no-op 语义。
+
+- `skin/sort/filter/priority` 是否仍未实现：
+  - 是，仍由 `ActionContextMenu` 禁用项策略控制，本轮未启用。
+
+- 是否修改数据库：
+  - 否。未新增任何写库逻辑。
+
+- 静态定位结果：
+  - 命令：
+    - `rg -n "ActionContextMenu|RightButton|bottom_panels|eventFilter|_handle_week_context|_show_week_context|WeekScheduleCard|_show_context_menu|_on_day_clicked|_on_day_double_clicked|switch_to_add_page|_on_view_selected|view_selected" src/ui/week_window.py src/ui/common/action_context_menu.py`
+  - 结果：
+    - `WeekWindow` 引用 `ActionContextMenu` 命中；
+    - `eventFilter` 的 `RightButton` 分支命中；
+    - 日期映射、卡片过滤、`return True` 命中；
+    - `WeekScheduleCard._show_context_menu`、`_on_day_clicked`、`_on_day_double_clicked`、`switch_to_add_page`、`_on_view_selected` 均存在。
+
+- import 验证结果：
+  - 命令：
+    - `python -c "from src.ui.week_window import WeekWindow, WeekScheduleCard; from src.ui.common.action_context_menu import ActionContextMenu; print('imports ok', ...)" `
+  - 结果：通过（`imports ok`）。
+
+- offscreen 验证结果：
+  - 桥接存在性：
+    - `week context bridge exists ok`，通过。
+  - 日期映射：
+    - 输出 `mapped dates` 共 7 项，`dates[0] == current_monday`，通过。
+  - 添加路径日期选择：
+    - 输出 `selected date for add path 2026-06-04`（示例），`current_selected_date` 断言通过。
+
+- `ActionContextMenu` 回归验证结果：
+  - 输出：
+    - `actions ['add']`
+    - `views ['day', 'week', 'month', 'todo']`
+  - `priority` 保持禁用，断言通过。
+
+- `py_compile` 结果：
+  - 命令：
+    - `python -m py_compile src/ui/week_window.py src/ui/common/action_context_menu.py`
+  - 结果：通过。
+
+- diff 范围检查结果：
+  - 禁止范围检查：
+    - `src/ui/main_window.py`、`src/ui/dashboard.py`、`src/ui/components.py`、`src/ui/header.py`、`src/ui/todo.py`、`src/ui/todo_board.py`、`src/ui/month_window.py`、`src/controllers`、`src/data`、`src/repositories`、`src/services`、`src/theme`、`src/utils/signals.py`、`src/utils/styles.py`、`assets`、`main.py`、`requirements.txt`、`schedule.db` 均无 diff。
+  - 命令拼写兜底：
+    - 提示词中的 `git diff --name-name-only -- schedule.db` 失败（无此参数），已按要求改用 `git diff --name-only -- schedule.db`，结果无输出。
+  - 总范围：
+    - `git diff --name-only`：
+      - `manage_instruction/Work_Log.md`
+      - `manage_instruction/Work_Task_Prompts.md`（开工前既有；复核时修正 stale 锚点）
+      - `src/ui/week_window.py`
+    - `git status --short --branch`：
+      - `## main...temp/main [ahead 45]`
+      - `M manage_instruction/Work_Log.md`
+      - `M manage_instruction/Work_Task_Prompts.md`
+      - `M src/ui/week_window.py`
+
+- 复核修正：
+  - 发现 `Work_Task_Prompts.md` 仍显示“当前待执行提示词：CM-3”，与实际 CM-3 执行状态不一致。
+  - 已将其收口为 CM-3 已执行、等待决策/顾问窗口复核，下一步候选 CM-4；未写入 CM-4 执行提示词。
+
+- 未完成事项：
+  - 等待决策/顾问窗口复核 `CM-3` 接入。
+
+- 风险或疑点：
+  - 本轮仅覆盖周界面空白区右键。后续 `CM-4` 需整体验证与 `CM-2` 并行存在时的交互一致性。
