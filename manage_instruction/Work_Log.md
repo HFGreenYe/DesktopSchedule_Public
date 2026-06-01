@@ -285,6 +285,7 @@
   - 开工前未发现源码工作区 diff。
 - 实际修改文件：
   - `manage_instruction/Work_Log.md`
+  - `manage_instruction/Work_Task_Prompts.md`（复核时修正 stale 锚点）
 
 - 读取的规划文件清单：
   - `manage_instruction/Work_Formulation.md`
@@ -799,3 +800,108 @@
 
 - 风险或疑点：
   - 本轮仅覆盖周界面空白区右键。后续 `CM-4` 需整体验证与 `CM-2` 并行存在时的交互一致性。
+
+## 2026-06-01 CM-4（右键上下文菜单整体验收与归档准备）
+
+- 本轮任务名称：`CM-4（右键上下文菜单整体验收与归档准备）`。
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 46]`
+  - 开工前既有 diff：`manage_instruction/Work_Task_Prompts.md`（管理文档既有变更，非本轮源码问题）。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+
+- 最近相关提交摘要（`git log --oneline -8`）：
+  - `76f2f94 feat: add week empty area context menu`（CM-3）
+  - `3481655 feat: add dashboard context menu bridge`（CM-2）
+  - `6fb847f refactor: add reusable action context menu`（CM-1）
+  - `8a6c551 docs: record cm-0 context menu boundary review`（CM-0 记录）
+
+- CM-0~CM-3 汇总结论：
+  - CM-0：完成主界面/周界面右键接入边界审查，明确新增公共菜单组件路径。
+  - CM-1：完成 `ActionContextMenu` 公共组件试点，信号与禁用项策略建立。
+  - CM-2：主界面空状态与列表空白区完成页面级右键菜单接入，桥接到主窗口既有入口。
+  - CM-3：周界面 `bottom_panels` 空白区完成页面级右键菜单接入，右键列日期映射与视图/添加动作链路接入。
+
+- ActionContextMenu 整体验收结果：
+  - 静态定位通过：`class ActionContextMenu`、`action_requested`、`view_requested`、`actions_by_id`、`view_actions_by_id` 均存在。
+  - 回归验证通过（offscreen）：
+    - `add` 触发后 `actions == ['add']`。
+    - `day/week/month/todo` 触发后 `views == ['day','week','month','todo']`。
+    - `skin/sort/filter/priority` 禁用，trigger 后不新增信号。
+    - `view` 主项不发出 `action_requested('view')`。
+
+- 主界面右键菜单链路验收结果：
+  - `DashboardView` 保留并提供 `context_action_requested` / `context_view_requested`。
+  - `MainWindow` 保留桥接：`_handle_dashboard_context_action` / `_handle_dashboard_context_view`。
+  - `添加` 复用 `switch_to_add_page()`；`日/周/月/待办` 复用 `switch_view(...)`。
+
+- 主界面 `ScheduleCard` 既有右键菜单：
+  - `ScheduleCard._show_context_menu(...)` 仍存在（静态命中），未被覆盖。
+
+- 周界面右键菜单链路验收结果：
+  - `WeekWindow` 保留桥接：`_handle_week_context_action` / `_handle_week_context_view`。
+  - `eventFilter` 中右键空白区链路存在，菜单动作接入既有入口。
+  - `添加` 复用 `switch_to_add_page()`，过去日期限制仍由该入口原逻辑处理。
+  - `日/周/月/待办` 复用 `_on_view_selected(...)` / `view_selected`。
+  - `week` 仍走 `_on_view_selected('week')` 的 no-op 分支。
+
+- 周界面日期映射验收结果：
+  - offscreen 输出：`mapped dates ['2026-06-01','2026-06-02','2026-06-03','2026-06-04','2026-06-05','2026-06-06','2026-06-07']`。
+  - 断言通过：`len(bottom_panels)==7`，首列等于 `current_monday`。
+
+- 周界面 `WeekScheduleCard` 既有右键菜单：
+  - `WeekScheduleCard._show_context_menu(...)` 仍存在（静态命中），未被破坏。
+
+- 周界面左键/双击/拖拽保持性：
+  - `_on_day_clicked(...)` / `_on_day_double_clicked(...)` 均存在。
+  - 添加日期路径验证通过：`_on_day_clicked(q)` 后 `current_selected_date == q`。
+  - 拖拽排序相关方法链路未改动（静态检查无异常变更）。
+
+- `skin/sort/filter/priority` 未实现项状态：
+  - 保持禁用；本轮未启用实现。
+
+- 是否修改数据库：
+  - 否。本轮未写库。
+  - `schedule.db` 无 tracked diff。
+
+- 静态依赖检查结果：
+  - 命令：
+    - `rg -n "MainWindow|WeekWindow|DashboardView|TodoBoardWindow|db_manager|Repository|Service|ScheduleRepository|CategoryRepository|global_signals|switch_view|switch_to_add_page|get_colored_icon|src\.ui\.components" src/ui/common/action_context_menu.py`
+  - 结果：无输出（exit code 1），符合预期。
+
+- import 验证结果：
+  - 通过：`ActionContextMenu`、`DashboardView`、`ScheduleCard`、`MainWindow`、`WeekWindow`、`WeekScheduleCard` 可 import。
+
+- offscreen 验证结果：
+  - 通过：`ActionContextMenu` 行为回归。
+  - 通过：`DashboardView` context 信号存在。
+  - 通过：`MainWindow` dashboard context bridge 存在。
+  - 通过：`WeekWindow` context bridge 存在。
+  - 通过：周界面日期映射与添加日期路径验证。
+
+- `py_compile` 结果：
+  - 通过：`src/ui/common/action_context_menu.py`、`src/ui/dashboard.py`、`src/ui/main_window.py`、`src/ui/week_window.py`。
+
+- diff 范围检查结果：
+  - `git diff --name-only -- src`：无输出。
+  - `git diff --name-only -- assets`：无输出。
+  - `git diff --name-only -- main.py`：无输出。
+  - `git diff --name-only -- requirements.txt`：无输出。
+  - `git diff --name-only -- schedule.db`：无输出。
+  - `git diff --name-only`：`manage_instruction/Work_Log.md`（本轮）+ `manage_instruction/Work_Task_Prompts.md`（开工前既有）。
+
+- 复核修正：
+  - 发现 `Work_Task_Prompts.md` 仍显示“当前待执行提示词：CM-4”，与实际 CM-4 执行状态不一致。
+  - 已将其收口为 CM-4 已执行、等待决策/顾问窗口复核；右键上下文菜单阶段等待归档；未写入后续功能执行提示词。
+
+- 是否建议右键菜单阶段归档：
+  - 建议可归档（CM-0~CM-4 验收链路通过，且本轮无源码改动）。
+
+- 下一步建议：
+  - 进入后续功能补充阶段；如继续扩展右键菜单，仅新增小工单处理未实现项（换肤/排序/筛选/四象限），保持渐进接入。
+
+- 未完成事项：
+  - 等待决策/顾问窗口复核并决定是否执行正式归档文档迁移。
+
+- 风险或疑点：
+  - 本轮 offscreen 验证覆盖静态与基础交互链路；真实桌面环境下菜单焦点与复杂鼠标轨迹仍建议人工点测一次后再做最终归档操作。
