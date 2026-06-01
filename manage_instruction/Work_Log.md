@@ -568,3 +568,120 @@
 
 - 风险或疑点：
   - 当前组件仅完成通用菜单壳与信号出口，尚未接入主界面/周界面，后续 `CM-2/CM-3` 需要额外验证命中区域与事件冲突。
+
+## 2026-06-01 CM-2（主界面日程区域右键菜单接入）
+
+- 本轮任务名称：`CM-2（主界面日程区域右键菜单接入）`
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 44]`
+  - 开工前已有管理文档 diff：`manage_instruction/Work_Task_Prompts.md`（既有状态，非本轮产生）。
+- 实际修改文件：
+  - `src/ui/dashboard.py`
+  - `src/ui/main_window.py`
+  - `manage_instruction/Work_Log.md`
+  - `manage_instruction/Work_Task_Prompts.md`（开工前既有 diff；复核时修正 stale 锚点）
+
+- 主界面右键接入区域：
+  - `DashboardView.lbl_empty`
+  - `DashboardView.scroll_content`
+
+- 是否排除 `ScheduleCard` 本体：
+  - 是。
+  - `scroll_content` 右键通过 `childAt(pos)` + 父链遍历判定，命中 `ScheduleCard` 时直接返回，不弹页面级菜单。
+
+- 是否保持 `ScheduleCard._show_context_menu(...)` 未改：
+  - 是，未修改 `ScheduleCard` 右键链路与 `ScheduleContextMenu`。
+
+- `DashboardView` 新增信号名称：
+  - `context_action_requested(str)`
+  - `context_view_requested(str)`
+
+- `DashboardView -> MainWindow` 信号链路：
+  - `DashboardView` 右键创建 `ActionContextMenu`，仅转发：
+    - `menu.action_requested -> self.context_action_requested.emit`
+    - `menu.view_requested -> self.context_view_requested.emit`
+  - `MainWindow` 连接：
+    - `page_dashboard.context_action_requested -> _handle_dashboard_context_action`
+    - `page_dashboard.context_view_requested -> _handle_dashboard_context_view`
+
+- `添加` 是否复用 `MainWindow.switch_to_add_page()`：
+  - 是，`_handle_dashboard_context_action` 中仅处理 `add`，调用 `switch_to_add_page()`。
+
+- `视图` 是否复用 `MainWindow.switch_view(...)`：
+  - 是，`_handle_dashboard_context_view` 直接调用 `switch_view(view_name)`。
+
+- `skin/sort/filter/priority` 是否仍未实现：
+  - 是。仍由 `ActionContextMenu` 禁用策略控制，不在本轮启用。
+
+- 是否修改数据库：
+  - 否。未新增任何写库路径。
+
+- import 验证结果：
+  - 命令：
+    - `python -c "from src.ui.dashboard import DashboardView, ScheduleCard; from src.ui.main_window import MainWindow; from src.ui.common.action_context_menu import ActionContextMenu; print('imports ok', ...)"`
+  - 结果：通过（`imports ok`）。
+
+- offscreen 验证结果：
+  - Dashboard 信号存在性验证：
+    - `dashboard context signals ok`，通过。
+  - MainWindow 桥接验证：
+    - `main window dashboard context bridge ok`，通过。
+
+- `ActionContextMenu` 回归验证结果：
+  - 触发输出：
+    - `actions ['add']`
+    - `views ['day', 'week', 'month', 'todo']`
+  - `priority` 保持禁用，断言通过。
+
+- 静态定位检查结果：
+  - 命令：
+    - `rg -n "context_action_requested|context_view_requested|ActionContextMenu|customContextMenuRequested|setContextMenuPolicy|_show_dashboard_context|_handle_dashboard_context|ScheduleCard|_show_context_menu|switch_to_add_page|switch_view" ...`
+  - 结果：
+    - `DashboardView` 页面级信号、接入点、菜单弹出方法命中。
+    - `MainWindow` 处理方法与桥接连接命中。
+    - `ScheduleCard._show_context_menu` 仍存在。
+
+- `py_compile` 结果：
+  - 命令：
+    - `python -m py_compile src/ui/dashboard.py src/ui/main_window.py src/ui/common/action_context_menu.py`
+  - 结果：通过。
+
+- diff 范围检查结果：
+  - 禁止范围均无 diff：
+    - `src/ui/week_window.py`
+    - `src/ui/components.py`
+    - `src/ui/header.py`
+    - `src/ui/todo.py`
+    - `src/ui/todo_board.py`
+    - `src/ui/month_window.py`
+    - `src/controllers`
+    - `src/data`
+    - `src/repositories`
+    - `src/services`
+    - `src/theme`
+    - `src/utils/signals.py`
+    - `src/utils/styles.py`
+    - `assets`
+    - `main.py`
+    - `requirements.txt`
+    - `schedule.db`
+  - 总范围：
+    - `git diff --name-only`：
+      - `manage_instruction/Work_Task_Prompts.md`（开工前既有；复核时修正 stale 锚点）
+      - `src/ui/dashboard.py`
+      - `src/ui/main_window.py`
+    - `git status --short --branch`：
+      - `## main...temp/main [ahead 44]`
+      - `M manage_instruction/Work_Task_Prompts.md`
+      - `M src/ui/dashboard.py`
+      - `M src/ui/main_window.py`
+
+- 复核修正：
+  - 发现 `Work_Task_Prompts.md` 仍显示“当前待执行提示词：CM-2”，与实际 CM-2 执行状态不一致。
+  - 已将其收口为 CM-2 已执行、等待决策/顾问窗口复核，下一步候选 CM-3；未写入 CM-3 执行提示词。
+
+- 未完成事项：
+  - 等待决策/顾问窗口复核 `CM-2` 接入。
+
+- 风险或疑点：
+  - 当前仅接入 `lbl_empty` 与 `scroll_content`。后续 `CM-3` 在周界面接入时需单独复核右键与拖拽/卡片右键冲突。

@@ -77,6 +77,8 @@ class MainWindow(FramelessMainWindow):
         self.body_stack.setCurrentIndex(0)
 
         self.page_dashboard.view_selector.view_selected.connect(self.switch_view)
+        self.page_dashboard.context_action_requested.connect(self._handle_dashboard_context_action)
+        self.page_dashboard.context_view_requested.connect(self._handle_dashboard_context_view)
 
         self.page_dashboard.req_refresh_all.connect(self._refresh_week_if_visible)
 
@@ -524,6 +526,13 @@ class MainWindow(FramelessMainWindow):
                 
         elif action_name == "sort":
             print("这里以后写排序逻辑")
+
+    def _handle_dashboard_context_action(self, action_name):
+        if action_name == "add":
+            self.switch_to_add_page()
+
+    def _handle_dashboard_context_view(self, view_name):
+        self.switch_view(view_name)
 
     def toggle_pin_mode(self):
         current_flags = self.windowFlags()

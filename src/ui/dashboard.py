@@ -10,6 +10,7 @@ from ..data.database import db_manager
 from ..services.schedule_query_service import ScheduleQueryService
 from ..services.schedule_sort_service import ScheduleSortService
 from .schedule_detail_pop import ScheduleDetailPop
+from .common.action_context_menu import ActionContextMenu
 
 class DraggableWidget(QWidget):
     def __init__(self, parent=None):
@@ -432,6 +433,8 @@ class DashboardView(QWidget):
     req_edit_alarm = pyqtSignal(object, str) 
     req_edit_list = pyqtSignal(object, str)
     req_refresh_all = pyqtSignal()
+    context_action_requested = pyqtSignal(str)
+    context_view_requested = pyqtSignal(str)
     def __init__(self, parent=None):
         super().__init__(parent)
         self.drag_pos = None 
@@ -485,12 +488,43 @@ class DashboardView(QWidget):
         self.scroll_area.setWidget(self.scroll_content)
         layout.addWidget(self.scroll_area)
 
+        self.lbl_empty.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.lbl_empty.customContextMenuRequested.connect(self._show_context_menu_for_empty)
+
+        self.scroll_content.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.scroll_content.customContextMenuRequested.connect(self._show_context_menu_for_scroll_content)
+
     # 增加一个供外部调用的切换方法
     def toggle_view_selector(self):
         if self.view_selector.isVisible():
             self.view_selector.hide()
         else:
             self.view_selector.show()
+
+    def _show_context_menu_for_empty(self, pos):
+        global_pos = self.lbl_empty.mapToGlobal(pos)
+        self._show_dashboard_context_menu(global_pos)
+
+    def _show_context_menu_for_scroll_content(self, pos):
+        child = self.scroll_content.childAt(pos)
+        if self._is_schedule_card_hit(child):
+            return
+        global_pos = self.scroll_content.mapToGlobal(pos)
+        self._show_dashboard_context_menu(global_pos)
+
+    def _is_schedule_card_hit(self, widget):
+        current = widget
+        while current is not None:
+            if isinstance(current, ScheduleCard):
+                return True
+            current = current.parentWidget()
+        return False
+
+    def _show_dashboard_context_menu(self, global_pos):
+        menu = ActionContextMenu(self)
+        menu.action_requested.connect(self.context_action_requested.emit)
+        menu.view_requested.connect(self.context_view_requested.emit)
+        menu.exec(global_pos)
 
     def refresh_data(self):
         while self.list_layout.count() > 1:
