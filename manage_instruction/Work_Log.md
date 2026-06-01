@@ -441,3 +441,130 @@
   - `DashboardView` 右键接入若命中判断不精确，最容易破坏卡片既有右键菜单。
   - `WeekWindow` 右键接入若不区分卡片命中与面板空白，可能干扰卡片右键与拖拽。
   - `SharedMoreMenu` 带窗口行为耦合，直接复用会引入与上下文菜单无关的副作用。
+
+## 2026-05-29 CM-1（公共 icon-text 上下文菜单组件试点）
+
+- 本轮任务名称：`CM-1（公共 icon-text 上下文菜单组件试点）`。
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 43]`
+  - 开工前无源码 diff，存在未跟踪文件：无。
+- 实际修改文件：
+  - `src/ui/common/action_context_menu.py`
+  - `manage_instruction/Work_Log.md`
+  - `manage_instruction/Work_Task_Prompts.md`（复核时修正 stale 锚点）
+
+- 是否新增 `src/ui/common/action_context_menu.py`：
+  - 是，已新增。
+
+- 菜单类名和信号名：
+  - 类名：`ActionContextMenu`
+  - 信号：`action_requested(str)`、`view_requested(str)`
+
+- 主菜单 action id 清单：
+  - `skin`
+  - `view`
+  - `add`
+  - `sort`
+  - `filter`
+
+- 视图子菜单 view id 清单：
+  - `day`
+  - `week`
+  - `month`
+  - `priority`
+  - `todo`
+
+- `view` 主项行为：
+  - 仅作为子菜单入口（`QAction.setMenu(...)`），不会发出 `action_requested("view")`。
+
+- 禁用项策略：
+  - 主菜单禁用：`skin`、`sort`、`filter`
+  - 视图子菜单禁用：`priority`
+  - 禁用项无业务信号连接，`trigger()` 后不会新增有效动作信号。
+
+- 禁用项 trigger 后信号检查：
+  - 先触发已启用项得到：
+    - `actions == ['add']`
+    - `views == ['day', 'week', 'month', 'todo']`
+  - 再触发禁用项（`skin/view/sort/filter/priority`）后：
+    - `actions`、`views` 均无新增。
+  - 断言通过：`'view' not in actions`，`'priority' not in views`。
+
+- 图标复用清单：
+  - `skin`: `Skin.svg` -> `theme.svg` 兜底
+  - `view`: `view.svg`
+  - `add`: `add.svg`
+  - `sort`: `sort.svg`
+  - `filter`: `filter.svg`
+  - `day`: `Calendar.svg`
+  - `week`: `week_top_color.svg` -> `view.svg` 兜底
+  - `month`: `Calendar.svg`
+  - `priority`: `importance.svg`
+  - `todo`: `todo.svg`
+
+- 是否使用 `QIcon("assets/icons/xxx.svg")`：
+  - 是，组件内部通过 `QIcon(path)` 加载，若文件不存在降级为空图标并保持可构造。
+
+- 是否未导入 `src.ui.components.get_colored_icon`：
+  - 是，未导入。
+
+- 是否导入或依赖 `MainWindow` / `WeekWindow` / `DashboardView` / `TodoBoardWindow`：
+  - 否。
+
+- 是否导入或依赖 `db_manager` / Repository / Service：
+  - 否。
+
+- 静态依赖检查结果：
+  - 命令：
+    - `rg -n "MainWindow|WeekWindow|DashboardView|TodoBoardWindow|db_manager|Repository|Service|ScheduleRepository|CategoryRepository|global_signals|switch_view|switch_to_add_page|get_colored_icon|src\.ui\.components" src/ui/common/action_context_menu.py`
+  - 结果：无输出（`rg` 退出码 1，符合预期）。
+
+- 静态定位结果：
+  - 命令：
+    - `rg -n "class ActionContextMenu|action_requested|view_requested|actions_by_id|view_actions_by_id|skin|view|add|sort|filter|priority|todo" src/ui/common/action_context_menu.py`
+  - 结果：命中类、信号、动作字典、主菜单与视图子菜单项，结构完整。
+
+- import 验证结果：
+  - 命令：
+    - `python -c "from src.ui.common.action_context_menu import ActionContextMenu; print(...)" `
+  - 结果：`ActionContextMenu import ok`。
+
+- offscreen 构造验证结果：
+  - 命令：
+    - `python -c "... ActionContextMenu(); print(actions/views) ..."`
+  - 结果：
+    - `actions ['skin', 'view', 'add', 'sort', 'filter']`
+    - `views ['day', 'week', 'month', 'priority', 'todo']`
+
+- 信号验证结果：
+  - 命令：按提示词触发 `add/day/week/month/todo` 及禁用项 trigger 校验。
+  - 结果：
+    - `actions ['add']`
+    - `views ['day', 'week', 'month', 'todo']`
+    - 所有断言通过。
+
+- `py_compile` 结果：
+  - 命令：
+    - `python -m py_compile src/ui/common/action_context_menu.py`
+  - 结果：通过。
+
+- diff 范围检查结果：
+  - 禁止范围检查：
+    - `src/ui/main_window.py`、`src/ui/week_window.py`、`src/ui/dashboard.py`、`src/ui/components.py`、`src/ui/header.py`、`src/controllers`、`src/data`、`src/repositories`、`src/services`、`src/theme`、`src/utils/signals.py`、`src/utils/styles.py`、`assets`、`main.py`、`requirements.txt`、`schedule.db` 均无 diff。
+  - 总范围：
+    - `git status --short --branch` 显示：
+      - `## main...temp/main [ahead 43]`
+      - `?? src/ui/common/action_context_menu.py`
+      - `M manage_instruction/Work_Log.md`
+      - 复核修正后另有 `M manage_instruction/Work_Task_Prompts.md`
+  - 说明：本轮未修改 `src/ui/common/__init__.py`，符合“默认不导出 ActionContextMenu”的限制。
+
+- 复核修正：
+  - 发现 `Work_Task_Prompts.md` 仍显示“当前待执行提示词：CM-0”，与实际 CM-1 执行状态不一致。
+  - 已将其收口为 CM-1 已执行、等待决策/顾问窗口复核，下一步候选 CM-2；未写入 CM-2 执行提示词。
+
+- 未完成事项：
+  - 等待决策/顾问窗口复核 `CM-1`。
+
+- 风险或疑点：
+  - 当前组件仅完成通用菜单壳与信号出口，尚未接入主界面/周界面，后续 `CM-2/CM-3` 需要额外验证命中区域与事件冲突。
