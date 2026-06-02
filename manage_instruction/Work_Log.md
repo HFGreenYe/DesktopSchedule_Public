@@ -652,3 +652,60 @@
   - 已补充：如外部刷新不能即时反映到月格圆点，本轮只记录风险，不接入 `RefreshCoordinator` 或新增 signal。
 - 下一步：
   - 执行窗口可按 `Work_Task_Prompts.md` 中最终 M-1 提示词执行。
+
+## 2026-06-02 月格圆点位置微调
+
+- 任务：
+  - 将月界面日程状态圆点从日期格右下角改为日期数字下方居中，随后按视觉复核反馈改为日期格左上角。
+- 修改原因：
+  - 右下角位置视觉上和日期数字关联较弱；日期数字下方居中试调后仍显得拥挤，因此改为左上角作为状态标记。
+- 实际修改文件：
+  - `src/ui/month_window.py`
+  - `manage_instruction/Work_Log.md`
+- 修改内容：
+  - 仅调整 `CalendarCellDelegate.paint(...)` 中圆点绘制坐标。
+  - 当前坐标策略：`inner_rect.left() + 6` / `inner_rect.top() + 6`。
+  - 圆点颜色规则、数据来源、日期映射、点击/添加/跳转行为均未修改。
+- 验证要求：
+  - 复跑 `MonthWindow` import。
+  - 复跑 offscreen `calendar.grab()` 绘制触发。
+  - 确认禁止范围无 diff。
+
+## 2026-06-03 月格状态标记改为边框染色
+
+- 任务：
+  - 取消月格状态圆点试调，先尝试给有日程状态的日期格边框染色；随后按视觉反馈取消边框染色，改为使用 label 染色图标。
+- 修改原因：
+  - 圆点无论放右下角、日期下方还是左上角，视觉上都显得突兀；边框染色更像日期格自身状态，不额外占用格内信息空间。
+- 实际修改文件：
+  - `src/ui/month_window.py`
+  - `manage_instruction/Work_Log.md`
+- 修改内容：
+  - `CalendarCellDelegate.paint(...)` 中不再绘制状态圆点。
+  - 边框恢复为原白色细边框，不再用状态色染边框。
+  - 当前方案：对有 marker 的日期格，在左上角绘制三角形 label 标记。
+  - 三角形 label 按 marker 颜色染色：高/中/低/过去完成/过去未完成仍沿用原颜色规则。
+  - 新增 delegate 内部 icon 缓存，避免每格重复渲染同色 SVG。
+  - 按视觉反馈将 label 图标上移到接近日期格上边框的位置；最终坐标贴到 `inner_rect.top()`，不额外保留 1px 间隙。
+  - 按视觉反馈从 `Label.svg` 切换为 `Label_fill.svg` 试看填充版效果。
+  - 随后替换 `Label.svg` 为左上角三角形标签图标，并将绘制位置改为日期格左上角，紧贴 `inner_rect.left()` / `inner_rect.top()`。
+  - 针对小尺寸 SVG 斜边锯齿问题，改为直接用 `QPainterPath` 绘制三角形 label，避免 SVG 缩放导致的斜边像素抖动。
+  - 按新视觉构想取消左上角 label 标记，改为在有 marker 的日期格内部绘制一个居中的小型空心方框。
+  - 小方框只使用状态色细边框，`QPen.setWidth(0)` 保持尽可能细的 cosmetic pen，不填充背景。
+  - 绘制顺序调整为先画状态小方框、再绘制日期数字，避免状态框压住日期文字。
+  - 按视觉反馈将状态小方框从 `42x28` 放大到 `56x34`，仅调整尺寸，不改变颜色规则和刷新逻辑。
+  - 按视觉反馈取消固定宽高，改为从日期格内矩形四边等距内缩 `14px` 绘制状态框，使状态框到原日期格边框的上下左右距离一致。
+  - 最终按视觉决策取消状态小方框，改回左上角三角形 label 方案。
+  - 三角形 label 内新增白色数字，显示该日期有效日程总数；数量超过 9 时显示 `9+`。
+  - 按视觉反馈将三角形 label 从 `26px` 缩小到 `22px`，数量字体从 `7pt` 缩小到 `6pt`。
+  - 新增 `schedule_marker_count_cache` / `marker_count_cache`，仅用于绘制数量角标，不改变 marker 颜色规则、数据写入或刷新链路。
+  - 新增 `MonthWindow.showEvent(...)`，每次月界面显示时调用 `_refresh_schedule_marker_cache()`。
+  - marker 颜色规则、数据来源、日期映射、点击/添加/跳转行为均未修改。
+- 问题定位：
+  - 数据库中 `2026-06-18` 两条 schedule 记录均为 `priority == 2`，当前 marker 缓存计算结果为红色 `#ff4d4f`。
+  - 界面仍显示旧颜色的原因是月界面缓存未在日界面/详情弹窗编辑后刷新。
+- 验证要求：
+  - 复跑 `MonthWindow` import。
+  - 复跑 offscreen `calendar.grab()` 绘制触发。
+  - 复跑临时 `py_compile`。
+  - 确认禁止范围无 diff。

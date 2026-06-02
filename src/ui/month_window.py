@@ -30,12 +30,14 @@ class CalendarCellDelegate(QStyledItemDelegate):
         self.visible_month = QDate.currentDate().month()
         self.today_date = QDate.currentDate()
         self.marker_cache = {}
+        self.marker_count_cache = {}
 
-    def set_calendar_state(self, visible_year, visible_month, today_date, marker_cache):
+    def set_calendar_state(self, visible_year, visible_month, today_date, marker_cache, marker_count_cache=None):
         self.visible_year = visible_year
         self.visible_month = visible_month
         self.today_date = today_date
         self.marker_cache = dict(marker_cache)
+        self.marker_count_cache = dict(marker_count_cache or {})
 
     def _date_for_index(self, index):
         first_of_month = QDate(self.visible_year, self.visible_month, 1)
@@ -50,6 +52,31 @@ class CalendarCellDelegate(QStyledItemDelegate):
         first_visible_date = first_of_month.addDays(-offset)
         day_offset = (index.row() - 1) * 7 + index.column()
         return first_visible_date.addDays(day_offset)
+
+    def _draw_label_marker(self, painter, rect, color, count):
+        label_size = 22
+        label_path = QPainterPath()
+        label_path.moveTo(rect.left(), rect.top())
+        label_path.lineTo(rect.left() + label_size, rect.top())
+        label_path.lineTo(rect.left(), rect.top() + label_size)
+        label_path.closeSubpath()
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(color))
+        painter.drawPath(label_path)
+
+        count_text = "9+" if count > 9 else str(count)
+        font = painter.font()
+        font.setPointSize(6)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.setPen(QColor("#FFFFFF"))
+        text_rect = QRectF(rect.left(), rect.top(), 14, 14)
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, count_text)
+        painter.restore()
+
 
     # 计算全局 Y 坐标对应的颜色（线性插值）
     def get_color_for_y(self, y):
@@ -93,6 +120,8 @@ class CalendarCellDelegate(QStyledItemDelegate):
         cell_date = self._date_for_index(index)
         cell_py_date = cell_date.toPyDate() if cell_date.isValid() else None
         is_today = cell_date == self.today_date
+        marker_color = self.marker_cache.get(cell_py_date)
+        marker_count = self.marker_count_cache.get(cell_py_date, 0)
         
         # 核心逻辑：判断当前格子里是不是纯数字（表头"周一"不是，日期"27"是）
         is_date = date_str.isdigit() 
@@ -103,8 +132,8 @@ class CalendarCellDelegate(QStyledItemDelegate):
         if is_date:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
             
-            # 1. 设置边框颜色和宽度 (3px 纯白边框)
-            card_pen = QPen(QColor(255, 255, 255,90)) 
+            # 1. 设置边框颜色和宽度 (保持原白色细边框)
+            card_pen = QPen(QColor(255, 255, 255, 90))
             card_pen.setWidth(0)
             painter.setPen(card_pen)
             
@@ -152,15 +181,8 @@ class CalendarCellDelegate(QStyledItemDelegate):
 
             # 居中写字
             painter.drawText(inner_rect, Qt.AlignmentFlag.AlignCenter, date_str)
-            marker_color = self.marker_cache.get(cell_py_date)
             if marker_color is not None:
-                painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-                painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(QBrush(marker_color))
-                dot_size = 6
-                dot_x = inner_rect.right() - dot_size - 4
-                dot_y = inner_rect.bottom() - dot_size - 4
-                painter.drawEllipse(dot_x, dot_y, dot_size, dot_size)
+                self._draw_label_marker(painter, inner_rect, marker_color, marker_count)
         painter.restore()
 
 class InlineAddViewMonth(QWidget):
@@ -294,6 +316,7 @@ class MonthWindow(FramelessMainWindow):
 
         self.current_date = QDate.currentDate()
         self.schedule_marker_cache = {}
+        self.schedule_marker_count_cache = {}
         self.drag_pos = None
 
         self._setup_ui()
@@ -604,6 +627,7 @@ class MonthWindow(FramelessMainWindow):
 
     def _build_schedule_marker_cache(self):
         marker_cache = {}
+        marker_count_cache = {}
         today = datetime.date.today()
         grouped = {}
 
@@ -623,9 +647,10 @@ class MonthWindow(FramelessMainWindow):
 
             info = grouped.setdefault(
                 target_date,
-                {"has_any": False, "all_completed": True, "max_priority": None},
+                {"has_any": False, "all_completed": True, "max_priority": None, "count": 0},
             )
             info["has_any"] = True
+            info["count"] += 1
 
             if getattr(schedule, "status", 0) != 1:
                 info["all_completed"] = False
@@ -634,6 +659,7 @@ class MonthWindow(FramelessMainWindow):
                     info["max_priority"] = priority
 
         for target_date, info in grouped.items():
+            marker_count_cache[target_date] = info["count"]
             if target_date < today:
                 marker_cache[target_date] = (
                     QColor("#FFFFFF") if info["all_completed"] else QColor("#999999")
@@ -649,15 +675,16 @@ class MonthWindow(FramelessMainWindow):
                 0: QColor("#52C41A"),
             }.get(info["max_priority"], QColor("#52C41A"))
 
-        return marker_cache
+        return marker_cache, marker_count_cache
 
     def _refresh_schedule_marker_cache(self):
-        self.schedule_marker_cache = self._build_schedule_marker_cache()
+        self.schedule_marker_cache, self.schedule_marker_count_cache = self._build_schedule_marker_cache()
         self.cell_delegate.set_calendar_state(
             self.current_date.year(),
             self.current_date.month(),
             QDate.currentDate(),
             self.schedule_marker_cache,
+            self.schedule_marker_count_cache,
         )
         self.calendar.updateCells()
 
@@ -713,6 +740,10 @@ class MonthWindow(FramelessMainWindow):
         painter.drawLine(156, 24, 156, self.height() - 2)
         
         painter.restore()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._refresh_schedule_marker_cache()
 
     # 窗口拖拽逻辑
     def mousePressEvent(self, event):
