@@ -8,8 +8,10 @@ from PyQt6.QtCore import Qt, pyqtSignal, QDate, QTime, QTimer, QRectF, QSize
 from PyQt6.QtGui import QPainter, QPainterPath, QColor, QBrush, QLinearGradient, QIcon, QPen, QPalette, QPixmap
 from PyQt6.QtSvg import QSvgRenderer
 from qframelesswindow import FramelessMainWindow
+import datetime
 
 from ..config import AppConfig
+from ..data.database import db_manager
 from ..utils.win_api import apply_24h2_border_fix
 from ..utils.styles import StyleManager
 from .header import ToolTipFilter
@@ -23,6 +25,31 @@ class CalendarCellDelegate(QStyledItemDelegate):
         self.grad_start = QColor(grad_start_str)
         self.grad_end = QColor(grad_end_str)
         self.table_view = table_view
+        self.calendar_widget = parent
+        self.visible_year = QDate.currentDate().year()
+        self.visible_month = QDate.currentDate().month()
+        self.today_date = QDate.currentDate()
+        self.marker_cache = {}
+
+    def set_calendar_state(self, visible_year, visible_month, today_date, marker_cache):
+        self.visible_year = visible_year
+        self.visible_month = visible_month
+        self.today_date = today_date
+        self.marker_cache = dict(marker_cache)
+
+    def _date_for_index(self, index):
+        first_of_month = QDate(self.visible_year, self.visible_month, 1)
+        first_day_of_week = self.calendar_widget.firstDayOfWeek().value
+        offset = (first_of_month.dayOfWeek() - first_day_of_week) % 7
+        if index.row() == 0:
+            return QDate()
+
+        if offset == 0:
+            offset = 7
+
+        first_visible_date = first_of_month.addDays(-offset)
+        day_offset = (index.row() - 1) * 7 + index.column()
+        return first_visible_date.addDays(day_offset)
 
     # 计算全局 Y 坐标对应的颜色（线性插值）
     def get_color_for_y(self, y):
@@ -63,6 +90,9 @@ class CalendarCellDelegate(QStyledItemDelegate):
 
         # 获取当前格子的文字
         date_str = str(index.data())
+        cell_date = self._date_for_index(index)
+        cell_py_date = cell_date.toPyDate() if cell_date.isValid() else None
+        is_today = cell_date == self.today_date
         
         # 核心逻辑：判断当前格子里是不是纯数字（表头"周一"不是，日期"27"是）
         is_date = date_str.isdigit() 
@@ -90,7 +120,8 @@ class CalendarCellDelegate(QStyledItemDelegate):
         # 3. 画交互状态（悬停、选中遮罩）—— 【只给日期画】
         if is_date:
             if option.state & QStyle.StateFlag.State_Selected:
-                painter.fillRect(inner_rect, QColor(255, 255, 255, 40)) 
+                if not is_today:
+                    painter.fillRect(inner_rect, QColor(255, 255, 255, 40))
             elif option.state & QStyle.StateFlag.State_MouseOver:
                 painter.fillRect(inner_rect, QColor(255, 255, 255, 10))
 
@@ -102,38 +133,34 @@ class CalendarCellDelegate(QStyledItemDelegate):
             is_date = date_str.isdigit() 
             
             if is_date:
-                # ==========================================
-                # 利用网格数学规律判断是否为本月
-                # ==========================================
-                day_num = int(date_str)
-                is_current_month = True
-                
-                # 兼容表头占据 Row 0 的情况：上个月的日期只可能出现在前两行，且数字必然 > 20
-                if index.row() <= 1 and day_num > 20:
-                    is_current_month = False
-                # 下个月的日期只会出现在倒数两行（Row 4 及以后），且数字必然 < 15
-                elif index.row() >= 4 and day_num < 15:
-                    is_current_month = False
+                is_current_month = (
+                    cell_date.year() == self.visible_year and
+                    cell_date.month() == self.visible_month
+                )
 
-                # ==========================================
-                # 🎨 根据判定结果上色
-                # ==========================================
-                if is_current_month:
-                    # 本月日期：通过列索引区分工作日和周末
-                    # 第一列是周一(0)，周六是(5)，周日是(6)
-                    if index.column() in (5, 6):
-                        painter.setPen(QColor(255, 60, 60))   # 周末：红色
+                if is_today:
+                    painter.setPen(QColor("#FFD700"))
+                elif is_current_month:
+                    if cell_date.dayOfWeek() in (6, 7):
+                        painter.setPen(QColor(255, 60, 60))
                     else:
-                        painter.setPen(QColor(255, 255, 255)) # 周一至周五：纯白
+                        painter.setPen(QColor(255, 255, 255))
                 else:
-                    # 非本月日期：半透明灰色（降低视觉干扰）
-                    painter.setPen(QColor(128, 128, 128, 100)) 
+                    painter.setPen(QColor(128, 128, 128, 100))
             else:
-                # 表头文字 (周一至周日)：保持纯白
                 painter.setPen(QColor(255, 255, 255))
 
             # 居中写字
             painter.drawText(inner_rect, Qt.AlignmentFlag.AlignCenter, date_str)
+            marker_color = self.marker_cache.get(cell_py_date)
+            if marker_color is not None:
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QBrush(marker_color))
+                dot_size = 6
+                dot_x = inner_rect.right() - dot_size - 4
+                dot_y = inner_rect.bottom() - dot_size - 4
+                painter.drawEllipse(dot_x, dot_y, dot_size, dot_size)
         painter.restore()
 
 class InlineAddViewMonth(QWidget):
@@ -266,9 +293,11 @@ class MonthWindow(FramelessMainWindow):
         self.titleBar.hide()
 
         self.current_date = QDate.currentDate()
+        self.schedule_marker_cache = {}
         self.drag_pos = None
 
         self._setup_ui()
+        self._refresh_schedule_marker_cache()
         self._start_clock()
         
         # 挂载 24H2 边框与黑屏修复
@@ -573,6 +602,65 @@ class MonthWindow(FramelessMainWindow):
         content_layout.addWidget(right_panel, stretch=1)
         main_layout.addWidget(content_area, stretch=1)
 
+    def _build_schedule_marker_cache(self):
+        marker_cache = {}
+        today = datetime.date.today()
+        grouped = {}
+
+        for schedule in db_manager.get_all_schedules():
+            if getattr(schedule, "status", 0) == 2:
+                continue
+            if getattr(schedule, "item_type", None) != "schedule":
+                continue
+
+            target_date = (
+                schedule.start_time.date()
+                if schedule.start_time
+                else (schedule.end_time.date() if schedule.end_time else None)
+            )
+            if target_date is None:
+                continue
+
+            info = grouped.setdefault(
+                target_date,
+                {"has_any": False, "all_completed": True, "max_priority": None},
+            )
+            info["has_any"] = True
+
+            if getattr(schedule, "status", 0) != 1:
+                info["all_completed"] = False
+                priority = int(getattr(schedule, "priority", 0))
+                if info["max_priority"] is None or priority > info["max_priority"]:
+                    info["max_priority"] = priority
+
+        for target_date, info in grouped.items():
+            if target_date < today:
+                marker_cache[target_date] = (
+                    QColor("#FFFFFF") if info["all_completed"] else QColor("#999999")
+                )
+                continue
+
+            if info["max_priority"] is None:
+                continue
+
+            marker_cache[target_date] = {
+                2: QColor("#FF4D4F"),
+                1: QColor("#FAAD14"),
+                0: QColor("#52C41A"),
+            }.get(info["max_priority"], QColor("#52C41A"))
+
+        return marker_cache
+
+    def _refresh_schedule_marker_cache(self):
+        self.schedule_marker_cache = self._build_schedule_marker_cache()
+        self.cell_delegate.set_calendar_state(
+            self.current_date.year(),
+            self.current_date.month(),
+            QDate.currentDate(),
+            self.schedule_marker_cache,
+        )
+        self.calendar.updateCells()
+
     def _start_clock(self):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._update_time)
@@ -598,6 +686,7 @@ class MonthWindow(FramelessMainWindow):
         self.current_date = QDate(year, month, 1)
         # 2. 同步更新左侧月份标签
         self.lbl_month.setText(f"{month}月")
+        self._refresh_schedule_marker_cache()
 
     # 绘制青色渐变背景与T形切割线
     def paintEvent(self, event):
@@ -735,8 +824,7 @@ class MonthWindow(FramelessMainWindow):
     def _on_schedule_saved(self):
         self.show_toast("✅ 添加日程成功")
         self._close_add_view()
-        # 触发底层日历重绘，把新日程的小圆点画出来
-        self.calendar.updateCells()
+        self._refresh_schedule_marker_cache()
 
     def show_toast(self, message):
         from PyQt6.QtWidgets import QLabel

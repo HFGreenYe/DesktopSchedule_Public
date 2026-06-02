@@ -446,3 +446,209 @@
 - 风险或疑点：
   - 现有 `MonthWindow` 把视觉绘制、添加入口、天气 tooltip、toast、视图切换都放在单文件内，后续 `M-2`~`M-6` 若不控制范围，容易顺手把多条链路混在一轮里。
   - `QCalendarWidget` 内部模型结构依赖 Qt 实现细节，后续日期命中建议尽量基于“当前页年月 + 表格 index”自算，不要过度依赖 `index.data()` 文本规则。
+
+---
+
+## 2026-06-02 M-1（月格状态圆点与今天金色日期）
+
+- 本轮任务名称：
+  - `M-1（月格状态圆点与今天金色日期）`
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 52]`
+  - `git diff --name-only`：
+    - `manage_instruction/Work_Log.md`
+    - `manage_instruction/Work_Task_Prompts.md`
+    - `src/ui/month_window.py`
+- 开工前既有 diff：
+  - `manage_instruction/Work_Log.md`：来自 `M-0` 日志记录。
+  - `manage_instruction/Work_Task_Prompts.md`：开工前既有管理文档 diff，本轮未修改。
+  - `src/ui/month_window.py`：本轮新增源码改动目标文件。
+- 实际修改文件：
+  - `src/ui/month_window.py`
+  - `manage_instruction/Work_Log.md`
+
+- 月格圆点实现位置：
+  - `src/ui/month_window.py`
+  - `CalendarCellDelegate.paint(...)`：负责在格子右下角绘制圆点。
+  - `MonthWindow._build_schedule_marker_cache()`：负责构建 `date -> QColor` 缓存。
+  - `MonthWindow._refresh_schedule_marker_cache()`：负责把当前页年月、今天日期和 marker 缓存同步给 delegate，并触发 `calendar.updateCells()`。
+
+- 月格圆点数据来源：
+  - 只读使用 `db_manager.get_all_schedules()`。
+  - 在月界面本地做聚合，不对 42 个格子重复调用 `get_schedules_for_date(...)`。
+
+- 圆点过滤规则：
+  - 已排除 `status == 2`。
+  - 已排除 `item_type == "todo"`。
+  - 日期来源为 `start_time.date()` 优先、`end_time.date()` 兜底。
+  - 重复日程实例按独立记录参与统计，不按 `group_id` 合并。
+
+- 未来/今天未完成日程红黄绿规则实现说明：
+  - 今天及未来仅统计未完成记录。
+  - `priority == 2` -> 红色 `#FF4D4F`
+  - `priority == 1` -> 黄色 `#FAAD14`
+  - `priority == 0` -> 绿色 `#52C41A`
+  - 若当天没有未完成日程，则不显示圆点。
+
+- 过去日期白/灰规则实现说明：
+  - 过去日期只要有日程：
+    - 全部完成 -> 白色 `#FFFFFF`
+    - 存在未完成 -> 灰色 `#999999`
+  - 无日程则不显示圆点。
+
+- 今天日期数字金色实现说明：
+  - 在 `CalendarCellDelegate.paint(...)` 中先精确计算当前格子的 `QDate`。
+  - 若格子日期等于 `QDate.currentDate()`，数字直接使用金色 `#FFD700` 绘制。
+  - 本月/非本月/周末判断不再依赖旧的数字阈值上色分支覆盖今天颜色。
+
+- 如何处理 `selectedDate()` 默认今天导致整格高亮的风险：
+  - 本轮未引入 `user_selected_date`，也未改 `selectedDate()` 业务语义。
+  - 仅在绘制层规避：若当前格子是“今天”，即使命中 Qt 的 `State_Selected`，也不再绘制整格选中遮罩。
+  - 已知限制：
+    - 用户主动单击今天时，本轮仍不会显示整格高亮。
+    - 该限制已按提示词要求留给 `M-2` 的交互重构处理。
+
+- 精确日期映射实现说明：
+  - 本轮没有继续扩张旧的“数字 + 行号阈值”启发式作为业务日期来源。
+  - `CalendarCellDelegate` 新增：
+    - `set_calendar_state(...)`
+    - `_date_for_index(index)`
+  - 计算方式基于：
+    - 当前可见页年月
+    - `QCalendarWidget.firstDayOfWeek()`
+    - `row/column -> day offset`
+  - 该映射只服务于本轮绘制，不接 hover/右键/双击交互。
+
+- 刷新时机：
+  - `MonthWindow.__init__` 完成 UI 后首次建立 marker 缓存。
+  - `_on_calendar_page_changed(...)` 翻月后重建 marker 缓存。
+  - `_on_schedule_saved()` 保存成功后重建 marker 缓存。
+
+- 是否保持单击跳日视图链路不变：
+  - 是。
+  - `calendar.clicked.connect(self.date_selected.emit)` 仍存在。
+  - `MainWindow.jump_to_date_from_month(...)` 未修改。
+
+- 是否保持添加按钮日期来源不变：
+  - 是。
+  - `_on_add_clicked(...)` 仍直接使用 `calendar.selectedDate()`。
+  - `InlineAddViewMonth` 写入逻辑未改。
+
+- 是否未新增双击/hover/右键/持久浮窗逻辑：
+  - 是。
+  - 静态搜索未新增：
+    - `mouseDoubleClickEvent`
+    - `contextMenuEvent`
+    - `ActionContextMenu`
+    - `customContextMenuRequested`
+    - `setContextMenuPolicy`
+    - `open_day_panels`
+    - `user_selected_date`
+    - `setSelectedDate`
+    - `clearSelection`
+  - `hover` 命中仅来自既有按钮 stylesheet 文本，不是新增 hover 预览逻辑。
+
+- 验证命令和结果：
+  - `from src.ui.month_window import MonthWindow, CalendarCellDelegate, InlineAddViewMonth`
+    - 通过。
+  - offscreen 构造：
+    - `MonthWindow()` 可构造。
+    - 输出选中日期：`2026-06-02`。
+  - 只读数据路径：
+    - `db_manager.get_all_schedules()` 可调用。
+    - 输出 `schedules 78`
+    - `priority/status/item_type` 字段抽样检查通过。
+  - 行为链路静态检查：
+    - `calendar.clicked.connect(self.date_selected.emit)` 仍存在。
+    - `_on_add_clicked(...)` 仍存在并使用 `selectedDate()`。
+    - `view_selected` 链路未变。
+
+- 语法检查：
+  - 按提示词原命令执行：
+    - `python -m py_compile src/ui/month_window.py main.py`
+  - 结果：
+    - 失败，原因不是语法错误，而是写入 `src/ui/__pycache__/month_window...pyc` 时遇到 `[WinError 5] 拒绝访问`。
+  - 等价兜底验证：
+    - 使用 `py_compile.compile(..., cfile=%TEMP%\\*.pyc, doraise=True)` 编译 `src/ui/month_window.py` 与 `main.py`。
+    - 结果：通过，说明语法层面无错误。
+
+- diff 范围检查结果：
+  - 禁止范围均无 diff：
+    - `src/ui/main_window.py`
+    - `src/ui/calendar_pop.py`
+    - `src/ui/common/action_context_menu.py`
+    - `src/ui/popups`
+    - `src/ui/common`
+    - `src/controllers`
+    - `src/services`
+    - `src/data`
+    - `src/repositories`
+    - `src/theme`
+    - `src/utils/signals.py`
+    - `src/utils/styles.py`
+    - `assets`
+    - `main.py`
+    - `requirements.txt`
+    - `schedule.db`
+    - `manage_instruction/Work_Formulation.md`
+    - `manage_instruction/Work_Instruction.md`
+    - `manage_instruction/Work_Snapshot.md`
+    - `manage_instruction/History_Instruction.md`
+    - `manage_instruction/History_Log.md`
+    - `manage_instruction/ReconstructionDolder`
+  - 允许范围：
+    - `git diff --name-only -- src/ui/month_window.py`：有 diff。
+    - `git diff --name-only`：
+      - `manage_instruction/Work_Log.md`
+      - `manage_instruction/Work_Task_Prompts.md`（开工前既有）
+      - `src/ui/month_window.py`
+
+- 未完成事项：
+  - 尚未做 `M-2` 的单击/双击语义拆分。
+  - 尚未处理“用户主动单击今天仍不高亮”的限制。
+  - 尚未接入 hover 预览、持久浮窗、右键菜单。
+
+- 风险或疑点：
+  - 本轮圆点绘制使用了精确的 `index -> QDate` 计算，但仍依赖 `QCalendarWidget` 内部 `QTableView` 的标准 7 列网格结构；后续如果 Qt 内部视图布局差异化，需要重新验证。
+  - 今天默认选中整格高亮已在绘制层压掉，但没有区分“默认今天”和“用户主动点了今天”；该行为差异已按计划留给 `M-2` 处理，不在本轮扩大范围。
+
+- 复核后最小补修：
+  - 触发原因：
+    - 顾问复核指出 `_date_for_index()` 中对 `firstDayOfWeek()` 做 `int(...)` 转换会在 PyQt6 下抛 `TypeError`。
+    - 顾问复核同时指出日期映射未正确处理模型第 0 行表头，以及月历固定 6 周日期行带来的首个可见日期偏移。
+  - 实际补修：
+    - 将 `firstDayOfWeek()` 转换改为 `.value`，避免 `DayOfWeek` 枚举直接 `int(...)`。
+    - `index.row() == 0` 时直接返回无效 `QDate()`，使表头不参与日期映射和圆点绘制。
+    - 将首个可见日期改为：
+      - 先按当前页年月计算 `first_of_month`。
+      - 按 `firstDayOfWeek().value` 计算相对偏移。
+      - 当偏移为 `0` 时额外回退 7 天，以对齐 `QCalendarWidget` 当前内部固定 6 周日期行布局。
+      - 再用 `(row - 1) * 7 + column` 推导真实日期。
+    - `cell_date` 无效时不再调用 `toPyDate()`。
+  - 复验结果：
+    - `MonthWindow / CalendarCellDelegate / InlineAddViewMonth` import：通过。
+    - 日期映射验证：通过。
+      - `row 0 / col 0` -> 无效日期（表头跳过）
+      - `row 1 / col 0` -> `2026-05-25`
+      - `row 2 / col 0` -> `2026-06-01`
+    - `w.calendar.grab()` 绘制触发验证：通过。
+      - 输出：`grab ok True 540 436`
+    - 说明：
+      - `w.show()` 在 offscreen 下仍会导致进程异常退出，但不属于本轮圆点逻辑问题。
+      - 顾问要求的“实际绘制触发验证”已通过 `w.calendar.grab()` 完成。
+
+## 2026-06-02 M-1 最终提示词写入
+
+- 任务：审核并写入 `M-1（月格状态圆点与今天金色日期）` 最终执行提示词。
+- 实际修改文件：
+  - `manage_instruction/Work_Task_Prompts.md`
+  - `manage_instruction/Work_Log.md`
+- 审核结论：
+  - 决策窗口给出的 M-1 方向可用，但需要收紧边界。
+  - 已补充：本轮只做视觉状态，不改单击、双击、hover、右键、添加和跳转行为。
+  - 已补充：`QCalendarWidget.selectedDate()` 默认今天的风险只允许在绘制层处理，不允许本轮引入 `user_selected_date`、清空选择或改变添加日期来源。
+  - 已补充：月格圆点应使用精确日期映射或可见年月 + row/column 计算，不能继续扩大旧的数字阈值启发式作为业务日期来源。
+  - 已补充：本轮只允许只读调用 `db_manager.get_all_schedules()`，不得写数据库，不得改数据层、服务层、Repository 或 `calendar_pop.py`。
+  - 已补充：如外部刷新不能即时反映到月格圆点，本轮只记录风险，不接入 `RefreshCoordinator` 或新增 signal。
+- 下一步：
+  - 执行窗口可按 `Work_Task_Prompts.md` 中最终 M-1 提示词执行。
