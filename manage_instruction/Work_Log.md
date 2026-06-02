@@ -16,12 +16,27 @@
 
 右键上下文菜单阶段已完成并归档。
 
-当前无待执行小工单。
+`M-0（月界面现状审查与交互边界定位）` 已执行完成。
 
 下一步建议：
 
-- 等待决策窗口复核“月界面功能补齐阶段”规划。
-- 复核通过后生成 `M-0：月界面现状审查与交互边界定位` 最终提示词。
+- 等待决策/顾问窗口复核 `M-0` 审查结论。
+- 复核通过后生成 `M-1：月格状态圆点与今天金色日期` 最终提示词。
+
+---
+
+## 2026-06-02 M-0 复核锚点更新
+
+- 任务目标：
+  - M-0 执行完成后，更新 `Work_Task_Prompts.md`，避免继续显示“当前待执行提示词：M-0”导致重复执行。
+- 实际修改文件：
+  - `manage_instruction/Work_Task_Prompts.md`
+  - `manage_instruction/Work_Log.md`
+- 更新结果：
+  - `Work_Task_Prompts.md` 已改为：`M-0` 已执行完成，等待复核。
+  - 下一步候选标记为：`M-1：月格状态圆点与今天金色日期`。
+- 验证：
+  - 本次更新未修改 `src/`、`assets/`、`main.py`、`requirements.txt`、`schedule.db`。
 
 ---
 
@@ -163,3 +178,271 @@
   - 右键上下文菜单阶段可归档。
   - 本阶段未实现换肤、排序、筛选、四象限。
   - 后续建议回到月界面功能补齐规划。
+
+---
+
+## 2026-06-02 M-0（月界面现状审查与交互边界定位）
+
+- 本轮任务名称：
+  - `M-0（月界面现状审查与交互边界定位）`
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 51]`
+  - `git diff --name-only` 无输出。
+- 开工前既有 diff：
+  - 无源码 diff。
+  - 无月界面规划文档既有 diff；`Work_Formulation.md`、`Work_Instruction.md`、`Work_Task_Prompts.md` 当前内容已提交，不属于本轮新增改动。
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+
+- 读取的规划文件：
+  - `manage_instruction/Work_Formulation.md`
+  - `manage_instruction/Work_Instruction.md`
+  - `manage_instruction/Work_Task_Prompts.md`
+  - `manage_instruction/Work_Log.md`
+  - `manage_instruction/ReconstructionDolder/Work_Formulation.md`
+  - `manage_instruction/ReconstructionDolder/History_Instruction.md`
+  - `manage_instruction/ReconstructionDolder/Workflow_Guide.md`
+
+- 读取的源码文件：
+  - `src/ui/month_window.py`
+  - `src/ui/main_window.py`
+  - `src/ui/calendar_pop.py`
+  - `src/ui/common/action_context_menu.py`
+- 追加只读文件与原因：
+  - `src/data/models.py`：确认 `Schedule` 字段语义。
+  - `src/services/schedule_query_service.py`：确认 `item_type` 与日期过滤旧语义。
+  - `src/repositories/schedule_repository.py`：确认 `get_all_schedules` / `get_schedules_for_date` 可用边界。
+  - `src/ui/dashboard.py`：确认 `priority/status` 旧颜色与状态语义。
+
+- 旧规划与当前阶段原则确认：
+  - 月界面功能补齐符合旧规划中的兼容式渐进改造原则，不需要新建 controller/router 取代现有链路。
+  - 新增纯 UI 浮窗/预览组件优先考虑 `src/ui/popups/`；仅当后续确认可跨页面复用时再放 `src/ui/common/`。
+  - 现有 `MainController` / `ViewRouter` / `RefreshCoordinator` 不需要在 `M-0`~`M-2` 被扩展；月界面现有 `date_selected` / `view_selected` 信号链已足够支撑第一批改造。
+  - 后续仍应遵守 `ActionContextMenu` 复用方向、`default.qss / skin preset` 路线和 `role/state/variant` 动态属性规范。
+
+- 当前月界面点击跳转链路：
+  - `MonthWindow.calendar.clicked.connect(self.date_selected.emit)`。
+  - `MainWindow.__init__` 中 `self.month_window.date_selected.connect(self.jump_to_date_from_month)`。
+  - `jump_to_date_from_month(qdate)` 仅转调 `jump_to_date(qdate)`。
+  - `jump_to_date(qdate)` 调用 `on_calendar_date_picked(py_date)` 后执行 `switch_view("day")`。
+  - 结论：当前是“单击日期即跳日视图”，不是“单击选中 / 双击跳转”。
+
+- 当前月界面添加入口和日期来源：
+  - `MonthWindow._on_add_clicked()` 直接读取 `self.calendar.selectedDate()`。
+  - 过去日期限制也直接基于 `selectedDate()` 判断。
+  - `InlineAddViewMonth.reset(target_date)` 保存该日期。
+  - `InlineAddViewMonth._on_save()` 用 `selected_date.toPyDate()` 组装默认 `start_time`，并通过 `db_manager.add_schedule(...)` 写入。
+  - 结论：当前月界面“添加”完全依赖 `QCalendarWidget.selectedDate()`，没有单独的“用户主动选中日期”状态。
+
+- `QCalendarWidget.selectedDate()` 默认今天与用户主动选中日期的区分风险：
+  - `MonthWindow` 初始化时未显式清空选择，也未维护 `user_selected_date`。
+  - `QCalendarWidget.selectedDate()` 默认就是今天。
+  - 当前 `_on_add_clicked()` 会把“默认今天”与“用户真的选了某天”混为一谈。
+  - 用户只翻月不点击日期时，`selectedDate()` 仍可能停留在今天；这会让“添加”落到错误日期。
+  - 结论：后续不能继续把 `selectedDate()` 当作唯一真实业务选中态，至少需要单独维护 `user_selected_date` 或等价状态。
+
+- 当前绘制方式和月格日期映射可行性：
+  - 月界面当前使用 `QCalendarWidget` + 内部 `QTableView` + `CalendarCellDelegate.paint(...)`。
+  - `paint(...)` 只能拿到 `index.data()` 文本和 `row/column`，没有直接拿到完整 `QDate`。
+  - 现有“是否本月”判断依赖启发式规则：
+    - 前两行且数字大于 20 视为上月补位。
+    - 后两行且数字小于 15 视为下月补位。
+  - 该规则用于上色还勉强可用，但不适合作为 hover/右键/双击/圆点的数据源。
+  - `MonthWindow` 已通过 `self.calendar.findChild(QTableView)` 拿到内部表格，说明后续可在该 `QTableView` 上接 `indexAt(...)`、`visualRect(...)`、mouse tracking、eventFilter。
+  - 当前代码里尚未实现：
+    - `indexAt(...)`
+    - `visualRect(...)`
+    - `mouseMoveEvent` 针对月格命中
+    - `mouseDoubleClickEvent` 针对月格命中
+    - `contextMenuEvent` 针对月格命中
+  - 结论：鼠标到日期映射是可做的，但应基于 `QTableView` 显式计算 `cell -> QDate`；不能继续依赖 delegate 内的数字启发式。
+  - 建议：后续维护 `visible_month/current_page` + `cell_date_map` 或实现独立 `_date_for_index(index)` 帮助方法。
+
+- 上月/下月补位日期判断方式结论：
+  - 当前月界面没有正式的补位日期映射函数。
+  - 仅有 `CalendarCellDelegate.paint(...)` 中的行号 + 数字阈值启发式判断。
+  - `MonthWindow.current_date` 在翻页后会被 `_on_calendar_page_changed(year, month)` 修正为该月 1 号，可作为“当前可见页月份”基础状态。
+  - 建议后续按“当前页年/月 + 首日 weekday + 42 格偏移”精确计算格子日期，替代阈值启发式。
+
+- 日程圆点所需字段语义审查结论：
+  - `Schedule.priority` 语义已在现有 UI 中固定：
+    - `0` = 低 = 绿色
+    - `1` = 中 = 黄色
+    - `2` = 高 = 红色
+  - `Schedule.status` 语义按现有 UI/服务判断：
+    - `0` = 活动/未完成
+    - `1` = 已完成
+    - `2` = 删除/历史，不应进入正常展示
+  - `Schedule.item_type`：
+    - `"schedule"` = 日程
+    - `"todo"` = 待办
+  - 重复日程实例：
+    - 已按独立记录存在，`group_id` 只表达循环组归属，不影响“月格按日期聚合”。
+  - 日期来源旧语义：
+    - `calendar_pop.py` 当前按 `start_time.date()` 优先，缺失时回退 `end_time.date()`。
+    - 该规则与月界面现状最接近，短期可沿用为月格圆点日期来源。
+  - 整月数据可行性：
+    - 当前可直接用 `db_manager.get_all_schedules()` 拉全量，再在月界面本地聚合 `date -> schedules`。
+    - `get_schedules_for_date()` 只适合单日过滤，不适合整月 42 格反复调用。
+  - 过滤建议：
+    - 排除 `status == 2`。
+    - 排除 `item_type == "todo"`。
+    - 保留重复实例的独立记录。
+    - 圆点日期来源短期按 `start_time` 优先、`end_time` 兜底，与 `calendar_pop.py` 对齐。
+  - `calendar_pop.py` 参考价值：
+    - 有现成 `HighlightCalendarWidget.paintCell(...)` 与整日聚合逻辑。
+    - 但颜色规则目前是 `white/grey/cyan`，不符合月界面新规划。
+    - 适合作为“按 `QDate` 精确绘制圆点”的参考，不适合直接复用 UI 规则。
+
+- hover 只读预览组件建议：
+  - 不建议先塞进 `month_window.py` 临时类。
+  - 更适合单独放到 `src/ui/popups/`，例如月界面专用只读预览弹窗。
+  - 原因：
+    - 明确是弹出层语义，不是共享基础控件。
+    - 需要脱离月历本体处理显示/隐藏和定位。
+    - 未来若要复用，再上提到 `common` 更安全。
+  - 风险等级：中高。核心风险不在 UI 壳，而在 hover 命中、跨格移动和生命周期去抖。
+
+- 持久浮窗组件建议和生命周期管理建议：
+  - 持久浮窗壳应优先放 `src/ui/popups/`，不要先写在 `month_window.py` 内部。
+  - 应使用独立顶层窗口或至少独立 popup/tool 窗口，避免被 `MonthWindow` 裁剪。
+  - `MonthWindow` 需要维护 `open_day_panels` 或等价列表。
+  - 统一关闭入口建议：
+    - `MonthWindow.closeEvent(...)`
+    - `MonthWindow.hideEvent(...)`
+    - 双击跳日视图前的统一清理方法
+  - 多个持久浮窗并存建议：
+    - 以点击日期格的全局位置为锚点做级联偏移，避免完全重叠。
+  - 风险等级：高。原因是多窗口生命周期与位置管理，而不是 UI 绘制本身。
+
+- 月界面右键菜单接入建议：
+  - `ActionContextMenu` 已具备所需 action/view 出口，`M-6` 优先复用，不建议先改组件。
+  - 月界面当前没有右键链路，也没有右键日期上下文状态。
+  - 右键日期应通过 `QTableView.indexAt(...)` 命中后单独存为临时上下文，例如 `context_menu_date`。
+  - 右键建议不改变当前选中日期；这在现有架构中可实现，因为右键菜单和单击选中还未耦合。
+  - `添加` 动作应使用右键日期，不应读取 `calendar.selectedDate()`。
+  - 过去日期添加禁用建议在弹菜单前设置 `menu.actions_by_id["add"].setEnabled(False)`，不建议改菜单组件的默认策略。
+  - `month` 当前项：
+    - 现有 `MonthWindow._on_view_selected("month")` 已是 no-op。
+    - 短期可保持可点但无动作，或在接入时禁用；优先保持组件不变、在月界面集成层处理。
+  - 周视图日期上下文限制：
+    - 当前 `switch_view("week")` / `view_selected.emit("week")` 不支持携带目标日期。
+    - 因此从月界面右键直接“带日期跳周视图”目前没有现成路由，应在 `M-6` 明确记录为限制，不强行实现。
+
+- 当前月界面缺失链路汇总：
+  - 无 hover 事件链路。
+  - 无双击日期格链路。
+  - 无右键菜单链路。
+  - 无“用户主动选中日期”独立状态。
+  - 无整月 `date -> schedules` 缓存。
+  - 无持久浮窗列表和关闭策略。
+
+- M-1 建议：
+  - 建议修改文件：
+    - `src/ui/month_window.py`
+  - 风险等级：
+    - 中
+  - 验收重点：
+    - 只补今天金色数字与日程圆点，不改变单击跳转。
+    - 优先用精确日期映射或子类化 `QCalendarWidget.paintCell(...)`，不要继续扩大 delegate 数字阈值逻辑。
+    - 圆点过滤规则必须排除 `status == 2`、`item_type == "todo"`。
+    - `schedule.db` 无 diff。
+
+- M-2 建议：
+  - 建议修改文件：
+    - `src/ui/month_window.py`
+    - `src/ui/main_window.py`
+  - 风险等级：
+    - 中高
+  - 验收重点：
+    - 单击只选中，不再跳日视图。
+    - 双击才发出跳转链路。
+    - 现有 `MainWindow.jump_to_date_from_month` 复用不变，只调整月界面发射时机。
+    - 为月格引入精确双击命中，不破坏视图切换和挂起链路。
+
+- M-3 建议：
+  - 建议修改文件：
+    - `src/ui/month_window.py`
+    - `src/ui/popups/` 下新增月界面 hover 预览组件文件
+  - 风险等级：
+    - 中高
+  - 验收重点：
+    - hover 预览只读，移出立即隐藏。
+    - 不影响单击选中、双击跳转、未来右键命中。
+    - 需要 `QTableView` mouse tracking + 日期命中，不得靠 `selectedDate()` 推断。
+
+- M-4 建议：
+  - 建议修改文件：
+    - `src/ui/month_window.py`
+    - `src/ui/popups/` 下新增持久浮窗壳组件文件
+  - 风险等级：
+    - 高
+  - 验收重点：
+    - 独立顶层浮窗不被裁剪。
+    - `MonthWindow` 正确维护 `open_day_panels`。
+    - close/hide/双击跳日视图时统一清理全部持久浮窗。
+    - 多浮窗并存不完全重叠。
+
+- M-5 建议：
+  - 建议修改文件：
+    - `src/ui/month_window.py`
+  - 风险等级：
+    - 中
+  - 验收重点：
+    - 添加优先使用用户主动选中日期。
+    - 无主动选中时再决定是否回退旧逻辑。
+    - 过去日期禁止添加保持。
+    - 不改 `InlineAddViewMonth` 写库语义，只改日期来源。
+
+- M-6 建议：
+  - 建议修改文件：
+    - `src/ui/month_window.py`
+    - 如必须桥接到日视图日期跳转，再最小修改 `src/ui/main_window.py`
+  - 风险等级：
+    - 中高
+  - 验收重点：
+    - 复用 `ActionContextMenu`，不新增菜单组件。
+    - 右键日期上下文与当前选中日期解耦。
+    - `add` 只用右键日期，过去日期禁用。
+    - `day/month/todo` 视图动作复用旧入口。
+    - `week` 日期上下文当前不支持时，要明确保持限制，不做伪实现。
+
+- M-7 整体验收重点：
+  - 圆点颜色与过滤规则正确。
+  - 今天金色数字与选中整格高亮分离。
+  - 单击/双击/hover/右键互不冲突。
+  - 持久浮窗生命周期正确。
+  - 添加日期来源正确且过去日期禁用。
+  - `schedule.db` 无 tracked diff。
+  - `main.py`、数据层、服务层、控制层无非必要 diff。
+
+- 对现有规划的调整建议：
+  - `M-1` 不建议继续沿用现有 `CalendarCellDelegate.paint(...)` 的数字启发式扩展圆点逻辑，建议改为“精确日期可得”的绘制路径。
+  - `M-6` 需要在提示词中明确：周视图跳转暂不携带日期上下文，除非另开小工单先补路由能力。
+
+- 静态搜索命令与关键结果：
+  - 全局月界面搜索已执行，确认 `MonthWindow.date_selected` 当前直接由 `calendar.clicked` 发出。
+  - `jump_to_date_from_month` 只做 `jump_to_date` 代理。
+  - `MonthWindow` 中不存在 `mouseDoubleClickEvent`、`contextMenuEvent`、`indexAt(...)`、`visualRect(...)` 的月格链路。
+  - `calendar_pop.py` 已有 `paintCell(...)` 与整日聚合逻辑，可参考但不宜直接复用规则。
+
+- diff 范围检查结果：
+  - `git diff --name-only -- src`：无输出。
+  - `git diff --name-only -- assets`：无输出。
+  - `git diff --name-only -- main.py`：无输出。
+  - `git diff --name-only -- requirements.txt`：无输出。
+  - `git diff --name-only -- schedule.db`：无输出。
+  - `git diff --name-only -- manage_instruction/Work_Formulation.md`：无输出。
+  - `git diff --name-only -- manage_instruction/Work_Instruction.md`：无输出。
+  - `git diff --name-only -- manage_instruction/Work_Snapshot.md`：无输出。
+  - `git diff --name-only -- manage_instruction/History_Instruction.md`：无输出。
+  - `git diff --name-only -- manage_instruction/History_Log.md`：无输出。
+  - `git diff --name-only -- manage_instruction/ReconstructionDolder`：无输出。
+  - 本轮结束后应仅新增 `manage_instruction/Work_Log.md` diff。
+
+- 未完成事项：
+  - 等待决策/顾问窗口基于本轮结论下发 `M-1` 最终执行提示词。
+
+- 风险或疑点：
+  - 现有 `MonthWindow` 把视觉绘制、添加入口、天气 tooltip、toast、视图切换都放在单文件内，后续 `M-2`~`M-6` 若不控制范围，容易顺手把多条链路混在一轮里。
+  - `QCalendarWidget` 内部模型结构依赖 Qt 实现细节，后续日期命中建议尽量基于“当前页年月 + 表格 index”自算，不要过度依赖 `index.data()` 文本规则。
