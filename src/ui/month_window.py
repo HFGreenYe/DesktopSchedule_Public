@@ -31,13 +31,15 @@ class CalendarCellDelegate(QStyledItemDelegate):
         self.today_date = QDate.currentDate()
         self.marker_cache = {}
         self.marker_count_cache = {}
+        self.user_selected_date = None
 
-    def set_calendar_state(self, visible_year, visible_month, today_date, marker_cache, marker_count_cache=None):
+    def set_calendar_state(self, visible_year, visible_month, today_date, marker_cache, marker_count_cache=None, user_selected_date=None):
         self.visible_year = visible_year
         self.visible_month = visible_month
         self.today_date = today_date
         self.marker_cache = dict(marker_cache)
         self.marker_count_cache = dict(marker_count_cache or {})
+        self.user_selected_date = user_selected_date
 
     def _date_for_index(self, index):
         first_of_month = QDate(self.visible_year, self.visible_month, 1)
@@ -148,9 +150,8 @@ class CalendarCellDelegate(QStyledItemDelegate):
 
         # 3. 画交互状态（悬停、选中遮罩）—— 【只给日期画】
         if is_date:
-            if option.state & QStyle.StateFlag.State_Selected:
-                if not is_today:
-                    painter.fillRect(inner_rect, QColor(255, 255, 255, 40))
+            if self.user_selected_date is not None and cell_date == self.user_selected_date:
+                painter.fillRect(inner_rect, QColor(255, 255, 255, 40))
             elif option.state & QStyle.StateFlag.State_MouseOver:
                 painter.fillRect(inner_rect, QColor(255, 255, 255, 10))
 
@@ -315,8 +316,10 @@ class MonthWindow(FramelessMainWindow):
         self.titleBar.hide()
 
         self.current_date = QDate.currentDate()
+        self.user_selected_date = None
         self.schedule_marker_cache = {}
         self.schedule_marker_count_cache = {}
+        self.open_day_panels = []
         self.drag_pos = None
 
         self._setup_ui()
@@ -570,7 +573,8 @@ class MonthWindow(FramelessMainWindow):
         self.calendar.setNavigationBarVisible(False) 
         self.calendar.setVerticalHeaderFormat(QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader)
         self.calendar.currentPageChanged.connect(self._on_calendar_page_changed)
-        self.calendar.clicked.connect(self.date_selected.emit)
+        self.calendar.clicked.connect(self._on_calendar_date_clicked)
+        self.calendar.activated.connect(self._on_calendar_date_activated)
         
         # ==========================================
         # 绘制挂载
@@ -685,6 +689,7 @@ class MonthWindow(FramelessMainWindow):
             QDate.currentDate(),
             self.schedule_marker_cache,
             self.schedule_marker_count_cache,
+            self.user_selected_date,
         )
         self.calendar.updateCells()
 
@@ -714,6 +719,24 @@ class MonthWindow(FramelessMainWindow):
         # 2. 同步更新左侧月份标签
         self.lbl_month.setText(f"{month}月")
         self._refresh_schedule_marker_cache()
+
+    def _on_calendar_date_clicked(self, qdate):
+        self.user_selected_date = qdate
+        self._refresh_schedule_marker_cache()
+
+    def _on_calendar_date_activated(self, qdate):
+        self._on_calendar_date_clicked(qdate)
+        self.close_day_panels()
+        self.date_selected.emit(qdate)
+
+    def close_day_panels(self):
+        for panel in list(self.open_day_panels):
+            try:
+                if panel is not None and hasattr(panel, "close"):
+                    panel.close()
+            finally:
+                pass
+        self.open_day_panels.clear()
 
     # 绘制青色渐变背景与T形切割线
     def paintEvent(self, event):

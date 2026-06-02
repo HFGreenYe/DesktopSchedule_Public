@@ -709,3 +709,177 @@
   - 复跑 offscreen `calendar.grab()` 绘制触发。
   - 复跑临时 `py_compile`。
   - 确认禁止范围无 diff。
+
+## 2026-06-03 M-2 最终提示词写入
+
+- 任务：
+  - 审核并写入 `M-2（月格单击选中与双击跳日视图）` 最终执行提示词。
+- 实际修改文件：
+  - `manage_instruction/Work_Task_Prompts.md`
+  - `manage_instruction/Work_Log.md`
+- 审核修正：
+  - 将原提示词中“M-1 圆点”表述修正为当前真实实现的“三角数量角标”。
+  - 明确单击只更新 `user_selected_date`，不得 emit 跳转信号。
+  - 明确选中高亮必须基于用户主动选中状态，不能直接依赖 `QCalendarWidget.selectedDate()` 默认今天。
+  - 明确优先使用 `QCalendarWidget.activated(QDate)` 作为双击/激活入口。
+  - 明确优先保留 `MonthWindow.date_selected` 作为双击跳转信号，复用 `MainWindow.jump_to_date_from_month(...)` 既有连接，优先不修改 `main_window.py`。
+  - 明确预留 `close_day_panels()` / `open_day_panels` 仅作为 M-4 生命周期接口，不实现持久浮窗。
+  - 明确本轮不得重写 `_on_add_clicked(...)` 为使用 `user_selected_date`，添加日期来源联动仍留到 M-5。
+- 下一步：
+  - 执行窗口可按 `Work_Task_Prompts.md` 中最终 M-2 提示词执行。
+
+## 2026-06-03 M-2（月格单击选中与双击跳日视图）
+
+- 本轮任务名称：
+  - `M-2（月格单击选中与双击跳日视图）`
+
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 54]`
+
+- 开工前既有 diff：
+  - `manage_instruction/Work_Log.md`
+  - `manage_instruction/Work_Task_Prompts.md`
+
+- 实际修改文件：
+  - `src/ui/month_window.py`
+  - `manage_instruction/Work_Log.md`
+
+- 用户主动选中日期状态的实现方式：
+  - 在 `MonthWindow` 上新增 `self.user_selected_date = None`。
+  - 在 `CalendarCellDelegate` 上新增 `user_selected_date` 状态，并通过 `set_calendar_state(...)` 传入。
+  - 整格高亮不再直接依赖 Qt 原生 `State_Selected`，改为仅在 `cell_date == user_selected_date` 时绘制。
+
+- 单击日期如何只更新选中态、不跳日视图：
+  - 将 `self.calendar.clicked.connect(self.date_selected.emit)` 改为：
+    - `self.calendar.clicked.connect(self._on_calendar_date_clicked)`
+  - `_on_calendar_date_clicked(qdate)` 只做两件事：
+    - 更新 `self.user_selected_date = qdate`
+    - 调用 `_refresh_schedule_marker_cache()` 刷新月格视觉
+  - 单击路径不再 emit `date_selected`，不再触发 `MainWindow.jump_to_date_from_month(...)`。
+
+- 双击日期如何跳转日视图：
+  - 新增：`self.calendar.activated.connect(self._on_calendar_date_activated)`。
+  - `_on_calendar_date_activated(qdate)` 顺序为：
+    - 先复用 `_on_calendar_date_clicked(qdate)` 同步用户选中态
+    - 再调用 `close_day_panels()`
+    - 最后 `self.date_selected.emit(qdate)`
+  - `MainWindow` 继续复用现有连接：
+    - `self.month_window.date_selected.connect(self.jump_to_date_from_month)`
+  - 本轮未修改 `src/ui/main_window.py`。
+
+- 双击跳转前是否调用 `close_day_panels()` 或等价安全接口：
+  - 是。
+  - 新增 `MonthWindow.close_day_panels()`，当前为安全空壳 + 生命周期清理接口。
+
+- 是否预留 `open_day_panels` 或等价生命周期状态：
+  - 是。
+  - 新增 `self.open_day_panels = []`。
+  - `close_day_panels()` 会遍历其中对象，若存在 `close()` 方法则调用，然后清空列表。
+  - 当前未实现真实持久浮窗，仅为后续 `M-4` 预留。
+
+- 是否保持 M-1 三角数量角标颜色/数量逻辑不变：
+  - 是。
+  - 未修改 marker 颜色规则。
+  - 未修改 marker 数量统计。
+  - 未修改 marker 显示条件。
+
+- 是否保持今天金色日期逻辑不变：
+  - 是。
+  - 今天仍通过日期数字金色显示。
+  - 变化仅在于“今天整格高亮”现在由 `user_selected_date` 决定，而不再受默认 selected today 影响。
+
+- 是否保持添加按钮日期来源不变：
+  - 是。
+  - `_on_add_clicked(...)` 仍使用 `self.calendar.selectedDate()`。
+  - 未改 `InlineAddViewMonth`。
+  - 未改 `db_manager.add_schedule(...)` 调用。
+
+- 是否未实现 hover 预览：
+  - 是。
+
+- 是否未实现持久浮窗：
+  - 是。
+
+- 是否未接右键菜单：
+  - 是。
+
+- 验证命令和结果：
+  - `rg -n "user_selected_date|selected_date|date_selected|date_double_clicked|activated|mouseDoubleClickEvent|clicked|calendar\.clicked|jump_to_date_from_month|close_day_panels|open_day_panels|_on_add_clicked|InlineAddViewMonth|marker|schedule_marker|marker_count" src/ui/month_window.py src/ui/main_window.py`
+    - 结果：
+      - `calendar.clicked` 已改为连接 `_on_calendar_date_clicked`
+      - `calendar.activated` 已连接 `_on_calendar_date_activated`
+      - `date_selected.emit(...)` 只出现在激活跳转路径
+      - `jump_to_date_from_month(...)` 仅保留在 `MainWindow` 既有连接处
+  - `from src.ui.month_window import MonthWindow, CalendarCellDelegate, InlineAddViewMonth; from src.ui.main_window import MainWindow`
+    - 结果：通过。
+  - offscreen 构造验证：
+    - `MonthWindow()` 可构造。
+    - `has close_day_panels == True`
+    - `has calendar == True`
+    - `user_selected_date is None`
+  - 单击行为验证：
+    - 直接调用 `_on_calendar_date_clicked(QDate(2026, 6, 15))`
+    - 结果：
+      - `user_selected_date == 2026-06-15`
+      - `date_selected` 未触发
+  - 激活/双击路径验证：
+    - 在 `open_day_panels` 放入带 `close()` 的 dummy 对象后调用 `_on_calendar_date_activated(QDate(2026, 6, 16))`
+    - 结果：
+      - `user_selected_date == 2026-06-16`
+      - dummy `closed == True`
+      - `open_day_panels == []`
+      - `date_selected` 收到 `2026-06-16`
+  - 添加逻辑静态验证：
+    - `_on_add_clicked(...)` 仍使用 `selectedDate()`
+    - `InlineAddViewMonth` 和 `db_manager.add_schedule(...)` 未变
+  - 语法检查：
+    - 使用 `py_compile.compile(..., cfile=%TEMP%\\*.m2.pyc, doraise=True)` 编译：
+      - `src/ui/month_window.py`
+      - `src/ui/main_window.py`
+      - `main.py`
+    - 结果：通过。
+
+- diff 范围检查结果：
+  - 禁止范围均无 diff：
+    - `src/ui/calendar_pop.py`
+    - `src/ui/common/action_context_menu.py`
+    - `src/ui/popups`
+    - `src/ui/common`
+    - `src/ui/dashboard.py`
+    - `src/ui/week_window.py`
+    - `src/ui/todo.py`
+    - `src/ui/todo_board.py`
+    - `src/controllers`
+    - `src/services`
+    - `src/data`
+    - `src/repositories`
+    - `src/theme`
+    - `src/utils/signals.py`
+    - `src/utils/styles.py`
+    - `assets`
+    - `main.py`
+    - `requirements.txt`
+    - `schedule.db`
+    - `manage_instruction/Work_Formulation.md`
+    - `manage_instruction/Work_Instruction.md`
+    - `manage_instruction/Work_Snapshot.md`
+    - `manage_instruction/History_Instruction.md`
+    - `manage_instruction/History_Log.md`
+    - `manage_instruction/ReconstructionDolder`
+  - 允许范围：
+    - `git diff --name-only -- src/ui/month_window.py`：有 diff
+    - `git diff --name-only -- src/ui/main_window.py`：无 diff
+    - `git diff --name-only`：
+      - `manage_instruction/Work_Log.md`
+      - `manage_instruction/Work_Task_Prompts.md`（开工前既有）
+      - `src/ui/month_window.py`
+
+- 未完成事项：
+  - 未实现 hover 只读预览，留待 `M-3`。
+  - 未实现月界面持久浮窗壳，留待 `M-4`。
+  - 未实现添加按钮优先使用用户选中日期，留待 `M-5`。
+  - 未接入月界面右键菜单，留待 `M-6`。
+
+- 风险或疑点：
+  - 本轮选中高亮完全基于 `user_selected_date`，而添加入口仍基于 `QCalendarWidget.selectedDate()`；两者在用户单击日期时通常同步，但产品语义尚未统一，已按要求留到 `M-5` 处理。
+  - `QCalendarWidget.activated(QDate)` 在当前实现中承担“双击/激活跳转”职责；如果后续要严格区分鼠标双击与键盘激活，需要在后续工单单独细化，不在本轮扩大范围。
