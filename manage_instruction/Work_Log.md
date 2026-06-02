@@ -24,6 +24,36 @@
 
 ---
 
+## 2026-06-01 右键菜单子菜单与 hover 细节修正
+
+- 任务目标：
+  - 修正 `ActionContextMenu` 视图子菜单显示/隐藏、位置、宽度、图标颜色和选中背景覆盖范围。
+- 实际修改：
+  - `src/ui/common/action_context_menu.py`
+    - 将菜单项改为 `QWidgetAction` 自绘行，扩大 hover 青色背景覆盖范围，使背景覆盖图标与文字整行。
+    - 主菜单图标与视图子菜单图标统一通过 `load_colored_svg_pixmap(..., "#333333", ...)` 染色，避免白色图标融入浅色背景。
+    - `视图` 项不再依赖 Qt 原生 `setMenu(...)` 子菜单延迟，改为 hover 时手动 `popup(...)`。
+    - 视图子菜单显示位置改为主菜单右边界贴合子菜单左边界，减少原生子菜单重叠。
+    - 视图子菜单固定宽度缩窄为 `150px`，主菜单固定宽度为 `160px`。
+    - 鼠标离开主菜单/子菜单区域后通过零延迟检查关闭视图子菜单，避免原生子菜单长时间残留。
+- 保持不变：
+  - 未修改 Dashboard / WeekWindow 接入逻辑。
+  - 未修改 `action_requested("add")` 与 `view_requested(day/week/month/todo)` 的信号语义。
+  - 未启用换肤、排序、筛选、四象限。
+  - 未修改数据库、服务层、控制层、assets。
+- 验证：
+  - `ActionContextMenu` import 通过。
+  - offscreen 构造通过。
+  - 信号回归通过：`add`、`day/week/month/todo` 仍按原语义发出，禁用项不触发动作。
+  - `DashboardView` / `WeekWindow` import 回归通过。
+  - `py_compile` 通过。
+- 未完成事项：
+  - 未做真实 GUI 截图自动验收；本轮需要用户本地目视确认菜单贴边、宽度和 hover 体验。
+- 风险或疑点：
+  - 子菜单显示改为手动 `popup(...)`，如果后续发现边缘屏幕位置溢出，需要另开小修正处理屏幕边界回退。
+
+---
+
 ## 2026-06-01 右键菜单圆角样式微调
 
 - 任务目标：
