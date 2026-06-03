@@ -17,6 +17,7 @@ from ..utils.styles import StyleManager
 from .header import ToolTipFilter
 from .components import get_colored_icon, SharedMoreMenu
 from .popups.month_day_hover_preview import MonthDayHoverPreview
+from .popups.month_day_panel import MonthDayPanel
 
 
 class CalendarCellDelegate(QStyledItemDelegate):
@@ -767,11 +768,48 @@ class MonthWindow(FramelessMainWindow):
     def _on_calendar_date_clicked(self, qdate):
         self.user_selected_date = qdate
         self._refresh_schedule_marker_cache()
+        self._hide_hover_preview()
+        self._open_day_panel(qdate)
 
     def _on_calendar_date_activated(self, qdate):
-        self._on_calendar_date_clicked(qdate)
+        self.user_selected_date = qdate
+        self._refresh_schedule_marker_cache()
+        self._hide_hover_preview()
         self.close_day_panels()
         self.date_selected.emit(qdate)
+
+    def _remove_day_panel(self, panel):
+        if panel in self.open_day_panels:
+            self.open_day_panels.remove(panel)
+
+    def _find_open_day_panel(self, qdate):
+        self.open_day_panels = [panel for panel in self.open_day_panels if panel is not None]
+        for panel in self.open_day_panels:
+            if getattr(panel, "panel_date", None) == qdate:
+                return panel
+        return None
+
+    def _get_day_panel_position(self, index):
+        month_rect = self.frameGeometry()
+        x = month_rect.topRight().x() + 16
+        y = month_rect.topRight().y() + 24 + index * 36
+        return x, y
+
+    def _open_day_panel(self, qdate):
+        existing_panel = self._find_open_day_panel(qdate)
+        if existing_panel is not None:
+            existing_panel.show()
+            existing_panel.raise_()
+            existing_panel.activateWindow()
+            return existing_panel
+
+        schedules = self.hover_schedule_cache.get(qdate.toPyDate(), [])
+        panel = MonthDayPanel(qdate, schedules)
+        panel.closed.connect(self._remove_day_panel)
+        panel.move(*self._get_day_panel_position(len(self.open_day_panels)))
+        panel.show()
+        self.open_day_panels.append(panel)
+        return panel
 
     def close_day_panels(self):
         for panel in list(self.open_day_panels):
@@ -858,8 +896,14 @@ class MonthWindow(FramelessMainWindow):
         self._refresh_schedule_marker_cache()
 
     def hideEvent(self, event):
+        self.close_day_panels()
         self._hide_hover_preview()
         super().hideEvent(event)
+
+    def closeEvent(self, event):
+        self.close_day_panels()
+        self._hide_hover_preview()
+        super().closeEvent(event)
 
     # 窗口拖拽逻辑
     def mousePressEvent(self, event):

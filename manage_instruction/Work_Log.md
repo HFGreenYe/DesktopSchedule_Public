@@ -48,6 +48,237 @@
 
 ---
 
+## 2026-06-03 M-4 最终提示词写入
+
+- 任务：
+  - 审核并写入 `M-4（月格单击持久浮窗壳）` 最终执行提示词。
+- 实际修改文件：
+  - `manage_instruction/Work_Task_Prompts.md`
+  - `manage_instruction/Work_Log.md`
+- 审核修正：
+  - 在读取上下文中加入 `manage_instruction/Final_Formulation.md`，确保执行窗口先读取最终架构目标和技术债索引。
+  - 明确 `Final_Formulation.md` 本轮禁止修改。
+  - 明确 `MonthDayPanel` 不依赖 `db_manager`、Repository、Service、`MainWindow` 或 `MonthWindow` 具体实例。
+  - 明确 panel 手动关闭时必须从 `open_day_panels` 移除，避免悬挂引用。
+  - 明确同一天重复单击优先复用/置顶已有 panel，不重复打开相同日期面板。
+  - 增加同日复用验证命令和 `month_day_panel.py` 静态依赖检查。
+  - 保留 M-1 三角数量角标、M-2 单击/双击语义、M-3 hover 预览、添加按钮日期来源、右键菜单未接入等边界。
+- 下一步：
+  - 执行窗口可按 `Work_Task_Prompts.md` 中最终 M-4 提示词执行。
+
+## 2026-06-03 M-4（月格单击日期持久浮窗壳）
+
+- 本轮任务名称：
+  - `M-4（月格单击日期持久浮窗壳）`
+
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 57]`
+
+- 开工前既有 diff：
+  - `manage_instruction/Work_Log.md`
+  - `manage_instruction/Work_Task_Prompts.md`
+
+- 实际修改文件：
+  - `src/ui/month_window.py`
+  - `src/ui/popups/month_day_panel.py`
+  - `manage_instruction/Work_Log.md`
+
+- 持久浮窗组件位置：
+  - 新增 `src/ui/popups/month_day_panel.py`
+  - 类名：`MonthDayPanel`
+
+- 持久浮窗是否为独立顶层窗口：
+  - 是。
+  - 使用 `Qt.Tool | Qt.FramelessWindowHint`。
+  - 设置了 `WA_ShowWithoutActivating` 和 `WA_TranslucentBackground`。
+  - 不作为月历内部子控件，避免被 `MonthWindow` 裁剪。
+
+- 单击日期如何打开持久浮窗且不跳日视图：
+  - `_on_calendar_date_clicked(qdate)` 仍先：
+    - 更新 `user_selected_date`
+    - 调用 `_refresh_schedule_marker_cache()` 更新选中高亮
+  - 然后：
+    - 调用 `_hide_hover_preview()`，避免 hover 预览与持久 panel 重叠
+    - 调用 `_open_day_panel(qdate)` 打开外侧 panel
+  - 单击路径不 emit `date_selected`，不跳日视图。
+
+- 持久浮窗定位方式，是否在月界面外侧：
+  - 是。
+  - 基于 `MonthWindow.frameGeometry().topRight()` 计算外侧位置。
+  - `_get_day_panel_position(index)` 当前策略：
+    - `x = topRight.x() + 16`
+    - `y = topRight.y() + 24 + index * 36`
+  - 结果是 panel 优先显示在月界面右侧，并按打开顺序做垂直错位。
+
+- 多个持久浮窗如何并存和错位：
+  - 使用 `open_day_panels` 保存所有已打开 panel。
+  - 不同日期可同时存在多个 panel。
+  - 新 panel 根据当前列表长度做垂直偏移，避免完全重叠。
+
+- 同一天重复单击如何复用已有 panel：
+  - 新增 `_find_open_day_panel(qdate)` 查找同一天已打开 panel。
+  - 若已存在：
+    - 直接 `show()`
+    - `raise_()`
+    - `activateWindow()`
+  - 不重复创建同一天 panel。
+
+- 关闭按钮如何关闭单个 panel：
+  - `MonthDayPanel` 头部提供关闭按钮 `×`。
+  - 点击关闭按钮调用 `close()`。
+  - `MonthDayPanel.closeEvent(...)` 只发出 `closed.emit(self)`。
+  - `MonthWindow` 侧连接 `panel.closed.connect(self._remove_day_panel)`，将其从 `open_day_panels` 移除。
+
+- `open_day_panels` 如何维护：
+  - 打开新 panel 时 append。
+  - `closed` 信号触发 `_remove_day_panel(panel)` 时 remove。
+  - `_find_open_day_panel()` 进入时会先过滤掉 `None` 残留引用。
+
+- `close_day_panels()` 如何关闭全部 panel：
+  - 遍历 `list(self.open_day_panels)`。
+  - 对仍存在且有 `close()` 的对象调用 `close()`。
+  - 最后统一 `self.open_day_panels.clear()`。
+  - 即使用户已手动关闭过，重复关闭也不会抛异常。
+
+- 月界面 hide/close/双击跳转时是否关闭全部 panel：
+  - 是。
+  - 双击 / activated 跳转前：
+    - `_on_calendar_date_activated(qdate)` 先同步 `user_selected_date` 和高亮，再 `_hide_hover_preview()`，再 `close_day_panels()`，最后 `date_selected.emit(qdate)`。
+  - `hideEvent(...)`：
+    - 调用 `close_day_panels()`
+    - 调用 `_hide_hover_preview()`
+  - `closeEvent(...)`：
+    - 调用 `close_day_panels()`
+    - 调用 `_hide_hover_preview()`
+
+- 是否保持 M-1 三角数量角标逻辑不变：
+  - 是。
+  - `schedule_marker_cache` / `schedule_marker_count_cache` 计算未改。
+  - 今天金色日期逻辑未改。
+
+- 是否保持 M-2 单击/双击语义不变：
+  - 是。
+  - `calendar.clicked` 仍连接 `_on_calendar_date_clicked`
+  - `calendar.activated` 仍连接 `_on_calendar_date_activated`
+  - `date_selected.emit(...)` 仍只在 activated 跳转路径触发
+  - 单击仍不 emit `date_selected`
+
+- 是否保持 M-3 hover 预览语义不变：
+  - 是。
+  - hover 预览仍是只读组件 `MonthDayHoverPreview`
+  - hover 路径仍在 `viewport Leave` 后立即隐藏
+  - hover 预览没有被改造成持久 panel
+
+- 是否保持添加按钮日期来源不变：
+  - 是。
+  - `_on_add_clicked(...)` 仍使用 `self.calendar.selectedDate()`
+  - 未改 `InlineAddViewMonth`
+  - 未改数据库写入路径
+
+- 是否未接右键菜单：
+  - 是。
+
+- 是否未写数据库：
+  - 是。
+  - 本轮仅复用现有只读 `hover_schedule_cache` 数据。
+
+- 验证命令和结果：
+  - `rg -n "MonthDayPanel|month_day_panel|open_day_panels|close_day_panels|_open_day_panel|user_selected_date|calendar\.clicked|calendar\.activated|date_selected\.emit|hover_preview|hovered_date|MonthDayHoverPreview|hideEvent|closeEvent|_on_add_clicked|selectedDate|ActionContextMenu|contextMenu" src/ui/month_window.py src/ui/popups`
+    - 结果：持久 panel、生命周期清理、hover/activated/单击链路均已命中。
+  - `rg -n "db_manager|Repository|Service|MainWindow|MonthWindow|DashboardView|TodoBoardWindow|global_signals|switch_view|switch_to_add_page|add_schedule|update_schedule|delete_schedule" src/ui/popups/month_day_panel.py`
+    - 结果：无输出。
+    - 说明：新 panel 组件无运行期业务依赖。
+  - import 验证：
+    - `MonthWindow / CalendarCellDelegate / InlineAddViewMonth / MonthDayHoverPreview`：通过
+    - `MonthDayPanel`：通过
+  - offscreen 构造验证：
+    - `MonthWindow()` 可构造
+    - `has open_day_panels == True`
+    - 初始 `panel count == 0`
+    - `has close_day_panels == True`
+  - 单击打开 panel 验证：
+    - 调用 `_on_calendar_date_clicked(QDate(2026, 6, 15))`
+    - 结果：
+      - `user_selected_date == 2026-06-15`
+      - `date_selected hits == 0`
+      - `panel count == 1`
+  - 同日复用验证：
+    - 同一天连续两次 `_on_calendar_date_clicked(...)`
+    - 结果：`same day counts 1 1`
+  - 关闭全部 panel 验证：
+    - 连续打开两天 panel 后调用 `close_day_panels()`
+    - 结果：`before close 2`，`after close 0`
+  - 双击 / activated 路径验证：
+    - 先打开一个 panel，再调用 `_on_calendar_date_activated(QDate(2026,6,16))`
+    - 结果：
+      - `before activated panels 1`
+      - `after activated panels 0`
+      - `hits == ['2026-06-16']`
+  - M-3 hover 回归验证：
+    - `_show_hover_preview(...)` 后 `hover visible == True`
+    - `_hide_hover_preview()` 后 `hover hidden == False`
+    - 说明：这里打印的是 `isVisible()`，输出 `False` 表示已隐藏；断言通过。
+  - hide / close 生命周期验证：
+    - `hideEvent(QHideEvent())` 前后 panel 数量：`1 -> 0`
+    - `closeEvent(QCloseEvent())` 前后 panel 数量：`1 -> 0`
+  - M-2 行为静态回归：
+    - `calendar.clicked` 仍连接 `_on_calendar_date_clicked`
+    - `calendar.activated` 仍连接 `_on_calendar_date_activated`
+    - `date_selected.emit(...)` 仍只在 activated 路径中
+    - `_on_add_clicked(...)` 仍使用 `selectedDate()`
+  - 语法检查：
+    - 使用 `py_compile.compile(..., cfile=%TEMP%\\*.m4.pyc, doraise=True)` 编译：
+      - `src/ui/month_window.py`
+      - `main.py`
+      - `src/ui/popups/month_day_hover_preview.py`
+      - `src/ui/popups/month_day_panel.py`
+    - 结果：通过。
+
+- diff 范围检查结果：
+  - 禁止范围均无 diff：
+    - `src/ui/main_window.py`
+    - `src/ui/calendar_pop.py`
+    - `src/ui/common/action_context_menu.py`
+    - `src/ui/common`
+    - `src/ui/dashboard.py`
+    - `src/ui/week_window.py`
+    - `src/ui/todo.py`
+    - `src/ui/todo_board.py`
+    - `src/controllers`
+    - `src/services`
+    - `src/data`
+    - `src/repositories`
+    - `src/theme`
+    - `src/utils/signals.py`
+    - `src/utils/styles.py`
+    - `assets`
+    - `main.py`
+    - `requirements.txt`
+    - `schedule.db`
+    - `manage_instruction/Final_Formulation.md`
+    - `manage_instruction/Work_Formulation.md`
+    - `manage_instruction/Work_Instruction.md`
+    - `manage_instruction/Work_Snapshot.md`
+    - `manage_instruction/History_Instruction.md`
+    - `manage_instruction/History_Log.md`
+    - `manage_instruction/ReconstructionDolder`
+  - 允许范围：
+    - `src/ui/month_window.py`
+    - `src/ui/popups/month_day_panel.py`
+    - `manage_instruction/Work_Log.md`
+    - `manage_instruction/Work_Task_Prompts.md`（开工前既有）
+
+- 未完成事项：
+  - 未实现添加按钮优先使用用户选中日期，留待 `M-5`。
+  - 未接入月界面右键菜单，留待 `M-6`。
+  - 当前持久 panel 仍是壳 / 简版只读列表，未提供编辑能力。
+
+- 风险或疑点：
+  - 当前 panel 外侧定位只做了右侧 + 垂直偏移，未做屏幕边界回退；如果屏幕右边界不足，后续需单开小工单处理，不在本轮扩大。
+  - `raise_()` / `activateWindow()` 在 offscreen 验证下只能确认调用路径，不代表真实桌面环境下一定带来完全一致的焦点效果；当前不影响功能边界。
+
+---
+
 ## 2026-06-02 M-0 复核锚点更新
 
 - 任务目标：
