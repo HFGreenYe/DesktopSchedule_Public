@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QFrame, QToolButton, QLineEdit, 
                              QCalendarWidget, QApplication, QTableView, 
                              QStyledItemDelegate, QStyle, QStyleOptionViewItem,
-                             QGridLayout, QTextEdit) 
+                             QGridLayout, QTextEdit, QComboBox)
 from PyQt6.QtCore import Qt, pyqtSignal, QDate, QTime, QTimer, QRectF, QSize, QEvent
 from PyQt6.QtGui import QPainter, QPainterPath, QColor, QBrush, QLinearGradient, QIcon, QPen, QPalette, QPixmap, QGuiApplication
 from PyQt6.QtSvg import QSvgRenderer
@@ -192,12 +192,23 @@ class InlineAddViewMonth(QWidget):
     """月视图左侧专属的极简添加组件"""
     saved = pyqtSignal()
     canceled = pyqtSignal()
+    req_open_time_picker = pyqtSignal(object, object)
+    req_open_alarm_picker = pyqtSignal(object, bool, int)
+    req_open_list_picker = pyqtSignal(object, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.selected_date = None
         self.is_schedule_mode = True
+        self.selected_start_time = None
+        self.selected_end_time = None
+        self.selected_reminder = None
+        self.selected_alarm_duration = 0
+        self.selected_list_id = None
+        self.selected_list_name = None
+        self.selected_is_alarm_mode = False
         self._setup_ui()
+        self._update_summary_labels()
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -234,20 +245,70 @@ class InlineAddViewMonth(QWidget):
         icons_layout = QHBoxLayout()
         icons_layout.setContentsMargins(0, 0, 0, 0)
         icons_layout.setSpacing(4)
-        
-        for icon_name in ["time.svg", "alarm.svg", "list.svg"]:
-            btn = QPushButton()
-            btn.setFixedSize(22, 22)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            pixmap = get_colored_icon(icon_name, "#FFFFFF", 14)
-            if not pixmap.isNull(): btn.setIcon(QIcon(pixmap))
-            btn.setStyleSheet("QPushButton { background: transparent; border: none; } QPushButton:hover { background: rgba(255,255,255,0.2); border-radius: 3px; }")
-            icons_layout.addWidget(btn)
-        
+
+        self.btn_time = self._create_icon_btn("time.svg", "时间设置待接入")
+        self.btn_alarm = self._create_icon_btn("alarm.svg", "提醒设置待接入")
+        self.btn_list = self._create_icon_btn("list.svg", "清单选择待接入")
+
+        self.btn_time.clicked.connect(lambda: self._show_pending_toast("时间选择将在 M-5d 接入"))
+        self.btn_alarm.clicked.connect(lambda: self._show_pending_toast("提醒选择将在 M-5e 接入"))
+        self.btn_list.clicked.connect(lambda: self._show_pending_toast("清单选择将在 M-5e 接入"))
+
+        icons_layout.addWidget(self.btn_time)
+        icons_layout.addWidget(self.btn_alarm)
+        icons_layout.addWidget(self.btn_list)
         icons_layout.addStretch()
         layout.addLayout(icons_layout)
 
-        # 4. 底部按钮
+        # 4. 轻量状态壳：紧急性 / 重复
+        shell_row = QHBoxLayout()
+        shell_row.setContentsMargins(0, 0, 0, 0)
+        shell_row.setSpacing(6)
+
+        self.lbl_priority = QLabel("紧急性")
+        self.lbl_priority.setStyleSheet("color: rgba(255,255,255,0.85); font-size: 11px; font-family: 'Microsoft YaHei';")
+        self.combo_priority = QComboBox()
+        self.combo_priority.addItems(["无", "低", "中", "高"])
+        self.combo_priority.setFixedHeight(22)
+        self.combo_priority.setStyleSheet(self._combo_style())
+
+        self.lbl_repeat = QLabel("重复")
+        self.lbl_repeat.setStyleSheet("color: rgba(255,255,255,0.85); font-size: 11px; font-family: 'Microsoft YaHei';")
+        self.combo_repeat = QComboBox()
+        self.combo_repeat.addItems(["无", "每天", "每周", "每月"])
+        self.combo_repeat.setFixedHeight(22)
+        self.combo_repeat.setStyleSheet(self._combo_style())
+
+        shell_row.addWidget(self.lbl_priority)
+        shell_row.addWidget(self.combo_priority, 1)
+        shell_row.addSpacing(8)
+        shell_row.addWidget(self.lbl_repeat)
+        shell_row.addWidget(self.combo_repeat, 1)
+        layout.addLayout(shell_row)
+
+        # 5. 当前状态摘要
+        self.info_card = QFrame()
+        self.info_card.setStyleSheet("""
+            QFrame {
+                background: rgba(255, 255, 255, 0.08);
+                border: 1px solid rgba(255,255,255,0.15);
+                border-radius: 6px;
+            }
+        """)
+        info_layout = QVBoxLayout(self.info_card)
+        info_layout.setContentsMargins(8, 8, 8, 8)
+        info_layout.setSpacing(4)
+
+        self.lbl_info_time = QLabel("时间未设置")
+        self.lbl_info_alarm = QLabel("无提醒")
+        self.lbl_info_list = QLabel("清单未选择")
+        for label in (self.lbl_info_time, self.lbl_info_alarm, self.lbl_info_list):
+            label.setStyleSheet("color: rgba(255,255,255,0.88); font-size: 11px; font-family: 'Microsoft YaHei';")
+            info_layout.addWidget(label)
+
+        layout.addWidget(self.info_card)
+
+        # 6. 底部按钮
         btn_layout = QHBoxLayout()
         btn_layout.setContentsMargins(0, 0, 0, 0)
         
@@ -267,10 +328,112 @@ class InlineAddViewMonth(QWidget):
         btn_layout.addWidget(self.btn_save)
         layout.addLayout(btn_layout)
 
-    def reset(self, target_date):
-        self.selected_date = target_date
+    def _create_icon_btn(self, icon_name, tooltip_text):
+        btn = QPushButton()
+        btn.setFixedSize(22, 22)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        pixmap = get_colored_icon(icon_name, "#FFFFFF", 14)
+        if not pixmap.isNull():
+            btn.setIcon(QIcon(pixmap))
+        btn.setStyleSheet(
+            "QPushButton { background: transparent; border: none; } "
+            "QPushButton:hover { background: rgba(255,255,255,0.2); border-radius: 3px; }"
+        )
+        btn._tooltip = ToolTipFilter(tooltip_text, btn)
+        btn.installEventFilter(btn._tooltip)
+        return btn
+
+    def _combo_style(self):
+        return """
+            QComboBox {
+                background: rgba(255, 255, 255, 0.08);
+                border: 1px solid rgba(255,255,255,0.25);
+                border-radius: 4px;
+                color: white;
+                font-size: 11px;
+                padding-left: 6px;
+                font-family: 'Microsoft YaHei';
+            }
+            QComboBox::drop-down { border: none; width: 14px; }
+            QComboBox QAbstractItemView {
+                background: white;
+                color: #333333;
+                border: 1px solid #dddddd;
+                outline: none;
+            }
+        """
+
+    def _show_pending_toast(self, message):
+        if hasattr(self.window(), "show_toast"):
+            self.window().show_toast(message)
+
+    def _format_state_value(self, value):
+        if value is None:
+            return ""
+        return str(value)
+
+    def _update_summary_labels(self):
+        start_text = self._format_state_value(self.selected_start_time)
+        end_text = self._format_state_value(self.selected_end_time)
+        reminder_text = self._format_state_value(self.selected_reminder)
+
+        if start_text and end_text:
+            self.lbl_info_time.setText(f"时间：{start_text} - {end_text}")
+        elif end_text:
+            self.lbl_info_time.setText(f"时间：{end_text}")
+        elif start_text:
+            self.lbl_info_time.setText(f"时间：{start_text}")
+        else:
+            self.lbl_info_time.setText("时间未设置")
+
+        if reminder_text:
+            alarm_prefix = "强提醒 " if self.selected_is_alarm_mode else ""
+            self.lbl_info_alarm.setText(f"提醒：{alarm_prefix}{reminder_text}")
+        else:
+            self.lbl_info_alarm.setText("无提醒")
+
+        if self.selected_list_name:
+            self.lbl_info_list.setText(f"清单：{self.selected_list_name}")
+        elif self.selected_list_id is not None:
+            self.lbl_info_list.setText(f"清单：#{self.selected_list_id}")
+        else:
+            self.lbl_info_list.setText("清单未选择")
+
+    def set_time_data(self, start_time, end_time):
+        self.selected_start_time = start_time
+        self.selected_end_time = end_time
+        self._update_summary_labels()
+
+    def set_alarm_data(self, reminder_time, is_alarm_mode=False, alarm_duration=0):
+        self.selected_reminder = reminder_time
+        self.selected_is_alarm_mode = is_alarm_mode
+        self.selected_alarm_duration = alarm_duration
+        self._update_summary_labels()
+
+    def set_list_data(self, category_id, category_name):
+        self.selected_list_id = category_id
+        self.selected_list_name = category_name
+        self._update_summary_labels()
+
+    def reset_form(self, target_date=None):
+        if target_date is not None:
+            self.selected_date = target_date
+
         self.input_title.clear()
         self.input_desc.clear()
+        self.selected_start_time = None
+        self.selected_end_time = None
+        self.selected_reminder = None
+        self.selected_alarm_duration = 0
+        self.selected_list_id = None
+        self.selected_list_name = None
+        self.selected_is_alarm_mode = False
+        self.combo_priority.setCurrentIndex(0)
+        self.combo_repeat.setCurrentIndex(0)
+        self._update_summary_labels()
+
+    def reset(self, target_date):
+        self.reset_form(target_date)
 
     def _on_save(self):
         title = self.input_title.text().strip()

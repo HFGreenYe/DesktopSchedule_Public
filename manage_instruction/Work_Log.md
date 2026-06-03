@@ -1910,6 +1910,212 @@
   - `AddScheduleViewWeek` 与 `WeekWindow` 当前 list picker 链路本身缺 `list_type` 过滤，这说明“周版能跑”并不等于“周版语义适合作为月界面模板”；后续月界面应更偏向主添加页语义。
   - 当前真实 `repeat_rule` 已存在 `none` 和 `无` 双轨历史值，若 `M-5f` 不谨慎，容易继续扩大混用范围；建议本月界面新增写入继续保持 `none` 作为最小兼容闭环。
 
+## 2026-06-03 M-5c（月界面添加表单 UI 壳补齐）
+
+- 本轮任务名称：
+  - `M-5c（月界面添加表单 UI 壳补齐）`
+
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 61]`
+
+- 实际修改文件：
+  - `src/ui/month_window.py`
+  - `manage_instruction/Work_Log.md`
+
+- 开工前既有 diff：
+  - `manage_instruction/Work_Log.md`
+  - `manage_instruction/Work_Task_Prompts.md`
+
+- `InlineAddViewMonth` 新增状态字段清单：
+  - `selected_start_time`
+  - `selected_end_time`
+  - `selected_reminder`
+  - `selected_alarm_duration`
+  - `selected_list_id`
+  - `selected_list_name`
+  - 额外补充内部展示字段：
+    - `selected_is_alarm_mode`
+
+- 新增回填接口清单：
+  - `set_time_data(start_time, end_time)`
+  - `set_alarm_data(reminder_time, is_alarm_mode=False, alarm_duration=0)`
+  - `set_list_data(category_id, category_name)`
+
+- 是否新增 picker 请求信号占位：
+  - 是。
+  - 新增：
+    - `req_open_time_picker = pyqtSignal(object, object)`
+    - `req_open_alarm_picker = pyqtSignal(object, bool, int)`
+    - `req_open_list_picker = pyqtSignal(object, str)`
+
+- 是否连接真实 picker：
+  - 否。
+  - 本轮只声明信号，不在 `MonthWindow` 中连接，不 emit 到真实 picker。
+
+- 是否新增 `MonthWindow.page_time / page_alarm / page_list`：
+  - 否。
+
+- 是否新增 `MonthWindow.go_to_*_picker`：
+  - 否。
+
+- `btn_time / btn_alarm / btn_list` 是否作为实例属性保留：
+  - 是。
+  - 三个按钮均已转为明确实例属性，并保留在 `InlineAddViewMonth` 内部。
+
+- UI 壳新增内容：
+  - 已保留并继续使用：
+    - 标题输入框
+    - 详情输入框
+  - 已新增可见壳：
+    - 时间按钮 `btn_time`
+    - 提醒按钮 `btn_alarm`
+    - 清单按钮 `btn_list`
+    - 紧急性显示 / 控件壳：`combo_priority`
+    - 重复规则显示 / 控件壳：`combo_repeat`
+    - 当前状态摘要：
+      - `lbl_info_time`
+      - `lbl_info_alarm`
+      - `lbl_info_list`
+  - 按钮点击反馈：
+    - 当前点击只会通过 `window().show_toast(...)` 提示“将在 M-5d / M-5e 接入”
+    - 不打开 picker
+    - 不修改业务状态
+
+- 必要 Qt import 是否仅在 `src/ui/month_window.py` 内补充：
+  - 是。
+  - 本轮只补充了 `QComboBox` 导入。
+
+- `_on_save(...)` 兼容性说明：
+  - 未新增保存字段。
+  - 未写入提醒字段。
+  - 未写入 picker 状态。
+  - 未让紧急性 / 重复 UI 壳影响保存。
+  - 保存结构仍为旧逻辑：
+    - `title`
+    - `item_type`
+    - `priority`
+    - `repeat_rule`
+    - `description`
+    - `start_time`
+    - `end_time`
+    - `category_id`
+
+- `_on_save(...)` 方法体隔离检查结果：
+  - 原命令直接 `print(inspect.getsource(...))` 时因为 Windows `gbk` 控制台无法输出源码中的表情字符而报 `UnicodeEncodeError`，不是逻辑失败。
+  - 使用等价断言命令复跑通过：
+    - `_on_save isolation ok`
+  - 结论：
+    - `_on_save(...)` 方法体中未出现：
+      - `reminder_time`
+      - `is_alarm`
+      - `alarm_duration`
+      - `selected_start_time`
+      - `selected_end_time`
+      - `selected_reminder`
+      - `selected_list_id`
+
+- import 验证结果：
+  - 命令：
+    - `from src.ui.month_window import MonthWindow, InlineAddViewMonth`
+  - 结果：
+    - `month imports ok <class 'src.ui.month_window.MonthWindow'> <class 'src.ui.month_window.InlineAddViewMonth'>`
+
+- offscreen 构造验证结果：
+  - `InlineAddViewMonth()` 可构造。
+  - `btn_time / btn_alarm / btn_list` 均存在。
+  - 输出：
+    - `created True`
+    - `has btn_time True`
+    - `has btn_alarm True`
+    - `has btn_list True`
+
+- reset 状态验证结果：
+  - 先调用：
+    - `set_time_data('09:00','10:00')`
+    - `set_alarm_data('09:00', True, 10)`
+    - `set_list_data(123, '测试清单')`
+  - 再调用：
+    - `reset_form()`
+  - 结果：
+    - `selected_start_time is None`
+    - `selected_end_time is None`
+    - `selected_reminder is None`
+    - `selected_alarm_duration == 0`
+    - `selected_list_id is None`
+    - `selected_list_name is None`
+
+- 回填接口验证结果：
+  - 调用：
+    - `set_time_data('08:30','09:30')`
+    - `set_alarm_data('08:20', True, 5)`
+    - `set_list_data(7, '工作')`
+  - 结果：
+    - `selected_start_time == '08:30'`
+    - `selected_end_time == '09:30'`
+    - `selected_reminder == '08:20'`
+    - `selected_alarm_duration == 5`
+    - `selected_list_id == 7`
+    - `selected_list_name == '工作'`
+
+- picker 未接入验证结果：
+  - `rg -n "go_to_time_picker|go_to_alarm_picker|go_to_list_picker|page_time|page_alarm|page_list" src/ui/month_window.py`
+  - 结果：
+    - 无输出（退出码 1，视为通过）
+  - 结论：
+    - 本轮未新增任何月界面真实 picker 页面栈或路由函数。
+
+- M-1 到 M-5 回归定位结果：
+  - `rg -n "schedule_markers|marker|paint|mouseDoubleClickEvent|selected_date|jump|persistent|MonthDayPanel|switch_to_add_page|target_date|reset_form" src/ui/month_window.py src/ui/popups/month_day_panel.py`
+  - 结果：
+    - `CalendarCellDelegate.paint(...)`、marker 缓存、`MonthDayPanel`、`_get_add_target_date()`、`_on_add_clicked()`、`inline_add_view.reset(target_date)` 仍在。
+    - 本轮只新增 `reset_form(...)`，并保留 `reset(target_date)` 调用语义不变。
+  - 结论：
+    - 未碰月格绘制、双击跳转、持久 panel、添加目标日期解析逻辑。
+
+- `py_compile` 结果：
+  - 命令：
+    - `python -m py_compile src/ui/month_window.py main.py`
+  - 结果：
+    - 通过。
+
+- diff 范围检查结果：
+  - 禁止范围检查：
+    - `src/ui/main_window.py`：无 diff
+    - `src/ui/add_view.py`：无 diff
+    - `src/ui/add_view_week.py`：无 diff
+    - `src/ui/week_window.py`：无 diff
+    - `src/ui/calendar_pop.py`：无 diff
+    - `src/ui/common`：无 diff
+    - `src/ui/popups`：无 diff
+    - `src/ui/utils`：无 diff
+    - `src/controllers`：无 diff
+    - `src/data`：无 diff
+    - `src/repositories`：无 diff
+    - `src/services`：无 diff
+    - `src/theme`：无 diff
+    - `src/utils/signals.py`：无 diff
+    - `src/utils/styles.py`：无 diff
+    - `assets`：无 diff
+    - `main.py`：无 diff
+    - `requirements.txt`：无 diff
+    - `schedule.db`：无 diff
+  - 总 diff：
+    - `manage_instruction/Work_Log.md`
+    - `manage_instruction/Work_Task_Prompts.md`
+    - `src/ui/month_window.py`
+  - 说明：
+    - `manage_instruction/Work_Task_Prompts.md` 为开工前既有 diff，本轮未改。
+
+- 未完成事项：
+  - 未接时间 picker，留待 `M-5d`。
+  - 未接提醒 / 清单 picker，留待 `M-5e`。
+  - 未让紧急性 / 重复控件影响保存，留待 `M-5f`。
+  - 未调整 `_on_save(...)` 的真实入库字段，留待 `M-5f`。
+
+- 风险或疑点：
+  - 本轮 `combo_priority / combo_repeat` 仅为 UI 壳，占位可见但不参与保存；如果顾问要求完全不可操作，可在下一轮改成只读展示壳，但当前实现已满足“可操作但不得影响保存”的约束。
+  - 为支持提醒摘要文案，本轮额外引入了 `selected_is_alarm_mode`。它只用于 UI 展示，不参与保存，也不影响验收要求中的字段隔离。
+
 - 复核后样式微调：
   - 触发原因：
     - 视觉复核指出 hover 预览弹窗圆角未明显生效，且黑底白字与天气 tooltip 不一致。
@@ -1922,3 +2128,51 @@
   - 行为确认：
     - 本次只改 hover 预览视觉样式。
     - 不改变 hover 命中、隐藏、只读数据、M-1 角标、M-2 单击/双击语义和添加逻辑。
+
+## M-5c 最终提示词写入
+
+- 时间：2026-06-03
+
+- 任务：
+  - 根据 M-5b 执行窗口建议与复核意见，整理并写入 `M-5c（月界面添加表单 UI 壳补齐）` 最终执行提示词。
+
+- 实际修改文件：
+  - `manage_instruction/Work_Task_Prompts.md`
+  - `manage_instruction/Work_Log.md`
+
+- 本次提示词修订重点：
+  - 明确 M-5c 只做 UI 壳、状态字段、picker 请求信号占位和回填接口。
+  - 明确不接真实时间 / 提醒 / 清单 picker。
+  - 明确不新增 `MonthWindow.page_time/page_alarm/page_list`。
+  - 明确不新增 `MonthWindow.go_to_*_picker`。
+  - 明确 `_on_save(...)` 不新增保存字段，不写入 `reminder_time/is_alarm/alarm_duration`。
+  - 明确新增按钮需保留为 `self.btn_time` / `self.btn_alarm` / `self.btn_list`，避免后续 M-5d/M-5e 返工。
+  - 明确如需新增 `QComboBox` 等 Qt import，只允许在 `src/ui/month_window.py` 内补充。
+  - 将 `_on_save(...)` 检查收紧为方法体隔离检查，避免新状态字段出现在 reset/回填接口时造成误判。
+
+- 范围说明：
+  - 本次只写执行提示词和日志。
+  - 不修改源码。
+  - 不修改规划合同。
+  - 不进入 M-5c 源码执行。
+
+- 下一步候选：
+  - 执行窗口按 `Work_Task_Prompts.md` 执行 M-5c。
+
+## M-5c 复核修正
+
+- 时间：2026-06-03
+
+- 触发原因：
+  - 顾问窗口按提示词和日志复核 M-5c 执行结果时，`git diff --check` 发现 `src/ui/month_window.py` 第 6 行存在 trailing whitespace。
+
+- 实际修改文件：
+  - `src/ui/month_window.py`
+  - `manage_instruction/Work_Log.md`
+
+- 修正内容：
+  - 删除 `QComboBox` import 行尾多余空格。
+
+- 行为影响：
+  - 仅格式修正。
+  - 不改变 `InlineAddViewMonth` UI 壳、状态字段、回填接口、picker 占位信号和保存逻辑。

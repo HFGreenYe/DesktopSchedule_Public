@@ -1,470 +1,434 @@
-# Work Task Prompts
+# 当前待执行提示词：M-5c
 
-用途：保存主窗口审核后的最终执行提示词或当前复核锚点。执行窗口只应执行本文件中的最终版本。
+## M-5c：月界面添加表单 UI 壳补齐
 
----
-
-# 当前待执行提示词：M-5b
-
-## M-5b：月界面添加表单能力只读审查与 picker 承接方案确认
-
-请执行 `M-5b：月界面添加表单能力只读审查与 picker 承接方案确认`。本轮只做静态审查、代码阅读、搜索、只读数据检查和日志记录，不修改源码，不写数据库，不实现 UI，不接 picker。
+请执行 `M-5c：月界面添加表单 UI 壳补齐`。本轮只补齐月界面 `InlineAddViewMonth` 的添加表单 UI 壳、内部状态字段、picker 请求信号占位和回填接口。本轮不接真实 picker，不修改 `_on_save(...)` 保存字段，不写数据库，不修改主界面 / 周界面添加页，不进入 M-5d / M-5e / M-5f。
 
 ## 1. 本轮目标
 
-当前 `M-5（月界面添加按钮日期来源联动）` 已完成，月界面添加按钮已经能优先使用用户选中日期。但 `InlineAddViewMonth` 仍是极简添加壳，不能直接进入 `M-6（月界面右键菜单接入）`。
+基于 `M-5b` 只读审查结论，在 `src/ui/month_window.py` 内对 `InlineAddViewMonth` 做最小 UI 壳补齐：
 
-本轮目标是只读审查月界面添加表单能力，确认后续 `M-5c` 到 `M-5g` 的真实边界：
+- 补齐月界面左侧添加表单的展示壳，使其更接近主界面添加表单的能力布局。
+- 增加内部状态字段，为后续时间、提醒、清单 picker 接入预留承接位置。
+- 增加回填接口，为后续 `M-5d / M-5e` 做准备。
+- 保留时间 / 提醒 / 清单按钮为可定位实例属性：
+  - `self.btn_time`
+  - `self.btn_alarm`
+  - `self.btn_list`
+- 本轮不打开真实 picker。
+- 本轮不连接 `MainWindow` picker。
+- 本轮不新增 `MonthWindow` picker 页面栈。
+- 本轮不改变 `_on_save(...)` 当前入库字段。
+- 本轮不改变已有保存逻辑和数据库写入行为。
 
-- 审查 `InlineAddViewMonth` 与主/周添加页字段差异。
-- 审查主界面 / 周界面 picker 承接链路。
-- 确认月界面 picker 承接方案候选：
-  - 月界面内部页面栈。
-  - 复用主窗口 picker。
-  - 月界面左侧局部切换 picker。
-- 确认 picker 返回后如何回填 `InlineAddViewMonth`。
-- 确认 picker 打开期间 hover 预览 / 持久 panel 是否需要隐藏。
-- 确认时间语义：
-  - 默认日期。
-  - 是否允许跨天。
-  - 未选时间时继续 `00:00` 兼容还是提示必须选择时间。
-- 确认提醒依赖时间规则：
-  - 未设置 start/end 时是否禁止设置提醒。
-  - target_time 使用 start 优先还是 end 优先。
-- 确认清单 picker 的 `list_type` 建议。
-- 确认月界面是否只支持添加日程，还是也支持待办。
-- 确认 `repeat_rule` 的真实入库值、显示值和 `ScheduleRepeatService` 归一化规则。
-- 输出 `M-5c` 到 `M-5g` 的精确边界、允许文件、风险等级和验收重点。
+本轮目标是“可见 UI 壳 + 状态承接接口”，不是完整添加功能闭环。
 
-本轮不直接修改 `src/`。
+## 2. 允许 / 禁止
 
-## 2. 允许/禁止
+### 允许修改
 
-允许修改：
-
+- `src/ui/month_window.py`
 - `manage_instruction/Work_Log.md`
 - `manage_instruction/Work_Task_Prompts.md`（仅在需要维护本轮复核锚点时）
 
-禁止修改：
+如 UI 壳需要新增 Qt 控件类导入，例如 `QComboBox`，只能在 `src/ui/month_window.py` 内补充必要 import，不得改其他文件。
 
-- `src/`
+### 禁止修改
+
+- `src/ui/main_window.py`
+- `src/ui/add_view.py`
+- `src/ui/add_view_week.py`
+- `src/ui/week_window.py`
+- `src/ui/calendar_pop.py`
+- `src/ui/common/`
+- `src/ui/popups/`
+- `src/ui/utils/`
+- 除 `src/ui/month_window.py` 以外的任何 `src/ui/` 文件
+- `src/controllers/`
+- `src/data/`
+- `src/repositories/`
+- `src/services/`
+- `src/theme/`
+- `src/utils/signals.py`
+- `src/utils/styles.py`
 - `assets/`
 - `main.py`
 - `requirements.txt`
 - `schedule.db`
+- `.env`
+- `.gitignore`
 - `manage_instruction/Final_Formulation.md`
 - `manage_instruction/Work_Formulation.md`
 - `manage_instruction/Work_Instruction.md`
-- `manage_instruction/Work_Snapshot.md`
-- `manage_instruction/History_Instruction.md`
-- `manage_instruction/History_Log.md`
 - `manage_instruction/ReconstructionDolder/`
 
-禁止事项：
+### 禁止事项
 
-- 不改源码。
-- 不改 UI。
-- 不接 picker。
-- 不新增信号。
-- 不新增页面栈。
-- 不修改 `InlineAddViewMonth`。
-- 不修改主界面 / 周界面添加页。
-- 不修改 `TimePickerView` / `AlarmPickerView` / `ListPickerView`。
-- 不修改 `ScheduleRepeatService`。
-- 不改数据库字段。
-- 不写数据库。
+- 不接真实时间 picker。
+- 不接真实提醒 picker。
+- 不接真实清单 picker。
+- 不新增 `MonthWindow.page_time / page_alarm / page_list`。
+- 不新增 `MonthWindow.go_to_time_picker / go_to_alarm_picker / go_to_list_picker`。
+- 不连接 `MainWindow` 的 picker 页面或方法。
+- 不修改 `_on_save(...)` 保存字段。
+- 不新增 `reminder_time` / `is_alarm` / `alarm_duration` 入库。
+- 不让 UI 壳阶段的紧急性 / 重复控件影响保存。
+- 不新增重复规则。
+- 不新增英文 `repeat_rule`。
+- 不新增数据库字段。
+- 不修改数据层、服务层、控制层。
+- 不修改月界面右键菜单。
 - 不提交 Git。
-- 不生成 M-5c/M-5d 等源码实现。
 
 若开工前已有 diff，必须在 `Work_Log.md` 中单独记录，并区分是否属于本轮产生。
 
 ## 3. 具体任务
 
-### 3.1 读取规划与当前日志
+### 3.1 读取当前依据
 
 读取：
 
 ```powershell
-Get-Content -Path manage_instruction\Final_Formulation.md -Encoding UTF8
-Get-Content -Path manage_instruction\Work_Formulation.md -Encoding UTF8
 Get-Content -Path manage_instruction\Work_Instruction.md -Encoding UTF8
-Get-Content -Path manage_instruction\Work_Task_Prompts.md -Encoding UTF8
 Get-Content -Path manage_instruction\Work_Log.md -Encoding UTF8
-```
-
-重点确认：
-
-- M-5 后续路线是否已写入。
-- M-6 是否已明确后移。
-- 当前下一步是否为 M-5b。
-- 最终架构约束中对 UI popup、窗口膨胀、功能补充阶段的要求。
-- 后续功能开发是否仍应保持渐进式、小工单、低耦合。
-
-### 3.2 读取月界面添加相关源码
-
-读取：
-
-```powershell
+Get-Content -Path manage_instruction\Work_Task_Prompts.md -Encoding UTF8
+Get-Content -Path manage_instruction\Final_Formulation.md -Encoding UTF8
 Get-Content -Path src\ui\month_window.py -Encoding UTF8
-```
-
-重点审查：
-
-- `InlineAddViewMonth` 当前字段、按钮和保存逻辑。
-- `InlineAddViewMonth.reset(target_date)` 当前行为。
-- `InlineAddViewMonth._on_save(...)` 当前写入字段。
-- `MonthWindow._get_add_target_date(...)` 当前日期来源。
-- `MonthWindow._on_add_clicked(...)` 当前添加入口。
-- `MonthWindow._on_schedule_saved(...)` 当前刷新链路。
-- hover 预览和持久 panel 当前缓存是否与添加保存后刷新相关。
-
-必须输出：
-
-- 当前月添加表单已有字段。
-- 当前月添加表单缺失字段。
-- 当前保存字段与主/周添加页的差异。
-- 当前保存后刷新是否覆盖 marker、hover cache、持久 panel。
-
-### 3.3 读取主界面和周界面添加页
-
-读取：
-
-```powershell
 Get-Content -Path src\ui\add_view.py -Encoding UTF8
-Get-Content -Path src\ui\add_view_week.py -Encoding UTF8
 ```
-
-重点审查：
-
-- 主界面 `AddScheduleView`：
-  - 字段状态。
-  - 信号。
-  - picker 请求方式。
-  - 回填方法。
-  - `_on_save(...)` 写入字段。
-  - 时间/提醒/清单/紧急性/重复规则逻辑。
-- 周界面 `AddScheduleViewWeek`：
-  - 与主界面差异。
-  - 是否更适合月界面竖向布局参考。
-  - picker 请求和回填方式。
-  - `_on_save(...)` 写入字段。
-
-必须输出：
-
-- `InlineAddViewMonth` 与 `AddScheduleView` 字段差异表。
-- `InlineAddViewMonth` 与 `AddScheduleViewWeek` 字段差异表。
-- 哪些业务语义应复用。
-- 哪些 UI 结构不应复制。
-- 月界面更适合参考主界面还是周界面，或二者混合。
-
-### 3.4 读取 picker 和承接链路
-
-读取：
-
-```powershell
-Get-Content -Path src\ui\time_picker.py -Encoding UTF8
-Get-Content -Path src\ui\time_picker_week.py -Encoding UTF8
-Get-Content -Path src\ui\alarm_picker.py -Encoding UTF8
-Get-Content -Path src\ui\alarm_picker_week.py -Encoding UTF8
-Get-Content -Path src\ui\list_picker.py -Encoding UTF8
-Get-Content -Path src\ui\main_window.py -Encoding UTF8
-Get-Content -Path src\ui\week_window.py -Encoding UTF8
-```
-
-重点审查：
-
-- 主界面 picker 承接：
-  - `req_open_time_picker`
-  - `req_open_alarm_picker`
-  - `req_open_list_picker`
-  - `go_to_time_picker`
-  - `go_to_alarm_picker`
-  - `go_to_list_picker`
-  - `set_time_data`
-  - `set_alarm_data`
-  - `set_list_data`
-- 周界面 picker 承接：
-  - 是否自带 `page_time`、`page_alarm`、`page_list`。
-  - 是否使用 week 专用 picker。
-  - 回填方式。
-- picker 本身：
-  - `TimePickerView` / `TimePickerViewWeek` 的确认信号。
-  - `AlarmPickerView` / `AlarmPickerViewWeek` 的确认信号。
-  - `ListPickerView.load_data(current_selected_id, list_type)` 行为。
-  - `ListPickerView.confirm_requested` 参数。
-
-必须输出：
-
-- 月界面 picker 承接的 3 个候选方案。
-- 每个方案的优点、风险、预计修改文件。
-- 推荐方案。
-- M-5d/M-5e 应采用哪个方案。
-- picker 打开时是否隐藏 hover 预览。
-- picker 打开时是否关闭或保留持久 panel。
-- picker 返回后如何回到 `InlineAddViewMonth`。
-
-### 3.5 审查时间语义
-
-只读判断：
-
-- 当前主界面日程模式是否要求时间。
-- 当前周界面日程模式是否要求时间。
-- 当前月界面是否仍使用 `00:00` 兜底。
-- 月界面后续是否应：
-  - 沿用主/周“必须设置时间”的语义；
-  - 还是暂时保留 `00:00` 兼容；
-  - 或先 UI 壳阶段不改变保存语义，到 M-5d 再处理。
-- 打开时间 picker 时默认日期应如何传入：
-  - 使用 `_get_add_target_date()`。
-  - 使用 `user_selected_date`。
-  - 使用 `calendar.selectedDate()` fallback。
-- 是否允许跨天 start/end。
-- 如果不允许跨天，应在哪里限制或提示。
-
-必须输出：
-
-- 推荐时间语义。
-- M-5d 需要实现的最小边界。
-- M-5d 不应碰的逻辑。
-
-### 3.6 审查提醒语义
-
-只读判断：
-
-- 主界面未设置时间时如何处理提醒按钮。
-- 周界面未设置时间时如何处理提醒按钮。
-- target_time 使用 start 优先还是 end 优先。
-- 保存字段：
-  - `reminder_time`
-  - `is_alarm`
-  - `alarm_duration`
-- 月界面后续如何复用该语义。
-
-必须输出：
-
-- M-5e 提醒接入边界。
-- 未设置时间时是否禁用提醒或 toast 提示。
-- 提醒 picker 回填字段。
-- 不应修改 picker 内部逻辑。
-
-### 3.7 审查清单语义
-
-只读判断：
-
-- 主界面清单 picker 是否传 `list_type`。
-- 周界面清单 picker 是否传 `list_type`。
-- `ListPickerView.load_data(current_selected_id, list_type)` 如何过滤。
-- 月界面是否只支持日程。
-- 如果只支持日程，是否应传 `list_type="schedule"`。
-- 是否有待办模式需求，是否应推迟。
-
-必须输出：
-
-- M-5e 清单接入边界。
-- 推荐 `list_type`。
-- 是否允许待办模式。
-- 保存字段是否仍为 `category_id`。
-
-### 3.8 审查紧急性与重复规则
-
-读取或搜索：
-
-```powershell
-Get-Content -Path src\services\schedule_repeat_service.py -Encoding UTF8
-rg -n "repeat_rule|REPEAT|NON_REPEAT|每天|每周|每月|每年|none|daily|weekly|monthly|yearly|ScheduleRepeatService" src manage_instruction
-```
-
-只读数据检查允许执行：
-
-```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; vals=sorted({(getattr(s,'repeat_rule',None) or '') for s in db_manager.get_all_schedules()}); print('repeat_rule values:', vals)"
-```
-
-如果只读数据检查因环境、权限或数据库状态失败，不要改源码，不要改数据库；记录失败原因，并继续用静态代码结果形成保守结论。
 
 重点确认：
 
-- `ScheduleRepeatService` 当前支持哪些规则。
-- 当前数据库中真实 `repeat_rule` 值有哪些。
-- 主/周添加页 combo 显示值是什么。
-- `InlineAddViewMonth` 当前默认写入什么值。
-- 是否存在历史默认值 `none`。
-- 后续是否应先做显示值 -> 入库值归一化。
-- 不得新增新重复规则。
-- 不得改重复日程生成逻辑。
+- `M-5b` 结论：先补月界面添加表单能力，再做右键菜单。
+- 月界面添加目标日期已由 `M-5` 接入。
+- 本轮只做 UI 壳与状态承接，不接 picker。
+- 后续真实功能分拆为：
+  - `M-5d` 时间 picker。
+  - `M-5e` 提醒 / 清单 picker。
+  - `M-5f` 紧急性 / 重复规则 / 保存结构对齐。
 
-必须输出：
+### 3.2 补齐 `InlineAddViewMonth` 内部状态字段
 
-- 当前真实 repeat_rule 值。
-- 当前显示值。
-- 当前服务归一化规则。
-- M-5f 应使用的规则体系建议。
-- M-5f 禁止触碰的重复生成逻辑边界。
+在 `InlineAddViewMonth` 初始化或 reset 相关位置补充后续 picker 需要的内部状态字段。
 
-### 3.9 输出小工单边界
+建议字段：
 
-在 `Work_Log.md` 中输出：
+```python
+self.selected_start_time = None
+self.selected_end_time = None
+self.selected_reminder = None
+self.selected_alarm_duration = 0
+self.selected_list_id = None
+self.selected_list_name = None
+```
 
-#### M-5c：UI 壳补齐
+要求：
 
-必须写明：
+- 字段只作为状态承接。
+- 本轮不得写入数据库。
+- 本轮不得影响 `_on_save(...)`。
+- reset 时必须清空。
 
-- 建议修改文件。
-- 允许做什么 UI。
-- 哪些按钮可禁用或 toast。
-- 不得打开 picker。
-- 不得写入状态。
-- 不得改 `_on_save(...)`。
-- 验收重点。
+### 3.3 增加回填接口
 
-#### M-5d：时间选择接入
+在 `InlineAddViewMonth` 中增加轻量回填方法，供后续 picker 使用。
 
-必须写明：
+建议方法：
 
-- 建议修改文件。
-- picker 承接方案。
-- 默认日期来源。
-- start/end 回填方式。
-- 未选时间行为。
-- 是否允许跨天。
-- 不接提醒/清单/重复。
-- 验收重点。
+```python
+def set_time_data(self, start_time, end_time): ...
+def set_alarm_data(self, reminder_time, is_alarm_mode=False, alarm_duration=0): ...
+def set_list_data(self, category_id, category_name): ...
+```
 
-#### M-5e：提醒与清单接入
+要求：
 
-必须写明：
+- 只更新内部状态字段和 UI 文案。
+- 不保存数据库。
+- 不调用 `_on_save(...)`。
+- 不 emit 保存信号。
+- 不访问 `db_manager` / Repository / Service。
+- 不依赖 `MainWindow`。
 
-- 建议修改文件。
-- 提醒依赖时间规则。
-- reminder 字段回填。
-- list picker 的 `list_type`。
-- `category_id` 保存语义。
-- 不改 picker 内部。
-- 验收重点。
+### 3.4 增加 picker 请求信号占位
 
-#### M-5f：紧急性 / 重复规则 / 保存结构对齐
+可在 `InlineAddViewMonth` 上增加信号占位，供后续 `M-5d / M-5e` 使用。
 
-必须写明：
+建议：
 
-- 建议修改文件。
-- priority 控件与保存语义。
-- repeat_rule 显示值、入库值、归一化建议。
-- 保存字段对齐清单。
-- 保存后刷新 marker、hover cache、持久 panel 的策略。
-- 不改重复生成逻辑。
-- 验收重点。
+```python
+req_open_time_picker = pyqtSignal(object, object)
+req_open_alarm_picker = pyqtSignal(object, bool, int)
+req_open_list_picker = pyqtSignal(object, str)
+```
 
-#### M-5g：整体验收
+要求：
 
-必须写明：
+- 本轮可以声明信号。
+- 本轮不得在 `MonthWindow` 中连接这些信号。
+- 本轮不得打开 picker 页面。
+- 本轮按钮不得 emit 半成品 picker 请求。
+- 若为了避免误触，可禁用按钮或显示轻量 toast；不得写入状态，不得打开 picker。
 
-- 需要复跑的用户路径。
-- 临时数据验证策略。
-- 如何清理临时数据。
-- `schedule.db` 最终无 tracked diff。
-- 主/周添加页回归检查。
-- 月界面单击、双击、hover、持久 panel 回归检查。
+### 3.5 补齐 UI 壳
+
+在月界面左侧添加表单区域补齐以下 UI 壳：
+
+- 标题输入框。
+- 详情描述输入框。
+- 图标按钮行：
+  - 时间按钮，实例属性保留为 `self.btn_time`。
+  - 提醒按钮，实例属性保留为 `self.btn_alarm`。
+  - 清单按钮，实例属性保留为 `self.btn_list`。
+- 紧急性显示 / 控件壳。
+- 重复规则显示 / 控件壳。
+- 当前状态摘要文案：
+  - 时间未设置。
+  - 无提醒。
+  - 清单未选择。
+- 取消 / 保存按钮保持原有语义。
+
+要求：
+
+- UI 可见即可，不要求和主界面完全一致。
+- 可根据月界面左侧窄栏做紧凑布局。
+- 时间 / 提醒 / 清单按钮本轮不得打开真实 picker。
+- 紧急性 / 重复控件如果可操作，本轮也不得影响 `_on_save(...)`。
+- 重复规则如显示选项，只能沿用当前已有显示体系，例如 `无 / 每天 / 每周 / 每月`；不得新增 `每年`，不得新增英文规则。
+- 若按钮点击需要反馈，只能禁用或显示轻量提示，不得产生业务状态。
+
+### 3.6 reset 行为
+
+确保 `reset_form(...)` 或等价重置逻辑清空：
+
+- 标题。
+- 详情。
+- `selected_start_time`。
+- `selected_end_time`。
+- `selected_reminder`。
+- `selected_alarm_duration`。
+- `selected_list_id`。
+- `selected_list_name`。
+- 时间 / 提醒 / 清单 UI 文案。
+- 紧急性 / 重复 UI 壳状态。
+
+不得改变 `reset_form(...)` 的既有调用方语义。
+
+### 3.7 `_on_save(...)` 保持不变
+
+本轮必须保持 `_on_save(...)` 的保存字段不变。
+
+当前保存结构仍应只沿用既有字段，例如：
+
+```python
+title
+item_type
+priority
+repeat_rule
+description
+start_time
+end_time
+category_id
+```
+
+要求：
+
+- 不新增 `reminder_time`。
+- 不新增 `is_alarm`。
+- 不新增 `alarm_duration`。
+- 不使用 `selected_start_time` / `selected_end_time` 写入保存。
+- 不使用 `selected_reminder` 写入保存。
+- 不使用 `selected_list_id` 写入保存。
+- 不让紧急性 / 重复 UI 壳影响保存。
+
+注意：上述新字段允许出现在 reset、回填接口和 UI 更新方法中；验收时必须单独检查 `_on_save(...)` 方法体，避免误判。
+
+### 3.8 更新日志
+
+更新 `manage_instruction/Work_Log.md`，记录本轮修改、验证结果和未完成事项。
 
 ## 4. 验收命令
 
-开工状态：
+### 4.1 静态定位
 
 ```powershell
-git status --short --branch
-git diff --name-only
+rg -n "class InlineAddViewMonth|selected_start_time|selected_end_time|selected_reminder|selected_alarm_duration|selected_list_id|selected_list_name|set_time_data|set_alarm_data|set_list_data|req_open_time_picker|req_open_alarm_picker|req_open_list_picker|btn_time|btn_alarm|btn_list" src/ui/month_window.py
 ```
 
-静态搜索 picker 链路：
+### 4.2 import 验证
 
 ```powershell
-rg -n "req_open_time_picker|req_open_alarm_picker|req_open_list_picker|go_to_time_picker|go_to_alarm_picker|go_to_list_picker|set_time_data|set_alarm_data|set_list_data|TimePickerView|TimePickerViewWeek|AlarmPickerView|AlarmPickerViewWeek|ListPickerView|confirm_requested|load_data" src/ui/month_window.py src/ui/add_view.py src/ui/add_view_week.py src/ui/main_window.py src/ui/week_window.py src/ui/time_picker.py src/ui/time_picker_week.py src/ui/alarm_picker.py src/ui/alarm_picker_week.py src/ui/list_picker.py
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.ui.month_window import MonthWindow, InlineAddViewMonth; print('month imports ok', MonthWindow, InlineAddViewMonth)"
 ```
 
-静态搜索保存字段：
+### 4.3 offscreen 构造验证
 
 ```powershell
-rg -n "schedule_data|title|item_type|priority|repeat_rule|description|start_time|end_time|reminder_time|is_alarm|alarm_duration|category_id|db_manager\\.add_schedule|_on_save|_on_add_clicked|_get_add_target_date" src/ui/month_window.py src/ui/add_view.py src/ui/add_view_week.py
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from src.ui.month_window import InlineAddViewMonth; app=QApplication([]); v=InlineAddViewMonth(); print('created', v is not None); print('has btn_time', hasattr(v, 'btn_time')); print('has btn_alarm', hasattr(v, 'btn_alarm')); print('has btn_list', hasattr(v, 'btn_list')); assert hasattr(v, 'btn_time'); assert hasattr(v, 'btn_alarm'); assert hasattr(v, 'btn_list')"
 ```
 
-静态搜索重复规则：
+### 4.4 reset 状态验证
 
 ```powershell
-rg -n "repeat_rule|REPEAT|NON_REPEAT|每天|每周|每月|每年|none|daily|weekly|monthly|yearly|ScheduleRepeatService" src manage_instruction
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from src.ui.month_window import InlineAddViewMonth; app=QApplication([]); v=InlineAddViewMonth(); v.set_time_data('09:00','10:00'); v.set_alarm_data('09:00', True, 10); v.set_list_data(123, '测试清单'); v.reset_form(); print('states', v.selected_start_time, v.selected_end_time, v.selected_reminder, v.selected_alarm_duration, v.selected_list_id, v.selected_list_name); assert v.selected_start_time is None; assert v.selected_end_time is None; assert v.selected_reminder is None; assert v.selected_alarm_duration == 0; assert v.selected_list_id is None; assert v.selected_list_name is None"
 ```
 
-只读 repeat_rule 数据检查：
+### 4.5 回填接口验证
 
 ```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.data.database import db_manager; vals=sorted({(getattr(s,'repeat_rule',None) or '') for s in db_manager.get_all_schedules()}); print('repeat_rule values:', vals)"
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from src.ui.month_window import InlineAddViewMonth; app=QApplication([]); v=InlineAddViewMonth(); v.set_time_data('08:30','09:30'); v.set_alarm_data('08:20', True, 5); v.set_list_data(7, '工作'); print('time', v.selected_start_time, v.selected_end_time); print('alarm', v.selected_reminder, v.selected_alarm_duration); print('list', v.selected_list_id, v.selected_list_name); assert v.selected_start_time == '08:30'; assert v.selected_end_time == '09:30'; assert v.selected_reminder == '08:20'; assert v.selected_alarm_duration == 5; assert v.selected_list_id == 7; assert v.selected_list_name == '工作'"
 ```
 
-import 验证：
+### 4.6 picker 未接入验证
 
 ```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.ui.month_window import MonthWindow, InlineAddViewMonth; from src.ui.add_view import AddScheduleView; from src.ui.add_view_week import AddScheduleViewWeek; from src.ui.time_picker import TimePickerView; from src.ui.alarm_picker import AlarmPickerView; from src.ui.list_picker import ListPickerView; from src.services.schedule_repeat_service import ScheduleRepeatService; print('m5b imports ok')"
+rg -n "go_to_time_picker|go_to_alarm_picker|go_to_list_picker|page_time|page_alarm|page_list" src/ui/month_window.py
 ```
 
-禁止范围检查：
+预期无输出。
+
+允许 `InlineAddViewMonth` 中存在以下信号声明：
+
+```text
+req_open_time_picker
+req_open_alarm_picker
+req_open_list_picker
+```
+
+但不得出现 `MonthWindow` 对这些信号的连接、页面栈或真实 picker 打开逻辑。
+
+### 4.7 `_on_save(...)` 方法体隔离检查
 
 ```powershell
-git diff --name-only -- src
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import inspect; from src.ui.month_window import InlineAddViewMonth; src=inspect.getsource(InlineAddViewMonth._on_save); print(src); assert 'reminder_time' not in src; assert 'is_alarm' not in src; assert 'alarm_duration' not in src; assert 'selected_start_time' not in src; assert 'selected_end_time' not in src; assert 'selected_reminder' not in src; assert 'selected_list_id' not in src"
+```
+
+### 4.8 保存字段静态检查
+
+```powershell
+rg -n "reminder_time|is_alarm|alarm_duration|selected_start_time|selected_end_time|selected_reminder|selected_list_id|selected_list_name" src/ui/month_window.py
+```
+
+允许这些字段出现在状态字段、reset、回填接口和 UI 文案更新中。
+必须结合 4.7 确认 `_on_save(...)` 没有使用这些字段。
+
+### 4.9 M-1 到 M-5 回归定位
+
+```powershell
+rg -n "schedule_markers|marker|paint|mouseDoubleClickEvent|selected_date|jump|persistent|MonthDayPanel|switch_to_add_page|target_date|reset_form" src/ui/month_window.py src/ui/popups/month_day_panel.py
+```
+
+### 4.10 语法检查
+
+```powershell
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src/ui/month_window.py main.py
+```
+
+### 4.11 禁止范围检查
+
+```powershell
+git diff --name-only -- src/ui/main_window.py
+git diff --name-only -- src/ui/add_view.py
+git diff --name-only -- src/ui/add_view_week.py
+git diff --name-only -- src/ui/week_window.py
+git diff --name-only -- src/ui/calendar_pop.py
+git diff --name-only -- src/ui/common
+git diff --name-only -- src/ui/popups
+git diff --name-only -- src/ui/utils
+git diff --name-only -- src/controllers
+git diff --name-only -- src/data
+git diff --name-only -- src/repositories
+git diff --name-only -- src/services
+git diff --name-only -- src/theme
+git diff --name-only -- src/utils/signals.py
+git diff --name-only -- src/utils/styles.py
 git diff --name-only -- assets
 git diff --name-only -- main.py
 git diff --name-only -- requirements.txt
 git diff --name-only -- schedule.db
-git diff --name-only -- manage_instruction/Final_Formulation.md
-git diff --name-only -- manage_instruction/Work_Formulation.md
-git diff --name-only -- manage_instruction/Work_Instruction.md
-git diff --name-only -- manage_instruction/Work_Snapshot.md
-git diff --name-only -- manage_instruction/History_Instruction.md
-git diff --name-only -- manage_instruction/History_Log.md
-git diff --name-only -- manage_instruction/ReconstructionDolder
+```
+
+预期以上命令均无输出。
+
+### 4.12 允许范围检查
+
+```powershell
 git diff --name-only
 git status --short --branch
 ```
 
-预期：
+预期最终只允许：
 
-- `src` 无 diff。
-- `assets` 无 diff。
-- `main.py` 无 diff。
-- `requirements.txt` 无 diff。
-- `schedule.db` 无 tracked diff。
-- `Final_Formulation.md` 无 diff。
-- `Work_Formulation.md` 无 diff。
-- `Work_Instruction.md` 无 diff。
-- `Work_Snapshot.md` 无 diff。
-- `History_Instruction.md` 无 diff。
-- `History_Log.md` 无 diff。
-- `ReconstructionDolder/` 无 diff。
-- 最终只允许：
-  - `manage_instruction/Work_Log.md`
-  - 必要时 `manage_instruction/Work_Task_Prompts.md`
+```text
+src/ui/month_window.py
+manage_instruction/Work_Log.md
+manage_instruction/Work_Task_Prompts.md
+```
 
 ## 5. Work_Log.md 记录要求
 
 更新 `manage_instruction/Work_Log.md`，至少记录：
 
-- 本轮任务名称：`M-5b（月界面添加表单能力只读审查与 picker 承接方案确认）`
+- 本轮任务名称：`M-5c（月界面添加表单 UI 壳补齐）`
 - 开工前 git 状态。
-- 开工前既有 diff。
 - 实际修改文件。
-- 读取的规划文件。
-- 读取的源码文件。
-- `InlineAddViewMonth` 当前能力清单。
-- `InlineAddViewMonth` 与主/周添加页字段差异。
-- 当前 picker 承接链路审查结果。
-- 推荐的月界面 picker 承接方案。
-- picker 返回后回填方案。
-- picker 打开期间 hover 预览 / 持久 panel 处理建议。
-- 时间语义建议。
-- 提醒依赖时间规则。
-- 清单 `list_type` 建议。
-- 月界面是否只支持日程的建议。
-- `repeat_rule` 真实入库值、显示值和 `ScheduleRepeatService` 归一化规则。
-- M-5c 到 M-5g 的建议修改文件、风险等级、验收重点。
+- `InlineAddViewMonth` 新增状态字段清单。
+- 新增回填接口清单：
+  - `set_time_data`
+  - `set_alarm_data`
+  - `set_list_data`
+- 是否新增 picker 请求信号占位。
+- 是否连接真实 picker：必须记录为否。
+- 是否新增 `MonthWindow.page_time / page_alarm / page_list`：必须记录为否。
+- 是否新增 `MonthWindow.go_to_*_picker`：必须记录为否。
+- `btn_time / btn_alarm / btn_list` 是否作为实例属性保留。
+- UI 壳新增内容：
+  - 详情输入。
+  - 时间按钮。
+  - 提醒按钮。
+  - 清单按钮。
+  - 紧急性显示 / 控件壳。
+  - 重复规则显示 / 控件壳。
+- 必要 Qt import 是否仅在 `src/ui/month_window.py` 内补充。
+- `_on_save(...)` 兼容性说明：
+  - 未新增保存字段。
+  - 未写入提醒字段。
+  - 未写入 picker 状态。
+  - 未让紧急性 / 重复 UI 壳影响保存。
+- `_on_save(...)` 方法体隔离检查结果。
+- import 验证结果。
+- offscreen 构造验证结果。
+- reset 状态验证结果。
+- 回填接口验证结果。
+- picker 未接入验证结果。
+- M-1 到 M-5 回归定位结果。
+- `py_compile` 结果。
 - diff 范围检查结果。
 - 未完成事项。
 - 风险或疑点。
+
+特别记录：
+
+- 本轮只做 UI 壳和状态承接。
+- 本轮不接时间 picker。
+- 本轮不接提醒 picker。
+- 本轮不接清单 picker。
+- 本轮不修改保存字段。
+- 后续 `M-5d` 再接时间 picker。
+- 后续 `M-5e` 再接提醒 / 清单 picker。
+- 后续 `M-5f` 再处理紧急性 / 重复规则 / 保存结构对齐。
+
+## 6. Work_Task_Prompts.md 处理要求
+
+如需要维护复核锚点，可将当前状态更新为：
+
+```text
+M-5c 已执行，等待决策/顾问窗口复核。
+下一步候选：M-5d。
+```
+
+不得在本轮自行写入 `M-5d` 的执行提示词。
+
+## 7. 完成后要求
 
 完成后不要提交 Git，等待决策/顾问窗口复核。
