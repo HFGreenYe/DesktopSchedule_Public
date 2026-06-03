@@ -303,6 +303,182 @@
 
 ---
 
+## 2026-06-03 M-5 最终提示词写入
+
+- 任务：
+  - 审核并写入 `M-5（月界面添加按钮日期来源联动）` 最终执行提示词。
+- 实际修改文件：
+  - `manage_instruction/Work_Task_Prompts.md`
+  - `manage_instruction/Work_Log.md`
+- 审核修正：
+  - 在阶段依据中补充 `Final_Formulation.md`。
+  - 明确 `_get_add_target_date()` 应优先使用有效的 `user_selected_date`，无用户选中或无效时回退 `calendar.selectedDate()`。
+  - 明确目标日期无效时应安全返回或沿用现有提示逻辑，不进入添加页。
+  - 明确添加按钮不得打开、关闭或修改持久 panel 列表。
+  - 明确添加按钮不得改变 hover 预览的显示/隐藏生命周期。
+  - 在验证命令中增加 panel 数量不变检查，确保 M-4 持久浮窗语义不被 M-5 破坏。
+- 下一步：
+  - 执行窗口可按 `Work_Task_Prompts.md` 中最终 M-5 提示词执行。
+
+## 2026-06-03 M-5（月界面添加按钮日期来源联动）
+
+- 本轮任务名称：
+  - `M-5（月界面添加按钮日期来源联动）`
+
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 59]`
+
+- 开工前既有 diff：
+  - `manage_instruction/Work_Log.md`
+  - `manage_instruction/Work_Task_Prompts.md`
+
+- 实际修改文件：
+  - `src/ui/month_window.py`
+  - `manage_instruction/Work_Log.md`
+
+- 添加目标日期解析方法：
+  - 新增 `MonthWindow._get_add_target_date()`。
+  - 规则：
+    - 若 `self.user_selected_date` 存在且有效，则返回 `self.user_selected_date`
+    - 否则返回 `self.calendar.selectedDate()`
+
+- 无用户选中日期时是否沿用 `calendar.selectedDate()`：
+  - 是。
+  - 验证结果：
+    - `target == w.calendar.selectedDate()`
+
+- 有用户选中日期时是否优先使用 `user_selected_date`：
+  - 是。
+  - 验证结果：
+    - 先 `_on_calendar_date_clicked(QDate.currentDate().addDays(3))`
+    - 再调用 `_get_add_target_date()`
+    - 返回值等于 `user_selected_date`
+
+- 过去日期不可添加是否基于最终目标日期判断：
+  - 是。
+  - `_on_add_clicked(...)` 改为先获取 `target_date = self._get_add_target_date()`
+  - 过去日期判断改为基于 `target_date < today`
+  - 当 `target_date` 无效时，安全返回，不进入添加页
+
+- 是否保持 `InlineAddViewMonth._on_save(...)` 不变：
+  - 是。
+  - 未改 `InlineAddViewMonth._on_save(...)`
+
+- 是否保持 `db_manager.add_schedule(...)` 不变：
+  - 是。
+  - 未改写库结构和调用路径
+
+- 是否保持 M-1 三角数量角标逻辑不变：
+  - 是。
+  - marker 颜色、数量、过滤规则未改
+  - 今天金色日期逻辑未改
+
+- 是否保持 M-2 单击/双击语义不变：
+  - 是。
+  - `calendar.clicked` 仍连接 `_on_calendar_date_clicked`
+  - `calendar.activated` 仍连接 `_on_calendar_date_activated`
+  - `date_selected.emit(...)` 仍只在 activated 跳转路径中
+
+- 是否保持 M-3 hover 预览语义不变：
+  - 是。
+  - hover preview 文件无 diff
+  - hover 命中、只读展示、移出隐藏逻辑未改
+
+- 是否保持 M-4 持久浮窗语义不变：
+  - 是。
+  - 单击仍会打开/复用持久 panel
+  - `_on_add_clicked(...)` 不关闭已有 panel
+  - `open_day_panels` 生命周期未改
+  - `month_day_panel.py` 无 diff
+
+- 是否未接右键菜单：
+  - 是。
+
+- 是否未写数据库：
+  - 是。
+
+- 验证命令和结果：
+  - `rg -n "user_selected_date|_get_add_target_date|_on_add_clicked|selectedDate|InlineAddViewMonth|reset\(|db_manager\.add_schedule|calendar\.clicked|calendar\.activated|date_selected\.emit|_open_day_panel|MonthDayPanel|hover_preview|ActionContextMenu|contextMenu" src/ui/month_window.py`
+    - 结果：
+      - `_get_add_target_date()` 已新增
+      - `_on_add_clicked(...)` 已改为使用 `target_date`
+      - `InlineAddViewMonth.reset(target_date)` 仍走原有添加页 reset 入口
+      - 未出现 `ActionContextMenu` / `contextMenu` 新链路
+  - import 验证：
+    - `MonthWindow / CalendarCellDelegate / InlineAddViewMonth / MonthDayHoverPreview / MonthDayPanel`：通过
+  - offscreen 构造验证：
+    - `MonthWindow()` 可构造
+    - `has _get_add_target_date == True`
+  - 无用户选中日期时默认逻辑验证：
+    - `target == calendar.selectedDate()`：通过
+  - 有用户选中日期时优先使用选中日期验证：
+    - `target == user_selected_date`：通过
+  - 添加页 reset 目标日期验证：
+    - 先单击未来日期，再调用 `_on_add_clicked()`
+    - `inline_add_view.selected_date == user_selected_date`
+    - `open_day_panels` 数量不变
+  - 过去日期不可添加验证：
+    - 先单击过去日期，再调用 `_on_add_clicked()`
+    - `inline_add_view.selected_date` 保持不变
+    - `open_day_panels` 数量不变
+  - M-2 / M-3 / M-4 静态回归：
+    - `calendar.clicked` 仍连接 `_on_calendar_date_clicked`
+    - `calendar.activated` 仍连接 `_on_calendar_date_activated`
+    - `date_selected.emit(...)` 仍只在 activated 路径中
+    - `_on_add_clicked(...)` 仍未接右键菜单或其他新链路
+  - 语法检查：
+    - 使用 `py_compile.compile(..., cfile=%TEMP%\\*.m5.pyc, doraise=True)` 编译：
+      - `src/ui/month_window.py`
+      - `main.py`
+      - `src/ui/popups/month_day_hover_preview.py`
+      - `src/ui/popups/month_day_panel.py`
+    - 结果：通过
+
+- diff 范围检查结果：
+  - 禁止范围均无 diff：
+    - `src/ui/main_window.py`
+    - `src/ui/calendar_pop.py`
+    - `src/ui/common/action_context_menu.py`
+    - `src/ui/common`
+    - `src/ui/popups/month_day_hover_preview.py`
+    - `src/ui/popups/month_day_panel.py`
+    - `src/ui/dashboard.py`
+    - `src/ui/week_window.py`
+    - `src/ui/todo.py`
+    - `src/ui/todo_board.py`
+    - `src/controllers`
+    - `src/services`
+    - `src/data`
+    - `src/repositories`
+    - `src/theme`
+    - `src/utils/signals.py`
+    - `src/utils/styles.py`
+    - `assets`
+    - `main.py`
+    - `requirements.txt`
+    - `schedule.db`
+    - `manage_instruction/Final_Formulation.md`
+    - `manage_instruction/Work_Formulation.md`
+    - `manage_instruction/Work_Instruction.md`
+    - `manage_instruction/Work_Snapshot.md`
+    - `manage_instruction/History_Instruction.md`
+    - `manage_instruction/History_Log.md`
+    - `manage_instruction/ReconstructionDolder`
+  - 允许范围：
+    - `src/ui/month_window.py`
+    - `manage_instruction/Work_Log.md`
+    - `manage_instruction/Work_Task_Prompts.md`（开工前既有）
+
+- 未完成事项：
+  - 未接入月界面右键菜单，留待 `M-6`
+  - 月界面功能补齐整体验收留待 `M-7`
+
+- 风险或疑点：
+  - 当前添加入口的“最终目标日期”已经优先使用 `user_selected_date`，但 `QCalendarWidget.selectedDate()` 仍会继续变化；如果后续产品要求彻底统一月界面内部所有日期来源，还需要在整体验收时复核其余路径，不在本轮扩大范围。
+  - 当 `user_selected_date` 为过去日期时，单击仍会打开持久 panel，但添加入口会被阻止；这是当前按阶段要求保留的行为组合，不在本轮调整。
+
+---
+
 ## 2026-06-02 M-0 复核锚点更新
 
 - 任务目标：

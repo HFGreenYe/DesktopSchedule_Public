@@ -1006,13 +1006,20 @@ class MonthWindow(FramelessMainWindow):
         else:
             self.view_selected.emit(vid)
 
+    def _get_add_target_date(self):
+        if self.user_selected_date is not None and self.user_selected_date.isValid():
+            return self.user_selected_date
+        return self.calendar.selectedDate()
+
     def _on_add_clicked(self):
         # 1. 验证日期是否过期
         today = QDate.currentDate()
-        # 这里验证的是“右侧日历当前选中的日期”，而不是月历翻到的月份
-        selected_date = self.calendar.selectedDate() 
+        target_date = self._get_add_target_date()
+
+        if not target_date.isValid():
+            return
         
-        if selected_date < today:
+        if target_date < today:
             self.show_toast("🚫 该日期已过期，无法添加日程")
             return
             
@@ -1022,7 +1029,7 @@ class MonthWindow(FramelessMainWindow):
         else:
             self.search_box.hide()
             self.view_selector_container.hide()
-            self.inline_add_view.reset(selected_date)
+            self.inline_add_view.reset(target_date)
             self.inline_add_view.show()
 
     def _close_add_view(self):
