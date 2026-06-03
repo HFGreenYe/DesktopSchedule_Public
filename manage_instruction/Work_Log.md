@@ -2176,3 +2176,35 @@
 - 行为影响：
   - 仅格式修正。
   - 不改变 `InlineAddViewMonth` UI 壳、状态字段、回填接口、picker 占位信号和保存逻辑。
+
+## M-5d 最终提示词写入
+
+- 时间：2026-06-03
+
+- 任务：
+  - 审核决策窗口提供的 `M-5d（月界面时间选择接入）` 提示词，并写入最终执行版。
+
+- 实际修改文件：
+  - `manage_instruction/Work_Task_Prompts.md`
+  - `manage_instruction/Work_Log.md`
+
+- 审核结论：
+  - 原方向可采纳：M-5d 应只接月界面时间 picker，不接提醒、清单、右键菜单和 priority/repeat 保存。
+  - 原稿需要补强内嵌 `TimePickerView` 的窗口控制按钮边界，以及未选择时间时的保存策略。
+
+- 本次修订重点：
+  - 增加 `TimePickerView.btn_close` 内嵌处理要求，避免点击关闭按钮直接关闭整个 `MonthWindow`。
+  - 增加 `TimePickerView.btn_suspend` 内嵌处理要求，避免引入月界面挂起新链路。
+  - 明确本轮不修改 `src/ui/time_picker.py`，只在 `MonthWindow` 的 `page_time` 实例上处理。
+  - 明确默认日期构造需兼容当前 `month_window.py` 的 `import datetime` 写法，避免误写 `datetime.now()`。
+  - 明确月界面 schedule 未选择时间时不得保存，应提示先设置计划时间。
+  - 明确允许 `selected_start_time` 为 `None`、`selected_end_time` 为用户选择结束时间，该语义与主界面 / 周界面当前添加页一致。
+  - 增加返回时间页、未选择时间保存拦截、`_on_save(...)` time-only 隔离等验收命令。
+
+- 范围说明：
+  - 本次只写执行提示词和日志。
+  - 不修改源码。
+  - 不进入 M-5d 源码执行。
+
+- 下一步候选：
+  - 执行窗口按 `Work_Task_Prompts.md` 执行 M-5d。
