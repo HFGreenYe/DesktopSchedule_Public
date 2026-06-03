@@ -71,6 +71,26 @@
 
 ---
 
+## 2026-06-03 M-5b 最终提示词写入
+
+- 任务：
+  - 审核并写入 `M-5b（月界面添加表单能力只读审查与 picker 承接方案确认）` 最终执行提示词。
+- 实际修改文件：
+  - `manage_instruction/Work_Task_Prompts.md`
+  - `manage_instruction/Work_Log.md`
+- 审核结论：
+  - 提示词方向符合 `Work_Formulation.md` / `Work_Instruction.md` 中 M-5 后续规划。
+  - 本轮只读审查，不改 `src/`、不写数据库、不接 picker。
+  - 读取范围覆盖月界面、主/周添加页、time/alarm/list picker、主/周 picker 承接链路和 `ScheduleRepeatService`。
+  - 输出要求覆盖 picker 承接方案、时间语义、提醒依赖时间、清单 `list_type`、`repeat_rule` 真实值体系和 M-5c~M-5g 边界。
+- 本次修正：
+  - 明确只读 repeat_rule 数据检查若因环境、权限或数据库状态失败，不得改源码或数据库，只记录失败原因并继续用静态代码形成保守结论。
+  - 保留 `Work_Task_Prompts.md` 为唯一提示词落点，当前写入完整 M-5b 最终提示词。
+- 下一步：
+  - 执行窗口可按 `Work_Task_Prompts.md` 中最终 M-5b 提示词执行。
+
+---
+
 ## 2026-06-03 Final_Formulation.md 新增
 
 - 任务目标：
@@ -1575,6 +1595,320 @@
 - 风险或疑点：
   - 当前 hover 预览在同一日期格内移动时会复用同一个 popup 实例，但仍会重新设置内容和位置；逻辑正确，后续如需进一步减轻重绘可再做优化，不在本轮扩大。
   - 预览展示顺序当前使用简单稳定排序，而不是单独的月界面专属业务排序；已满足只读预览需求，若后续产品要求更细排序，应另开工单，不在本轮扩大。
+
+## 2026-06-03 M-5b（月界面添加表单能力只读审查与 picker 承接方案确认）
+
+- 本轮任务名称：
+  - `M-5b（月界面添加表单能力只读审查与 picker 承接方案确认）`
+
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 61]`
+
+- 开工前既有 diff：
+  - `manage_instruction/Work_Log.md`
+  - `manage_instruction/Work_Task_Prompts.md`
+
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+
+- 读取的规划文件：
+  - `manage_instruction/Final_Formulation.md`
+  - `manage_instruction/Work_Formulation.md`
+  - `manage_instruction/Work_Instruction.md`
+  - `manage_instruction/Work_Task_Prompts.md`
+  - `manage_instruction/Work_Log.md`
+
+- 读取的源码文件：
+  - `src/ui/month_window.py`
+  - `src/ui/add_view.py`
+  - `src/ui/add_view_week.py`
+  - `src/ui/time_picker.py`
+  - `src/ui/time_picker_week.py`
+  - `src/ui/alarm_picker.py`
+  - `src/ui/alarm_picker_week.py`
+  - `src/ui/list_picker.py`
+  - `src/ui/main_window.py`
+  - `src/ui/week_window.py`
+  - `src/services/schedule_repeat_service.py`
+
+- 静态搜索与只读检查：
+  - picker 链路搜索：
+    - `rg -n "req_open_time_picker|req_open_alarm_picker|req_open_list_picker|go_to_time_picker|go_to_alarm_picker|go_to_list_picker|set_time_data|set_alarm_data|set_list_data|TimePickerView|TimePickerViewWeek|AlarmPickerView|AlarmPickerViewWeek|ListPickerView|confirm_requested|load_data" ...`
+    - 结果：
+      - `AddScheduleView`：完整三路 picker 请求信号，含 `list_type`。
+      - `AddScheduleViewWeek`：时间/提醒有完整请求，`req_open_list_picker` 只传 `category_id`，无 `list_type`。
+      - `MainWindow`：完整 add/edit 双模承接，list picker 会按 `item_type` 过滤。
+      - `WeekWindow`：完整 add/edit 双模承接，但 list picker 未传 `list_type`，周视图 todo 模式与 schedule 模式共用默认 `schedule` 清单过滤。
+  - 保存字段搜索：
+    - `rg -n "schedule_data|title|item_type|priority|repeat_rule|description|start_time|end_time|reminder_time|is_alarm|alarm_duration|category_id|db_manager\\.add_schedule|_on_save|_on_add_clicked|_get_add_target_date" ...`
+    - 结果：
+      - `InlineAddViewMonth` 只写入：`title/item_type/priority/repeat_rule/description/start_time/end_time/category_id`
+      - 实际固定值：
+        - `priority = 0`
+        - `repeat_rule = 'none'`
+        - `category_id = None`
+        - 无 `reminder_time/is_alarm/alarm_duration`
+      - `AddScheduleView` / `AddScheduleViewWeek` 会写入完整字段集。
+  - `repeat_rule` 搜索：
+    - `rg -n "repeat_rule|REPEAT|NON_REPEAT|每天|每周|每月|每年|none|daily|weekly|monthly|yearly|ScheduleRepeatService" src manage_instruction`
+    - 结果：
+      - UI 显示值主干仍是：`无 / 每天 / 每周 / 每月`。
+      - `schedule_detail_pop.py` 中“非重复”文案使用 `不重复`。
+      - `ScheduleRepeatService` 识别非重复：`none / 无 / 不重复 / ''`。
+      - `ScheduleRepeatService` 仅处理 `每天 / 每周 / 每月`，未实现 `每年 / daily / weekly / monthly / yearly`。
+  - 数据库只读检查：
+    - 命令：`python -c "from src.data.database import db_manager; vals=sorted({(getattr(s,'repeat_rule',None) or '') for s in db_manager.get_all_schedules()}); print('repeat_rule values:', vals)"`
+    - 输出：`repeat_rule values: ['none', '无', '每周', '每月']`
+    - 结论：
+      - 当前真实历史值混用英文 `none` 与中文重复值。
+      - 未在现有数据中看到 `每天`，但代码链路支持。
+
+- `InlineAddViewMonth` 当前能力清单：
+  - 字段：
+    - `selected_date`
+    - `is_schedule_mode`
+  - 输入能力：
+    - 标题 `input_title`
+    - 描述 `input_desc`
+  - 按钮：
+    - `time/alarm/list` 三个图标按钮仅作视觉占位，当前无信号连接、无状态回填。
+  - 保存能力：
+    - 标题必填。
+    - 保存时固定生成 `start_time == end_time == selected_date 00:00`。
+    - 固定 `priority = 0`
+    - 固定 `repeat_rule = 'none'`
+    - 固定 `category_id = None`
+    - 不支持提醒、强提醒、提醒时长、清单过滤、优先级、重复规则、显式起止时间。
+  - 重置能力：
+    - `reset(target_date)` 只负责记录目标日期并清空标题/描述。
+
+- `InlineAddViewMonth` 与主/周添加页字段差异：
+  - 相比 `AddScheduleView`：
+    - 缺失 picker 请求信号：
+      - `req_open_time_picker`
+      - `req_open_alarm_picker`
+      - `req_open_list_picker`
+    - 缺失回填接口：
+      - `set_time_data`
+      - `set_alarm_data`
+      - `set_list_data`
+    - 缺失状态字段：
+      - `selected_start_time`
+      - `selected_end_time`
+      - `selected_reminder`
+      - `is_alarm_mode`
+      - `alarm_duration`
+      - `selected_list_id`
+    - 缺失表单控件：
+      - `priority combo`
+      - `repeat combo`
+      - 详情折叠结构
+      - 信息卡片反馈
+      - schedule/todo 模式切换反馈
+    - 缺失保存校验：
+      - 主添加页要求 schedule 模式必须显式设置时间。
+  - 相比 `AddScheduleViewWeek`：
+    - 同样缺少完整 picker 与状态回填。
+    - 周版虽然具备完整字段保存，但自身 list picker 仍缺 `list_type` 过滤，不适合作为月界面承接语义模板。
+
+- 当前 picker 承接链路审查结果：
+  - 主窗口链路成熟：
+    - `AddScheduleView -> MainWindow.go_to_time_picker/go_to_alarm_picker/go_to_list_picker`
+    - picker confirm 后回填到 `page_add`
+    - edit 模式另走 `editing_schedule`
+  - 周窗口链路成熟但偏周视图内部：
+    - `AddScheduleViewWeek -> WeekWindow.go_to_*_picker`
+    - 也有 edit 分支
+    - 与周视图主流程、拖拽、详情回流耦合更重
+  - 月窗口当前没有任何 picker 容器、页面栈或桥接方法。
+  - 结论：
+    - 月界面不能直接“借 MainWindow picker”，因为月视图是独立窗口，不在 `MainWindow.body_stack` 中。
+    - 月界面也不宜直接复用 `WeekWindow` 承接方式，因为周视图 picker 返回语义、list 过滤语义都带有周视图历史包袱。
+
+- 推荐的月界面 picker 承接方案：
+  - 建议采用“月窗口内部最小承接”：
+    - 在 `src/ui/month_window.py` 内新增月界面自己的 picker 路由方法与状态位。
+    - picker 组件优先复用主版本：
+      - `TimePickerView`
+      - `AlarmPickerView`
+      - `ListPickerView`
+    - 不复用 `TimePickerViewWeek / AlarmPickerViewWeek` 作为月界面主方案。
+  - 理由：
+    - 主版本 `ListPickerView` 已支持 `list_type`。
+    - 主版本时间/提醒 picker 与 `AddScheduleView` 的字段语义一致，和后续 `M-5f` 对齐成本更低。
+    - 月界面后续若要支持 todo/schedule 双模式，主版本链路更完整。
+  - 不建议在 `M-5c~M-5f` 引入 controller 改造；保持在 `MonthWindow` 内部兼容式旁路。
+
+- picker 返回后回填方案：
+  - 月界面应补齐与主添加页同名的最小回填接口：
+    - `set_time_data(start, end)`
+    - `set_alarm_data(remind_dt, is_alarm, duration_mode)`
+    - `set_list_data(category_id)`
+  - picker confirm 后只回填到 `InlineAddViewMonth` 内部状态，不直接写库。
+  - `M-5f` 再统一落到 `_on_save()` 真实字段保存。
+  - 不建议让 picker 直接修改 `MonthWindow` 业务字段，再由 `InlineAddViewMonth` 被动读取；这样会放大跨组件耦合。
+
+- picker 打开期间 hover 预览 / 持久 panel 处理建议：
+  - 建议在任一 picker 打开前统一执行：
+    - `_hide_hover_preview()`
+    - `close_day_panels()`
+  - 理由：
+    - hover 预览和持久 panel 都是月格日期上下文，picker 打开后继续保留会造成视觉干扰和目标日期歧义。
+    - `M-2/M-4` 已证明 `close_day_panels()` 是月界面可接受的上下文清理动作。
+  - picker 返回后不自动恢复旧 panel；保持一次性关闭。
+
+- 时间语义建议：
+  - 建议月界面向主添加页对齐，而不是继续保留 `00:00` 默认时间保存语义。
+  - 具体建议：
+    - `M-5c`：先补内部状态与 UI 壳，不改保存。
+    - `M-5d`：接入时间 picker 后，schedule 模式必须显式选时间。
+    - `M-5f`：保存时若 schedule 模式仍无 `start/end`，应阻止保存并提示。
+  - 默认日期：
+    - 仍以 `MonthWindow._get_add_target_date()` 为唯一来源。
+  - 跨天：
+    - 现有 `TimePickerView` / `TimePickerViewWeek` 都是单日内起止，不支持跨天。
+    - 月界面本轮建议继续保持“不支持跨天”，避免新增语义分叉。
+
+- 提醒依赖时间规则：
+  - 建议完全对齐主添加页：
+    - 未设置 `start/end` 时不能设置提醒。
+    - `target_time` 采用 `start_time` 优先，缺失时回退 `end_time`。
+  - 理由：
+    - `AddScheduleView._emit_alarm_request()` 已经是现成成熟语义。
+    - `AlarmPickerView` 的合法性校验建立在明确 `target_time` 上。
+
+- 清单 `list_type` 建议：
+  - 月界面若接 list picker，应采用主添加页语义：
+    - `req_open_list_picker(category_id, current_type)`
+    - `ListPickerView.load_data(current_selected_id, list_type=current_type)`
+  - 不建议沿用周版只传 `category_id` 的链路。
+  - 结论：
+    - 月界面后续若支持 todo/schedule 双模式，必须补 `list_type`。
+
+- 月界面是否只支持日程的建议：
+  - 建议：
+    - `M-5c ~ M-5f` 仍以“月界面只支持 schedule 保存语义”为最低风险闭环。
+    - UI 上即便保留 `is_schedule_mode` 字段，也不建议在本轮同时扩出完整 todo 分支。
+  - 理由：
+    - 月格、hover、day panel、marker 目前都只围绕 `item_type == 'schedule'`。
+    - 同时引入 todo 会牵连 list_type、marker、hover/panel 展示策略和后续右键菜单，不符合本轮最小补齐目标。
+
+- `repeat_rule` 真实入库值、显示值和 `ScheduleRepeatService` 归一化规则：
+  - 真实入库值（代码与只读数据联合确认）：
+    - 非重复：`none`、`无`、`不重复`、`''`
+    - 重复：`每天`、`每周`、`每月`
+  - 当前数据库实际抽样值：
+    - `['none', '无', '每周', '每月']`
+  - UI 显示值：
+    - `AddScheduleView / AddScheduleViewWeek` 的 combo 使用：
+      - `无`
+      - `每天`
+      - `每周`
+      - `每月`
+    - `schedule_detail_pop.py` 使用：
+      - `不重复`
+      - `每天`
+      - `每周`
+      - `每月`
+  - `ScheduleRepeatService` 归一化规则：
+    - `NON_REPEAT_RULES = ('none', '无', '不重复', '')`
+    - 生成规则只处理：
+      - `每天`
+      - `每周`
+      - `每月`
+    - 未来生成数量：
+      - `每天 = 365`
+      - `每周 = 52`
+      - `每月 = 12`
+  - 建议：
+    - `M-5f` 不新增新规则，不引入英文 `daily/weekly/monthly/yearly`。
+    - 月界面 UI 选择可沿用 `AddScheduleView` 的显示值，但保存前需明确采用现有真实值体系，不要再引入新的“默认中文非重复值”。
+    - 若要最小兼容，月界面继续写 `none` 是安全的；若未来统一，需要另开工单，不在 `M-5f` 扩大。
+
+- `M-5c` 到 `M-5g` 的建议修改文件、风险等级、验收重点：
+  - `M-5c`：月界面添加表单能力壳补齐
+    - 建议修改：
+      - `src/ui/month_window.py`
+      - 允许时仅新增极小 popup/shell 文件到 `src/ui/popups/`，但优先不新增
+    - 风险：
+      - 中
+    - 内容：
+      - 给 `InlineAddViewMonth` 补状态字段、请求信号、回填接口、最小 UI 占位
+      - 先不改保存字段
+    - 验收重点：
+      - 不改 `M-1~M-5` 现有语义
+      - 不改 `MainWindow`
+  - `M-5d`：月界面时间 picker 承接
+    - 建议修改：
+      - `src/ui/month_window.py`
+    - 风险：
+      - 中
+    - 内容：
+      - 接入 `TimePickerView`
+      - 打开前隐藏 hover / 关闭 panel
+      - confirm 后回填 `set_time_data`
+    - 验收重点：
+      - 单击/双击/添加目标日期不回归
+      - picker 返回后月格主状态恢复正确
+  - `M-5e`：月界面提醒/清单 picker 承接
+    - 建议修改：
+      - `src/ui/month_window.py`
+    - 风险：
+      - 中
+    - 内容：
+      - 接入 `AlarmPickerView`
+      - 接入 `ListPickerView`
+      - list picker 显式传 `list_type='schedule'`
+    - 验收重点：
+      - 无时间时提醒按钮拦截
+      - picker confirm 只回填、不写库
+  - `M-5f`：priority/repeat/save 语义对齐
+    - 建议修改：
+      - `src/ui/month_window.py`
+    - 风险：
+      - 中偏高
+    - 内容：
+      - 增加优先级/重复规则最小保存能力
+      - schedule 模式无时间时禁止保存
+      - 保存字段向主添加页对齐
+    - 验收重点：
+      - 真实入库字段正确
+      - 不引入新 `repeat_rule` 体系
+  - `M-5g`：月界面添加链路整体验收
+    - 建议修改：
+      - 原则上只改 `manage_instruction/Work_Log.md`
+    - 风险：
+      - 低
+    - 验收重点：
+      - import/offscreen/只读校验
+      - 保存字段抽样校验
+      - 范围 diff 干净
+
+- 结论：
+  - 当前下一步仍建议按规划进入 `M-5c`。
+  - 不建议跳过 `M-5c` 直接做 `M-5d/M-5e`，因为月界面目前连 picker 请求信号和状态回填接口都没有。
+  - 不建议在 `M-5c~M-5f` 同时扩大到 todo、右键菜单、持久 panel 编辑能力或主控制层重构。
+
+- diff 范围检查结果：
+  - `git diff --name-only -- src`：无输出
+  - `git diff --name-only -- main.py`：无输出
+  - `git diff --name-only -- requirements.txt`：无输出
+  - `git diff --name-only -- schedule.db`：无输出
+  - `git diff --name-only`：
+    - `manage_instruction/Work_Log.md`
+    - `manage_instruction/Work_Task_Prompts.md`
+  - 结论：
+    - 本轮未改 `src/`
+    - `Work_Task_Prompts.md` 为开工前既有 diff，本轮未改
+
+- 未完成事项：
+  - 未实现 `M-5c` 的表单能力壳。
+  - 未实现月界面 picker 承接。
+  - 未实现月界面完整保存字段对齐。
+
+- 风险或疑点：
+  - `AddScheduleViewWeek` 与 `WeekWindow` 当前 list picker 链路本身缺 `list_type` 过滤，这说明“周版能跑”并不等于“周版语义适合作为月界面模板”；后续月界面应更偏向主添加页语义。
+  - 当前真实 `repeat_rule` 已存在 `none` 和 `无` 双轨历史值，若 `M-5f` 不谨慎，容易继续扩大混用范围；建议本月界面新增写入继续保持 `none` 作为最小兼容闭环。
 
 - 复核后样式微调：
   - 触发原因：
