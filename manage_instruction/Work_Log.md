@@ -2681,3 +2681,286 @@
   - 复跑 `schedule.db` tracked diff：无输出。
   - 复跑禁止范围检查：无输出。
   - `Work_Task_Prompts.md` 已更新为 M-5e 复核锚点，下一步候选为 M-5f，并保留 M-5e 已执行提示词全文供对照。
+
+## M-5f 最终提示词写入
+
+- 时间：2026-06-03
+
+- 任务：
+  - 审核决策窗口提供的 `M-5f（月界面紧急性 / 重复规则 / 保存结构对齐）` 提示词，并写入最终执行版。
+
+- 实际修改文件：
+  - `manage_instruction/Work_Task_Prompts.md`
+  - `manage_instruction/Work_Log.md`
+
+- 审核结论：
+  - 原方向可采纳：M-5f 应只对齐月界面 `priority / repeat_rule / schedule_data` 保存结构，不接右键菜单，不进入 M-5g。
+  - 原稿中“非重复临时保存后删除”的验收方式存在污染本地 SQLite 文件的风险，即使删除记录也可能导致 `schedule.db` 文件内容变化。
+
+- 本次修订重点：
+  - 将真实写库验收改为 mock / monkeypatch 截获 `db_manager.add_schedule(schedule_data)` 入参。
+  - 明确本轮不得真实写入 `schedule.db`，不得真实保存或删除临时日程。
+  - 明确 `none` 是历史兼容值 / 数据库默认值之一，不得误删或改动服务层兼容规则。
+  - 明确月界面 UI 保存值对齐主界面：`combo_priority.currentIndex()` 与 `combo_repeat.currentText().strip()`。
+  - 明确月界面 `combo_priority` 应从 `无/低/中/高` 收口为 `低/中/高`。
+  - 保留 `combo_repeat` 为 `无/每天/每周/每月`，不新增 `每年/yearly` 或 English repeat rule。
+  - 增加 `src/data/database.py` 读取与静态定位，用于确认数据库层对非重复值的兼容逻辑。
+
+- 范围说明：
+  - 本次只写执行提示词和日志。
+  - 不修改源码。
+  - 不进入 M-5f 源码执行。
+
+- 下一步候选：
+  - 执行窗口按 `Work_Task_Prompts.md` 执行 M-5f。
+
+## M-5f：月界面紧急性 / 重复规则 / 保存结构对齐
+
+- 时间：2026-06-03
+
+- 任务名称：
+  - `M-5f（月界面紧急性 / 重复规则 / 保存结构对齐）`
+
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 66]`
+  - `M manage_instruction/Work_Log.md`
+  - `M manage_instruction/Work_Task_Prompts.md`
+  - `M src/ui/month_window.py`
+  - 说明：
+    - `src/ui/month_window.py` 为 `M-1 ~ M-5e` 连续月界面改造延续。
+    - `manage_instruction/Work_Task_Prompts.md` 为开工前既有 diff，本轮未修改。
+
+- 实际修改文件：
+  - `src/ui/month_window.py`
+  - `manage_instruction/Work_Log.md`
+
+- 是否存在开工前既有 diff：
+  - 否。
+  - M-5f 提示词已在前置管理文档提交中落盘后再执行源码修改。
+  - `src/ui/month_window.py` 为本轮源码修改产物。
+  - `manage_instruction/Work_Task_Prompts.md` 本轮执行后更新为复核锚点。
+
+- 主界面 priority 保存基线：
+  - `src/ui/add_view.py::_on_save(...)`
+  - 使用：
+    - `priority = self.combo_priority.currentIndex()`
+
+- 主界面 repeat_rule 保存基线：
+  - `src/ui/add_view.py::_on_save(...)`
+  - 使用：
+    - `repeat_text = self.combo_repeat.currentText().strip()`
+    - `schedule_data['repeat_rule'] = repeat_text`
+
+- 周界面 priority / repeat_rule 保存基线：
+  - `src/ui/add_view_week.py::_on_save(...)`
+  - 使用：
+    - `priority = self.combo_priority.currentIndex()`
+    - `repeat_text = self.combo_repeat.currentText().strip()`
+
+- `ScheduleRepeatService` 重复规则基线：
+  - `NON_REPEAT_RULES = ("none", "无", "不重复", "")`
+  - `REPEAT_COUNTS = {"每天": 365, "每周": 52, "每月": 12}`
+  - 只明确支持：
+    - `每天`
+    - `每周`
+    - `每月`
+  - 未支持：
+    - `每年`
+    - `daily / weekly / monthly / yearly`
+
+- 数据层非重复兼容基线：
+  - `src/data/database.py::add_schedule(...)`
+  - 非重复分支兼容：
+    - `none`
+    - `无`
+    - `不重复`
+    - 空字符串
+  - 本轮未修改该兼容逻辑
+
+- 月界面 `combo_priority` 修正结果：
+  - 已从：
+    - `["无", "低", "中", "高"]`
+  - 改为：
+    - `["低", "中", "高"]`
+  - 结果语义：
+    - index 0 = 低
+    - index 1 = 中
+    - index 2 = 高
+  - `reset_form(...)` 仍执行：
+    - `combo_priority.setCurrentIndex(0)`
+
+- 月界面 `combo_repeat` 确认结果：
+  - 保持：
+    - `无`
+    - `每天`
+    - `每周`
+    - `每月`
+  - 未新增：
+    - `每年`
+    - `daily / weekly / monthly / yearly`
+
+- `_on_save(...)` 保存字段对齐结果：
+  - 已对齐为使用：
+    - `self.combo_priority.currentIndex()`
+    - `self.combo_repeat.currentText().strip()`
+  - 当前月界面 `schedule_data` 包含：
+    - `title`
+    - `item_type = "schedule"`
+    - `priority`
+    - `repeat_rule`
+    - `description`
+    - `start_time`
+    - `end_time`
+    - `reminder_time`
+    - `is_alarm`
+    - `alarm_duration`
+    - `category_id`
+  - 仍保持：
+    - 未设置时间不保存
+    - 保存成功后仍 `saved.emit()`
+
+- 是否未新增 todo 支持：
+  - 是。
+  - 月界面仍固定：
+    - `item_type = "schedule"`
+
+- 是否未新增每年 / English repeat rule：
+  - 是。
+  - 月界面未引入：
+    - `每年`
+    - `daily`
+    - `weekly`
+    - `monthly`
+    - `yearly`
+
+- 是否未修改重复服务 / 数据层：
+  - 是。
+  - 未修改：
+    - `src/services/schedule_repeat_service.py`
+    - `src/data/database.py`
+
+- mock 保存结构验收结果：
+  - 使用 monkeypatch 截获：
+    - `db_manager.add_schedule(schedule_data)`
+  - 未走真实写库
+  - 截获结果通过：
+    - `title == '__mock_m5f_month_save__'`
+    - `item_type == 'schedule'`
+    - `priority == 2`
+    - `repeat_rule == '无'`
+    - `description == 'mock validation only'`
+    - `start_time == 目标开始时间`
+    - `end_time == 目标结束时间`
+    - `reminder_time == 目标提醒时间`
+    - `is_alarm is True`
+    - `alarm_duration == 1`
+    - `category_id == 12345`
+  - `saved` 信号也已触发
+
+- 是否未真实写入 `schedule.db`：
+  - 是。
+  - 本轮未运行真实 `db_manager.add_schedule(...)` 保存验收。
+  - 未运行 `每天 / 每周 / 每月` 的真实保存测试。
+
+- `schedule.db` 是否无 tracked diff：
+  - `git diff --name-only -- schedule.db`
+  - 无输出，通过。
+
+- 验证结果：
+  - 静态定位：
+    - 已确认月界面 `combo_priority` 只有 `低 / 中 / 高`
+    - 已确认月界面 `combo_repeat` 只有 `无 / 每天 / 每周 / 每月`
+    - 已确认 `_on_save(...)` 使用：
+      - `combo_priority.currentIndex()`
+      - `combo_repeat.currentText().strip()`
+  - import 验证：
+    - `MonthWindow`
+    - `InlineAddViewMonth`
+    - 通过
+  - offscreen 控件语义验证：
+    - `priorities == ['低', '中', '高']`
+    - `repeats == ['无', '每天', '每周', '每月']`
+    - 通过
+  - reset 默认值验证：
+    - `combo_priority.currentIndex() == 0`
+    - `combo_priority.currentText().strip() == '低'`
+    - `combo_repeat.currentIndex() == 0`
+    - `combo_repeat.currentText().strip() == '无'`
+    - 通过
+  - `_on_save(...)` 字段表达式检查：
+    - 通过
+    - 原始一条 Python 断言命令受 Windows / PowerShell 引号组合影响触发 `SyntaxError`
+    - 已用等价断言命令复跑通过，不属于功能失败
+  - mock 保存结构验收：
+    - 通过
+  - 重复选项静态确认：
+    - `['无', '每天', '每周', '每月']`
+    - 通过
+  - `py_compile`：
+    - `src/ui/month_window.py`
+    - `main.py`
+    - 通过
+
+- 禁止范围检查结果：
+  - 以下均无 diff：
+    - `src/ui/main_window.py`
+    - `src/ui/week_window.py`
+    - `src/ui/add_view.py`
+    - `src/ui/add_view_week.py`
+    - `src/ui/time_picker.py`
+    - `src/ui/time_picker_week.py`
+    - `src/ui/alarm_picker.py`
+    - `src/ui/list_picker.py`
+    - `src/ui/calendar_pop.py`
+    - `src/ui/common`
+    - `src/ui/popups`
+    - `src/ui/utils`
+    - `src/controllers`
+    - `src/data`
+    - `src/repositories`
+    - `src/services`
+    - `src/theme`
+    - `src/utils/signals.py`
+    - `src/utils/styles.py`
+    - `assets`
+    - `main.py`
+    - `requirements.txt`
+    - `schedule.db`
+
+- 最终 diff 范围检查结果：
+  - `git diff --check`
+    - 通过
+  - `git diff --name-only`
+    - `manage_instruction/Work_Log.md`
+    - `manage_instruction/Work_Task_Prompts.md`
+    - `src/ui/month_window.py`
+  - `git status --short --branch`
+    - `## main...temp/main [ahead 66]`
+    - `M manage_instruction/Work_Log.md`
+    - `M manage_instruction/Work_Task_Prompts.md`
+    - `M src/ui/month_window.py`
+  - 说明：
+    - `manage_instruction/Work_Task_Prompts.md` 已更新为 M-5f 复核锚点
+
+- 未完成事项：
+  - `M-5g` 再做整体验收
+  - 月界面右键菜单未接入
+  - 月界面 todo 支持未接入
+
+- 风险或疑点：
+  - 月界面当前 `repeat_rule` 保存已与主界面对齐，但真实重复写库仍未在本轮验证；这是刻意收口，以避免 `每天 / 每周 / 每月` 真实生成批量数据污染本地 SQLite。
+  - 控制台在 `gbk` 输出下打印中文时仍可能出现乱码展示，例如 `无 -> ÎŢ`；当前断言已基于 Python 字符串真实值通过，不影响功能结论。
+
+- 顾问窗口复核补充：
+  - 对照 `Work_Task_Prompts.md` 与本轮执行日志复核，通过。
+  - 修正说明：`src/ui/month_window.py` 是 M-5f 本轮源码修改，不应记录为开工前既有 diff；`Work_Task_Prompts.md` 本轮更新为 M-5f 复核锚点。
+  - 复跑 import 验证：通过。
+  - 复跑 offscreen 控件语义验证：通过，`combo_priority == ['低', '中', '高']`，`combo_repeat == ['无', '每天', '每周', '每月']`。
+  - 复跑 reset 默认值验证：通过，priority 默认 `低`，repeat 默认 `无`；控制台中文显示乱码不影响断言。
+  - 复跑 `_on_save(...)` 字段表达式检查：通过；原提示词命令在 PowerShell 引号组合下触发 `SyntaxError`，已用等价断言命令复跑。
+  - 复跑 mock 保存结构验收：通过，截获 `schedule_data` 字段正确，未真实写入数据库。
+  - 复跑重复选项静态确认：通过。
+  - 复跑 `py_compile`：通过。
+  - 复跑 `main import`：通过。
+  - 复跑 `schedule.db` tracked diff：无输出。
+  - 复跑禁止范围检查：无输出。

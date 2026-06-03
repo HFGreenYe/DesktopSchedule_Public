@@ -1,53 +1,80 @@
-# 当前复核锚点：M-5e 已执行
+# 当前复核锚点：M-5f 已执行
 
 当前状态：
 
-- M-5e 已执行，等待决策/顾问窗口复核。
-- 下一步候选：M-5f。
-- 下方保留 M-5e 已执行提示词全文，供日志对照复核。
+- M-5f 已执行，等待决策/顾问窗口复核。
+- 下一步候选：M-5g。
+- 下方保留 M-5f 已执行提示词全文，供日志对照复核。
 
-## M-5e：月界面提醒与清单选择接入
+## M-5f：月界面紧急性 / 重复规则 / 保存结构对齐
 
-请执行 `M-5e：月界面提醒与清单选择接入`。本轮只接入月界面添加表单的提醒 picker 和清单 picker，不处理紧急性 / 重复规则保存，不接右键菜单，不进入 `M-5f / M-5g`。
+请执行 `M-5f：月界面紧急性 / 重复规则 / 保存结构对齐`。本轮只对齐月界面添加表单的紧急性、重复规则和最终保存字段语义，不接右键菜单，不进入 `M-5g`。
 
 ## 1. 本轮目标
 
-基于 `M-5b` 审查结论、`M-5c` 表单壳、`M-5d` 时间选择接入，本轮为月界面添加表单接入现有：
+基于 `M-5b` 审查结论、`M-5c` 表单壳、`M-5d` 时间选择、`M-5e` 提醒与清单选择，本轮完成月界面添加表单保存结构与主界面添加页的字段语义对齐。
 
-- `AlarmPickerView`
-- `ListPickerView`
+重点：
 
-目标：
-
-- 点击月界面添加表单的提醒按钮时，打开月界面内部提醒选择页。
-- 提醒 picker 的目标时间应来自已选日程时间：
-  - 优先 `selected_start_time`
-  - 否则 `selected_end_time`
-- 若尚未设置日程时间，提醒按钮不得打开提醒 picker，应提示先设置时间。
-- 提醒确认后回填到：
-  - `InlineAddViewMonth.set_alarm_data(reminder_time, is_alarm_mode, alarm_duration)`
-- 点击月界面添加表单的清单按钮时，打开月界面内部清单选择页。
-- 清单 picker 必须使用 `list_type="schedule"`。
-- 清单确认后回填到：
-  - `InlineAddViewMonth.set_list_data(category_id, category_name)`
-- 保存时允许写入现有提醒与清单字段：
-  - `reminder_time`
-  - `is_alarm`
-  - `alarm_duration`
-  - `category_id`
-- 不修改主界面 / 周界面添加页。
-- 不修改 picker 源文件。
+- 对齐主界面 `AddScheduleView._on_save(...)` 的已实现语义。
+- `priority` 使用 `combo_priority.currentIndex()`。
+- `repeat_rule` 使用 `combo_repeat.currentText().strip()`。
+- 不直接按 UI 文案硬写新的映射表。
 - 不新增数据库字段。
+- 不新增新的重复规则。
 - 不新增 todo 支持。
+- 不修改主界面 / 周界面添加页。
 
-本轮必须保持：
+必须先确认当前真实基线：
 
-- M-5d 时间选择行为不回退。
-- 未设置时间时仍不得保存日程。
-- `priority` 仍保持旧值 `0`。
-- `repeat_rule` 仍保持旧值 `none`。
-- 不让 `combo_priority / combo_repeat` 影响保存。
-- 不接右键菜单。
+- 主界面 `src/ui/add_view.py`：
+  - `priority = self.combo_priority.currentIndex()`
+  - `repeat_text = self.combo_repeat.currentText().strip()`
+  - 保存字段包含：
+    - `title`
+    - `item_type`
+    - `priority`
+    - `repeat_rule`
+    - `description`
+    - `start_time`
+    - `end_time`
+    - `reminder_time`
+    - `is_alarm`
+    - `alarm_duration`
+    - `category_id`
+- 周界面 `src/ui/add_view_week.py` 也使用相同保存字段语义。
+- 当前重复服务只明确支持：
+  - `每天`
+  - `每周`
+  - `每月`
+- 非重复兼容：
+  - `none`
+  - `无`
+  - `不重复`
+  - 空字符串
+- `none` 是历史兼容值 / 数据库默认值之一，不得误删或改动服务层兼容规则。
+- 本轮月界面 UI 保存时应对齐主界面显示值，不新增 `daily / weekly / monthly / yearly` 行为。
+- 不新增 `每年` 行为。
+
+本轮应修正一个现有月界面语义风险：
+
+- 月界面当前 `combo_priority` 为 `["无", "低", "中", "高"]`。
+- 主界面和周界面的紧急性选项是 `["低", "中", "高"]`，保存值为 index：
+  - `0 = 低`
+  - `1 = 中`
+  - `2 = 高`
+- 因此 M-5f 应将月界面紧急性控件对齐为 `["低", "中", "高"]`，不要保留“无”，避免保存值与 UI 文案错位。
+
+重复规则控件应继续对齐主界面语义：
+
+- 显示项为：
+  - `无`
+  - `每天`
+  - `每周`
+  - `每月`
+- 保存值使用 `currentText().strip()`。
+- 不写新的英文 repeat rule。
+- 不新增每年。
 
 ## 2. 允许 / 禁止
 
@@ -87,27 +114,28 @@
 - `manage_instruction/Final_Formulation.md`
 - `manage_instruction/Work_Formulation.md`
 - `manage_instruction/Work_Instruction.md`
+- `manage_instruction/Work_Snapshot.md`
 - `manage_instruction/ReconstructionDolder/`
+
+### 数据库约束
+
+- 本轮不得真实写入 `schedule.db`。
+- 不运行 `db_manager.add_schedule(...)` 的真实数据库写入路径。
+- 保存结构验收必须用 mock / monkeypatch 截获 `db_manager.add_schedule(schedule_data)` 入参。
+- 不允许用 `每天 / 每周 / 每月` 做真实写库验收，避免批量生成重复日程。
+- 最终 `schedule.db` 必须无 tracked diff。
 
 ### 禁止事项
 
-- 不修改 `AlarmPickerView` 源文件。
-- 不修改 `ListPickerView` 源文件。
-- 不修改 `TimePickerView` 源文件。
-- 不修改主窗口 / 周窗口 picker 链路。
 - 不新增数据库字段。
 - 不新增 todo 保存支持。
-- 不处理紧急性保存。
-- 不处理重复规则保存。
+- 不新增 English repeat rule 行为。
+- 不新增 `每年/yearly` 行为。
+- 不修改 `ScheduleRepeatService`。
+- 不修改 `DatabaseManager.add_schedule(...)`。
+- 不修改主界面 / 周界面添加页。
 - 不接月界面右键菜单。
-- 不在验证中创建或删除真实清单。
-- 不为通过测试写入 `schedule.db`。
 - 不提交 Git。
-
-说明：
-
-- `ListPickerView` 本身已有新增 / 删除清单 UI，本轮不修改该组件，不额外屏蔽其既有能力。
-- 但本轮验证不得通过 UI 或数据库创建、删除真实清单，只允许读取已有清单并回填已有 id 或 `None`。
 
 若开工前已有 diff，必须在 `Work_Log.md` 中单独记录，不视为本轮问题。
 
@@ -122,264 +150,125 @@ Get-Content -Path manage_instruction\Work_Instruction.md -Encoding UTF8
 Get-Content -Path manage_instruction\Work_Log.md -Encoding UTF8
 Get-Content -Path manage_instruction\Work_Task_Prompts.md -Encoding UTF8
 Get-Content -Path src\ui\month_window.py -Encoding UTF8
-Get-Content -Path src\ui\alarm_picker.py -Encoding UTF8
-Get-Content -Path src\ui\list_picker.py -Encoding UTF8
+Get-Content -Path src\ui\add_view.py -Encoding UTF8
+Get-Content -Path src\ui\add_view_week.py -Encoding UTF8
+Get-Content -Path src\services\schedule_repeat_service.py -Encoding UTF8
 Get-Content -Path src\data\database.py -Encoding UTF8
 ```
 
 重点确认：
 
-- `InlineAddViewMonth.req_open_alarm_picker` 已存在。
-- `InlineAddViewMonth.req_open_list_picker` 已存在。
-- `InlineAddViewMonth.set_alarm_data(...)` 已存在。
-- `InlineAddViewMonth.set_list_data(...)` 已存在。
-- `AlarmPickerView` 的接口是：
-  - `set_initial_data(target_time, is_alarm=False, duration=0)`
-  - `confirm_requested(remind_dt, is_alarm, duration)`
-  - `back_requested`
-- `ListPickerView` 的接口是：
-  - `load_data(current_selected_id=None, list_type=None)`
-  - `confirm_requested(category_id)`
-  - `back_requested`
-- `db_manager.get_category(category_id)` 可用于按 id 获取清单名称。
+- 主界面 `priority` 保存方式。
+- 主界面 `repeat_rule` 保存方式。
+- 周界面 `priority / repeat_rule` 保存方式。
+- 月界面当前 `combo_priority / combo_repeat` 的选项。
+- 月界面 `_on_save(...)` 当前字段。
+- `ScheduleRepeatService` 支持的重复规则与非重复兼容值。
+- `DatabaseManager.add_schedule(...)` 对 `none / 无 / 不重复 / 空字符串` 的兼容。
 
-### 3.2 在 `MonthWindow` 中接入月内 `AlarmPickerView / ListPickerView`
+### 3.2 对齐月界面紧急性控件
 
-在 `src/ui/month_window.py` 中做最小接入。
+修改 `InlineAddViewMonth` 的 `combo_priority`：
 
-建议实现方向：
+- 从当前：
+  - `["无", "低", "中", "高"]`
+- 改为对齐主界面 / 周界面：
+  - `["低", "中", "高"]`
 
-- 从现有 picker 导入：
-  - `AlarmPickerView`
-  - `ListPickerView`
-- 在 `MonthWindow` 内创建月界面专用页面，例如：
+要求：
 
-```python
-self.page_alarm = AlarmPickerView(self)
-self.page_list = ListPickerView(self)
-```
+- `reset_form(...)` 仍设置 `combo_priority.setCurrentIndex(0)`。
+- index 0 表示低紧急性。
+- index 1 表示中紧急性。
+- index 2 表示高紧急性。
+- 不新增“无紧急性”的数据库语义。
+- 不修改主界面 / 周界面的选项。
 
-- 不使用 `MainWindow.page_alarm / page_list`。
-- 不修改 `MainWindow`。
-- 不修改 `WeekWindow`。
-- 不修改 picker 源文件。
-- 将两个 picker 放入月界面左侧添加区域所在布局。
-- 默认隐藏：
+### 3.3 保持重复规则控件语义
 
-```python
-self.page_alarm.hide()
-self.page_list.hide()
-```
+确认 `combo_repeat` 保持：
 
-打开 picker 时：
+- `无`
+- `每天`
+- `每周`
+- `每月`
 
-- 隐藏 `inline_add_view`
-- 隐藏 `page_time`
-- 隐藏另一个非目标 picker
-- 只显示当前目标 picker
+要求：
 
-返回 picker 时：
+- 不新增 `每年`。
+- 不新增 `daily / weekly / monthly / yearly`。
+- 不在 UI 和保存层做额外映射。
+- 保存时使用 `self.combo_repeat.currentText().strip()`。
+- 不修改 `ScheduleRepeatService.NON_REPEAT_RULES`，保留历史兼容值 `none`。
 
-- 隐藏当前 picker
-- 恢复 `inline_add_view`
+### 3.4 对齐 `_on_save(...)` 保存结构
 
-### 3.3 处理 picker 内嵌窗口控制按钮
+修改 `InlineAddViewMonth._on_save(...)`，使其与主界面已实现字段语义对齐。
 
-`AlarmPickerView` 和 `ListPickerView` 都有独立页面风格的悬浮按钮。本轮内嵌到月界面时必须处理实例按钮，不改 picker 源文件。
-
-对 `self.page_alarm` 和 `self.page_list`：
-
-- `btn_suspend`：
-  - 隐藏。
-  - 不触发月界面挂起。
-- `btn_close`：
-  - 不得关闭整个 `MonthWindow`。
-  - 断开实例原有 `window().close()` 行为。
-  - 重连到对应返回方法：
-    - `back_from_alarm_picker()`
-    - `back_from_list_picker()`
-
-只允许在 `MonthWindow` 创建的实例上处理。
-
-### 3.4 连接提醒请求信号
-
-连接：
+保存字段应包含：
 
 ```python
-self.inline_add_view.req_open_alarm_picker.connect(self.go_to_alarm_picker)
-```
-
-修改 `InlineAddViewMonth.btn_alarm` 点击行为：
-
-- 不再只是 M-5c toast。
-- 点击时先判断是否已有时间：
-  - 优先使用 `selected_start_time`
-  - 否则使用 `selected_end_time`
-- 若没有时间：
-  - 不 emit picker 请求。
-  - toast 提示先设置时间。
-- 若有时间：
-  - emit：
-
-```python
-self.req_open_alarm_picker.emit(target_time, self.selected_is_alarm_mode, self.selected_alarm_duration)
+schedule_data = {
+    "title": title,
+    "item_type": "schedule",
+    "priority": self.combo_priority.currentIndex(),
+    "repeat_rule": self.combo_repeat.currentText().strip(),
+    "description": self.input_desc.toPlainText().strip(),
+    "start_time": self.selected_start_time,
+    "end_time": self.selected_end_time,
+    "reminder_time": self.selected_reminder,
+    "is_alarm": self.selected_is_alarm_mode,
+    "alarm_duration": self.selected_alarm_duration,
+    "category_id": self.selected_list_id,
+}
 ```
 
 要求：
 
-- `InlineAddViewMonth` 不直接依赖 `AlarmPickerView`。
-- `InlineAddViewMonth` 不直接写数据库。
+- 继续保持 M-5d 的“未设置时间不保存”策略。
+- 继续保持 `item_type = "schedule"`。
+- 不新增 todo 分支。
+- 不新增字段。
+- 不改 `db_manager.add_schedule(...)` 调用方式。
+- 保存成功后继续 emit `saved`。
+- 保存成功后的 reset / 刷新逻辑保持现有月界面行为。
 
-新增或完善 `MonthWindow.go_to_alarm_picker(target_time, is_alarm, duration)`：
+### 3.5 不做真实写库验收
 
-- 调用：
+本轮只用 mock / monkeypatch 验证 `_on_save(...)` 传给 `db_manager.add_schedule(...)` 的 `schedule_data`。
 
-```python
-self.page_alarm.set_initial_data(target_time, is_alarm, duration)
-```
+原因：
 
-- 隐藏其他月添加页组件。
-- 显示 `page_alarm`。
+- `每天 / 每周 / 每月` 会批量生成 366 / 53 / 13 条日程。
+- 即使非重复临时日程保存后删除，也可能改变本地 SQLite 文件内容。
+- M-5g 才做整体验收，可另行设计真实写库和清理策略。
 
-### 3.5 提醒确认回填
+本轮不得：
 
-连接：
+- 真实保存临时日程。
+- 真实删除临时日程。
+- 通过 UI 新增 / 删除清单。
+- 让 `schedule.db` 出现 tracked diff。
 
-```python
-self.page_alarm.back_requested.connect(self.back_from_alarm_picker)
-self.page_alarm.confirm_requested.connect(self.on_alarm_confirmed)
-```
-
-新增方法，例如：
-
-```python
-def back_from_alarm_picker(self):
-    self.page_alarm.hide()
-    self.inline_add_view.show()
-
-def on_alarm_confirmed(self, remind_dt, is_alarm, duration):
-    self.inline_add_view.set_alarm_data(remind_dt, is_alarm, duration)
-    self.back_from_alarm_picker()
-```
-
-要求：
-
-- 只回填到 `InlineAddViewMonth`。
-- 不直接写数据库。
-- 不触发保存。
-- 不刷新日程列表。
-
-### 3.6 连接清单请求信号
-
-连接：
-
-```python
-self.inline_add_view.req_open_list_picker.connect(self.go_to_list_picker)
-```
-
-修改 `InlineAddViewMonth.btn_list` 点击行为：
-
-- 不再只是 M-5c toast。
-- 点击时 emit：
-
-```python
-self.req_open_list_picker.emit(self.selected_list_id, "schedule")
-```
-
-要求：
-
-- 月界面当前只支持 schedule 保存语义。
-- list picker 必须使用 `list_type="schedule"`。
-- 不新增 todo 支持。
-- `InlineAddViewMonth` 不直接依赖 `ListPickerView`。
-
-新增或完善 `MonthWindow.go_to_list_picker(current_category_id, list_type="schedule")`：
-
-- 强制使用 schedule 类型：
-
-```python
-self.page_list.load_data(current_category_id, list_type="schedule")
-```
-
-- 隐藏其他月添加页组件。
-- 显示 `page_list`。
-
-### 3.7 清单确认回填
-
-连接：
-
-```python
-self.page_list.back_requested.connect(self.back_from_list_picker)
-self.page_list.confirm_requested.connect(self.on_list_confirmed)
-```
-
-新增方法，例如：
-
-```python
-def back_from_list_picker(self):
-    self.page_list.hide()
-    self.inline_add_view.show()
-
-def on_list_confirmed(self, category_id):
-    ...
-    self.inline_add_view.set_list_data(category_id, category_name)
-    self.back_from_list_picker()
-```
-
-`category_name` 获取建议：
-
-- 若 `category_id is None`：
-  - `category_name = None`
-- 若有 `category_id`：
-  - 使用 `db_manager.get_category(category_id)` 获取名称。
-  - 若查询不到，允许名称为空或显示 `#id`，但必须日志说明。
-- 不修改 `ListPickerView.confirm_requested` 签名。
-- 不创建、删除清单。
-
-### 3.8 保存字段最小接入
-
-允许在 `InlineAddViewMonth._on_save(...)` 中只新增提醒与清单现有字段：
-
-- `reminder_time`: `self.selected_reminder`
-- `is_alarm`: `self.selected_is_alarm_mode`
-- `alarm_duration`: `self.selected_alarm_duration`
-- `category_id`: `self.selected_list_id`
-
-保持以下字段不变：
-
-- `item_type`: 仍为 `schedule`
-- `priority`: 仍为 `0`
-- `repeat_rule`: 仍为 `none`
-- `description`: 仍取详情输入
-- `start_time / end_time`: 仍使用 M-5d 选中时间逻辑
-
-禁止在 `_on_save(...)` 中新增：
-
-- `combo_priority` 保存
-- `combo_repeat` 保存
-- 新数据库字段
-- todo 保存分支
-
-本轮不要求执行真实保存验证，避免写入 `schedule.db`。真实写入回归留到 `M-5g`。
-
-### 3.9 更新 `Work_Log.md`
+### 3.6 更新 Work_Log.md
 
 至少记录：
 
-- 本轮任务名称：`M-5e（月界面提醒与清单选择接入）`
+- 本轮任务名称：`M-5f（月界面紧急性 / 重复规则 / 保存结构对齐）`
 - 开工前 git 状态
 - 实际修改文件
-- `AlarmPickerView` 接入方式
-- `ListPickerView` 接入方式
-- 内嵌后 `btn_close / btn_suspend` 处理方式
-- `btn_alarm` 是否按“必须先有时间”打开 picker
-- `btn_list` 是否以 `list_type="schedule"` 打开 picker
-- `on_alarm_confirmed(...)` 回填结果
-- `on_list_confirmed(...)` 回填结果
-- `_on_save(...)` 提醒 / 清单字段接入策略
-- 是否未接 priority/repeat 保存
-- 是否未创建 / 删除清单
-- 是否未写入 `schedule.db`
+- 主界面 priority / repeat_rule 基线确认结果
+- 周界面 priority / repeat_rule 基线确认结果
+- `ScheduleRepeatService` 重复规则基线确认结果
+- 月界面 `combo_priority` 是否已从 `无/低/中/高` 改为 `低/中/高`
+- 月界面 `combo_repeat` 是否保持 `无/每天/每周/每月`
+- `_on_save(...)` 保存字段对齐结果
+- 是否未新增 todo 支持
+- 是否未新增每年 / English repeat rule
+- 是否未修改重复服务 / 数据层
+- mock 保存结构验收结果
+- 是否未真实写入 `schedule.db`
+- `schedule.db` 是否无 tracked diff
 - 验证命令和结果
 - diff 范围检查结果
 - 未完成事项
@@ -387,82 +276,65 @@ def on_list_confirmed(self, category_id):
 
 ## 4. 验收命令
 
-### 4.1 定位新增链路
+### 4.1 定位保存结构与控件项
 
 ```powershell
-rg -n "AlarmPickerView|ListPickerView|page_alarm|page_list|go_to_alarm_picker|back_from_alarm_picker|on_alarm_confirmed|go_to_list_picker|back_from_list_picker|on_list_confirmed|req_open_alarm_picker|req_open_list_picker|set_alarm_data|set_list_data|btn_alarm|btn_list|selected_reminder|selected_is_alarm_mode|selected_alarm_duration|selected_list_id|selected_list_name|_on_save|btn_close|btn_suspend" src/ui/month_window.py
+rg -n "combo_priority|combo_repeat|priority|repeat_rule|selected_start_time|selected_end_time|selected_reminder|selected_is_alarm_mode|selected_alarm_duration|selected_list_id|_on_save|每天|每周|每月|每年|daily|weekly|monthly|yearly|none" src/ui/month_window.py src/ui/add_view.py src/ui/add_view_week.py src/services/schedule_repeat_service.py src/data/database.py
 ```
 
 预期：
 
-- `AlarmPickerView / ListPickerView` 只在 `month_window.py` 中被月界面局部使用。
-- `btn_alarm` 会在有时间时 emit `req_open_alarm_picker`。
-- `btn_list` 会 emit `req_open_list_picker`。
-- 新增 `go_to_alarm_picker / back_from_alarm_picker / on_alarm_confirmed` 或等价方法。
-- 新增 `go_to_list_picker / back_from_list_picker / on_list_confirmed` 或等价方法。
-- `page_alarm.btn_close / page_list.btn_close` 不会关闭整个月界面。
+- 月界面 `combo_priority` 只有 `低 / 中 / 高`。
+- 月界面 `combo_repeat` 只有 `无 / 每天 / 每周 / 每月`。
+- 月界面 `_on_save(...)` 使用：
+  - `combo_priority.currentIndex()`
+  - `combo_repeat.currentText().strip()`
+- 不出现新增 `每年/yearly` 行为。
+- `none` 只作为历史兼容 / 默认值存在，不作为月界面新增写入值。
 
 ### 4.2 import 验证
 
 ```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.ui.month_window import MonthWindow, InlineAddViewMonth; from src.ui.alarm_picker import AlarmPickerView; from src.ui.list_picker import ListPickerView; print('month alarm/list imports ok', MonthWindow, InlineAddViewMonth, AlarmPickerView, ListPickerView)"
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.ui.month_window import MonthWindow, InlineAddViewMonth; print('month import ok', MonthWindow, InlineAddViewMonth)"
 ```
 
-### 4.3 offscreen 构造验证
+### 4.3 offscreen 控件语义验证
 
 ```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from src.ui.month_window import MonthWindow; app=QApplication([]); w=MonthWindow(); print('month created', w is not None); print('has page_alarm', hasattr(w, 'page_alarm')); print('has page_list', hasattr(w, 'page_list')); assert hasattr(w, 'page_alarm'); assert hasattr(w, 'page_list')"
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from src.ui.month_window import InlineAddViewMonth; app=QApplication([]); v=InlineAddViewMonth(); priorities=[v.combo_priority.itemText(i).strip() for i in range(v.combo_priority.count())]; repeats=[v.combo_repeat.itemText(i).strip() for i in range(v.combo_repeat.count())]; print('priorities', priorities); print('repeats', repeats); assert priorities == ['低', '中', '高']; assert repeats == ['无', '每天', '每周', '每月']"
 ```
 
-### 4.4 未设置时间时提醒不打开验证
+### 4.4 reset 默认值验证
 
 ```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from PyQt6.QtCore import QDate; from src.ui.month_window import MonthWindow; app=QApplication([]); w=MonthWindow(); w.inline_add_view.reset(QDate.currentDate().addDays(1)); w.inline_add_view.btn_alarm.click(); print('alarm visible without time', w.page_alarm.isVisible()); assert not w.page_alarm.isVisible()"
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from src.ui.month_window import InlineAddViewMonth; app=QApplication([]); v=InlineAddViewMonth(); v.combo_priority.setCurrentIndex(2); v.combo_repeat.setCurrentIndex(2); v.reset_form(); print('priority index', v.combo_priority.currentIndex(), v.combo_priority.currentText().strip()); print('repeat index', v.combo_repeat.currentIndex(), v.combo_repeat.currentText().strip()); assert v.combo_priority.currentIndex() == 0; assert v.combo_priority.currentText().strip() == '低'; assert v.combo_repeat.currentIndex() == 0; assert v.combo_repeat.currentText().strip() == '无'"
 ```
 
-### 4.5 有时间时提醒 picker 打开验证
+### 4.5 `_on_save(...)` 字段表达式检查
 
 ```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from datetime import datetime; from PyQt6.QtWidgets import QApplication; from PyQt6.QtCore import QDate; from src.ui.month_window import MonthWindow; app=QApplication([]); w=MonthWindow(); target=QDate.currentDate().addDays(1); end=datetime(target.year(), target.month(), target.day(), 10, 0); w.inline_add_view.reset(target); w.inline_add_view.set_time_data(None, end); w.inline_add_view.btn_alarm.click(); print('alarm visible', w.page_alarm.isVisible()); print('target time', w.page_alarm.target_time); assert w.page_alarm.isVisible(); assert w.page_alarm.target_time == end"
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import inspect; from src.ui.month_window import InlineAddViewMonth; src=inspect.getsource(InlineAddViewMonth._on_save); assert 'combo_priority.currentIndex()' in src; assert 'combo_repeat.currentText().strip()' in src; assert \"'item_type': 'schedule'\" in src or '\"item_type\": \"schedule\"' in src; assert 'selected_start_time' in src; assert 'selected_end_time' in src; assert 'selected_reminder' in src; assert 'selected_is_alarm_mode' in src; assert 'selected_alarm_duration' in src; assert 'selected_list_id' in src; assert 'yearly' not in src; assert '每年' not in src; print('_on_save priority/repeat/save structure ok')"
 ```
 
-### 4.6 提醒确认回填验证
+### 4.6 mock 保存结构验收
+
+使用 monkeypatch 截获 `db_manager.add_schedule(...)` 入参，不真实写库。
 
 ```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from datetime import datetime; from PyQt6.QtWidgets import QApplication; from PyQt6.QtCore import QDate; from src.ui.month_window import MonthWindow; app=QApplication([]); w=MonthWindow(); target=QDate.currentDate().addDays(1); remind=datetime(target.year(), target.month(), target.day(), 9, 50); w.inline_add_view.reset(target); w.on_alarm_confirmed(remind, True, 1); print('alarm state', w.inline_add_view.selected_reminder, w.inline_add_view.selected_is_alarm_mode, w.inline_add_view.selected_alarm_duration); assert w.inline_add_view.selected_reminder == remind; assert w.inline_add_view.selected_is_alarm_mode is True; assert w.inline_add_view.selected_alarm_duration == 1"
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from datetime import datetime; from PyQt6.QtWidgets import QApplication; from PyQt6.QtCore import QDate; from src.ui.month_window import InlineAddViewMonth; from src.data import database; app=QApplication([]); v=InlineAddViewMonth(); target=QDate.currentDate().addDays(1); start=datetime(target.year(), target.month(), target.day(), 9, 0); end=datetime(target.year(), target.month(), target.day(), 10, 0); v.reset(target); v.input_title.setText('__mock_m5f_month_save__'); v.input_desc.setPlainText('mock validation only'); v.set_time_data(start, end); v.set_alarm_data(start, True, 1); v.set_list_data(12345, 'mock-list'); v.combo_priority.setCurrentIndex(2); v.combo_repeat.setCurrentIndex(0); calls=[]; captured=[]; original=database.db_manager.add_schedule; database.db_manager.add_schedule=lambda data: captured.append(dict(data)) or True; v.saved.connect(lambda: calls.append('saved')); v._on_save(); database.db_manager.add_schedule=original; print('saved calls', calls); print('captured', captured); assert calls == ['saved']; assert len(captured) == 1; data=captured[0]; assert data['title'] == '__mock_m5f_month_save__'; assert data['item_type'] == 'schedule'; assert data['priority'] == 2; assert data['repeat_rule'] == '无'; assert data['description'] == 'mock validation only'; assert data['start_time'] == start; assert data['end_time'] == end; assert data['reminder_time'] == start; assert data['is_alarm'] is True; assert data['alarm_duration'] == 1; assert data['category_id'] == 12345"
 ```
 
-### 4.7 清单 picker 打开验证
+### 4.7 确认未做重复真实写库
+
+本轮不运行 `每天 / 每周 / 每月` 的 `_on_save()` 真实保存测试。
+
+只做静态确认：
 
 ```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from PyQt6.QtCore import QDate; from src.ui.month_window import MonthWindow; app=QApplication([]); w=MonthWindow(); w.inline_add_view.reset(QDate.currentDate().addDays(1)); w.inline_add_view.btn_list.click(); print('list visible', w.page_list.isVisible()); print('list type', getattr(w.page_list, 'current_list_type', None)); assert w.page_list.isVisible(); assert w.page_list.current_list_type == 'schedule'"
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from src.ui.month_window import InlineAddViewMonth; app=QApplication([]); v=InlineAddViewMonth(); repeats=[v.combo_repeat.itemText(i).strip() for i in range(v.combo_repeat.count())]; print('repeat options', repeats); assert repeats == ['无', '每天', '每周', '每月']"
 ```
 
-### 4.8 清单确认回填验证
-
-```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from src.ui.month_window import MonthWindow; from src.data.database import db_manager; app=QApplication([]); w=MonthWindow(); cats=db_manager.get_active_categories(list_type='schedule'); sample=cats[0] if cats else None; cid=sample.id if sample else None; w.on_list_confirmed(cid); print('list state', w.inline_add_view.selected_list_id, w.inline_add_view.selected_list_name); assert w.inline_add_view.selected_list_id == cid"
-```
-
-### 4.9 内嵌关闭按钮验证
-
-```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -u -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from datetime import datetime; from PyQt6.QtWidgets import QApplication; from PyQt6.QtCore import QDate; from src.ui.month_window import MonthWindow; app=QApplication([]); w=MonthWindow(); target=QDate.currentDate().addDays(1); end=datetime(target.year(), target.month(), target.day(), 10, 0); w.inline_add_view.reset(target); w.inline_add_view.set_time_data(None, end); w.go_to_alarm_picker(end, False, 0); print('before alarm close', w.page_alarm.isVisible(), w.inline_add_view.isVisible(), w.isHidden(), flush=True); w.page_alarm.btn_close.click(); print('after alarm close', w.page_alarm.isVisible(), w.inline_add_view.isVisible(), w.isHidden(), flush=True); assert not w.page_alarm.isVisible(); assert w.inline_add_view.isVisible(); assert not w.isHidden(); w.go_to_list_picker(None, 'schedule'); print('before list close', w.page_list.isVisible(), w.inline_add_view.isVisible(), w.isHidden(), flush=True); w.page_list.btn_close.click(); print('after list close', w.page_list.isVisible(), w.inline_add_view.isVisible(), w.isHidden(), flush=True); assert not w.page_list.isVisible(); assert w.inline_add_view.isVisible(); assert not w.isHidden()"
-```
-
-### 4.10 保存字段隔离检查
-
-检查 `_on_save(...)`：
-
-```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import inspect; from src.ui.month_window import InlineAddViewMonth; src=inspect.getsource(InlineAddViewMonth._on_save); assert 'reminder_time' in src; assert 'selected_reminder' in src; assert 'is_alarm' in src; assert 'selected_is_alarm_mode' in src; assert 'alarm_duration' in src; assert 'selected_alarm_duration' in src; assert 'category_id' in src; assert 'selected_list_id' in src; assert 'combo_priority' not in src; assert 'combo_repeat' not in src; print('_on_save alarm/list-only extension ok')"
-```
-
-### 4.11 不创建 / 删除清单验证约束
-
-本轮不要通过 UI 操作新增或删除清单。只允许读取已有清单并回填已有 id 或 `None`。
-
-检查 `schedule.db`：
+### 4.8 schedule.db diff 检查
 
 ```powershell
 git diff --name-only -- schedule.db
@@ -470,13 +342,13 @@ git diff --name-only -- schedule.db
 
 预期无输出。
 
-### 4.12 语法检查
+### 4.9 语法检查
 
 ```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src/ui/month_window.py src/ui/alarm_picker.py src/ui/list_picker.py main.py
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src/ui/month_window.py main.py
 ```
 
-### 4.13 禁止范围检查
+### 4.10 禁止范围检查
 
 ```powershell
 git diff --name-only -- src/ui/main_window.py
@@ -506,7 +378,7 @@ git diff --name-only -- schedule.db
 
 预期以上均无输出。
 
-### 4.14 总范围检查
+### 4.11 总范围检查
 
 ```powershell
 git diff --check
@@ -528,22 +400,22 @@ manage_instruction/Work_Task_Prompts.md
 
 更新 `manage_instruction/Work_Log.md`，至少记录：
 
-- 本轮任务名称：`M-5e（月界面提醒与清单选择接入）`
+- 本轮任务名称：`M-5f（月界面紧急性 / 重复规则 / 保存结构对齐）`
 - 开工前 git 状态
 - 实际修改文件
 - 是否存在开工前既有 diff
-- `AlarmPickerView` 接入方式
-- `ListPickerView` 接入方式
-- 内嵌后 `btn_close / btn_suspend` 处理方式
-- `btn_alarm` 未设置时间时是否阻止打开 picker
-- `btn_alarm` 有时间时是否打开 picker
-- `btn_list` 是否以 `list_type="schedule"` 打开 picker
-- `on_alarm_confirmed(...)` 回填验证结果
-- `on_list_confirmed(...)` 回填验证结果
-- `_on_save(...)` 提醒与清单字段接入策略
-- 是否未接 priority/repeat 保存
-- 是否未创建 / 删除清单
-- 是否未写入 `schedule.db`
+- 主界面 priority 保存基线
+- 主界面 repeat_rule 保存基线
+- 周界面 priority / repeat_rule 保存基线
+- 月界面 `combo_priority` 选项修正结果
+- 月界面 `combo_repeat` 选项确认结果
+- `_on_save(...)` 保存字段对齐结果
+- 是否未新增 todo 支持
+- 是否未新增每年 / English repeat rule
+- 是否未修改重复服务 / 数据层
+- mock 保存结构验收结果
+- 是否未真实写入 `schedule.db`
+- `schedule.db` 是否无 tracked diff
 - import / offscreen / py_compile 验证结果
 - 禁止范围检查结果
 - 未完成事项
@@ -551,22 +423,22 @@ manage_instruction/Work_Task_Prompts.md
 
 特别记录：
 
-- 本轮只接提醒 picker 和清单 picker。
-- 本轮不修改 `AlarmPickerView / ListPickerView` 源文件。
-- 本轮不修改主界面 / 周界面添加链路。
-- 本轮不接 priority/repeat 保存。
-- 后续 `M-5f` 再处理紧急性 / 重复规则 / 保存结构对齐。
+- 本轮只对齐月界面 priority / repeat_rule / 保存结构。
+- 本轮不做真实写库验收。
+- 本轮不修改 `ScheduleRepeatService` 或 `DatabaseManager.add_schedule(...)`。
+- 本轮不接月界面右键菜单。
+- 后续 `M-5g` 再做整体验收。
 
 ## 6. Work_Task_Prompts.md 处理要求
 
 如需要维护复核锚点，可将当前状态更新为：
 
 ```text
-M-5e 已执行，等待决策/顾问窗口复核。
-下一步候选：M-5f。
+M-5f 已执行，等待决策/顾问窗口复核。
+下一步候选：M-5g。
 ```
 
-不得在本轮自行写入 `M-5f` 的执行提示词。
+不得在本轮自行写入 `M-5g` 的执行提示词。
 
 ## 7. 完成后要求
 

@@ -275,7 +275,7 @@ class InlineAddViewMonth(QWidget):
         self.lbl_priority = QLabel("紧急性")
         self.lbl_priority.setStyleSheet("color: rgba(255,255,255,0.85); font-size: 11px; font-family: 'Microsoft YaHei';")
         self.combo_priority = QComboBox()
-        self.combo_priority.addItems(["无", "低", "中", "高"])
+        self.combo_priority.addItems(["低", "中", "高"])
         self.combo_priority.setFixedHeight(22)
         self.combo_priority.setStyleSheet(self._combo_style())
 
@@ -468,8 +468,8 @@ class InlineAddViewMonth(QWidget):
         schedule_data = {
             'title': title,
             'item_type': 'schedule',
-            'priority': 0,
-            'repeat_rule': 'none',
+            'priority': self.combo_priority.currentIndex(),
+            'repeat_rule': self.combo_repeat.currentText().strip(),
             'description': self.input_desc.toPlainText().strip(), 
             'start_time': self.selected_start_time,
             'end_time': self.selected_end_time,
