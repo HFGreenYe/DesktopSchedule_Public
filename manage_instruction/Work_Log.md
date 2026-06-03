@@ -883,3 +883,208 @@
 - 风险或疑点：
   - 本轮选中高亮完全基于 `user_selected_date`，而添加入口仍基于 `QCalendarWidget.selectedDate()`；两者在用户单击日期时通常同步，但产品语义尚未统一，已按要求留到 `M-5` 处理。
   - `QCalendarWidget.activated(QDate)` 在当前实现中承担“双击/激活跳转”职责；如果后续要严格区分鼠标双击与键盘激活，需要在后续工单单独细化，不在本轮扩大范围。
+
+## 2026-06-03 M-3 最终提示词写入
+
+- 任务：
+  - 审核并写入 `M-3（月格 hover 只读预览弹窗）` 最终执行提示词。
+- 实际修改文件：
+  - `manage_instruction/Work_Task_Prompts.md`
+  - `manage_instruction/Work_Log.md`
+- 审核修正：
+  - 明确 hover 事件应优先安装在 `QTableView.viewport()`，避免扩大到整个 `MonthWindow`。
+  - 明确使用 `indexAt(event.pos())` + 现有精确日期映射，不能用 `calendar.selectedDate()` 推断 hover 日期。
+  - 明确表头行、无效 index、无效 `QDate`、移出 viewport 时必须立即隐藏预览。
+  - 明确 hover 路径不得改变 `user_selected_date`、不得 emit `date_selected`、不得调用 `close_day_panels()`。
+  - 明确预览组件只接收日期和日程列表数据，不依赖 `db_manager`、Repository、Service、MainWindow 或 MonthWindow 具体实例。
+  - 明确可以新增 `date -> schedules` 只读缓存，但不得改变 M-1 marker 颜色/数量计算。
+  - 明确翻月、刷新 marker 缓存或窗口隐藏时应隐藏 hover 预览，避免旧日期浮窗残留。
+- 下一步：
+  - 执行窗口可按 `Work_Task_Prompts.md` 中最终 M-3 提示词执行。
+
+## 2026-06-03 M-3（月格 hover 只读预览弹窗）
+
+- 本轮任务名称：
+  - `M-3（月格 hover 只读预览弹窗）`
+
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 55]`
+
+- 开工前既有 diff：
+  - `manage_instruction/Work_Log.md`
+  - `manage_instruction/Work_Task_Prompts.md`
+
+- 实际修改文件：
+  - `src/ui/month_window.py`
+  - `src/ui/popups/month_day_hover_preview.py`
+  - `manage_instruction/Work_Log.md`
+
+- hover 预览组件位置：
+  - 新增 `src/ui/popups/month_day_hover_preview.py`
+  - 类名：`MonthDayHoverPreview`
+
+- hover 日期命中方式：
+  - 在 `MonthWindow` 内部对 `QCalendarWidget` 的 `QTableView.viewport()` 开启 mouse tracking 并安装 `eventFilter`。
+  - 鼠标移动时用：
+    - `self.calendar_table_view.indexAt(event.pos())`
+    - `self.cell_delegate._date_for_index(index)`
+  - 只对有效 index + 有效 `QDate` 显示预览。
+  - 表头行、无效 index、无效 `QDate` 会立即隐藏预览。
+
+- 预览弹窗定位方式，是否基于日期格右下角全局坐标：
+  - 是。
+  - 使用：
+    - `self.calendar_table_view.visualRect(index)`
+    - `self.calendar_viewport.mapToGlobal(cell_rect.bottomRight())`
+  - 预览显示在日期格右下角全局坐标基础上再偏移 `(+8, +8)`。
+
+- 鼠标移出日期格后如何立即隐藏：
+  - `eventFilter` 监听 `QEvent.Type.Leave`。
+  - 在无效 index / 无效日期 / viewport leave 时统一调用 `_hide_hover_preview()`。
+  - `_hide_hover_preview()` 会：
+    - 清空 `self.hovered_date`
+    - 隐藏 `self.hover_preview_popup`
+  - 同时在 `_refresh_schedule_marker_cache()` 与 `hideEvent()` 中也会隐藏预览，避免翻月、刷新或窗口隐藏后残留旧内容。
+
+- 预览是否只读：
+  - 是。
+  - 组件只包含文本展示，不包含编辑、删除、添加按钮。
+  - 不连接任何业务动作。
+  - 不触发任何页面跳转。
+
+- 预览数据来源和过滤规则：
+  - 在 `MonthWindow` 内新增只读缓存：
+    - `self.hover_schedule_cache`
+  - 通过 `_build_hover_schedule_cache()` 只读调用 `db_manager.get_all_schedules()` 构建。
+  - 过滤规则与 M-1 marker 逻辑对齐：
+    - 排除 `status == 2`
+    - 排除 `item_type != "schedule"`
+    - 日期优先 `start_time.date()`，缺失时用 `end_time.date()`
+  - 同一日期下按简单稳定顺序排序：
+    - `start_time/end_time`
+    - `-priority`
+    - `title`
+  - 重复日程实例按独立记录展示。
+
+- 是否保持 M-1 三角数量角标颜色/数量逻辑不变：
+  - 是。
+  - `schedule_marker_cache` / `schedule_marker_count_cache` 计算逻辑未改。
+  - 今天金色日期逻辑未改。
+
+- 是否保持 M-2 单击/双击语义不变：
+  - 是。
+  - `calendar.clicked` 仍连接 `_on_calendar_date_clicked`
+  - `calendar.activated` 仍连接 `_on_calendar_date_activated`
+  - `date_selected.emit(...)` 仍只出现在 activated 跳转路径中
+  - hover 路径不修改 `user_selected_date`
+  - hover 路径不 emit `date_selected`
+  - hover 路径不调用 `close_day_panels()`
+
+- 是否保持添加按钮日期来源不变：
+  - 是。
+  - `_on_add_clicked(...)` 仍使用 `self.calendar.selectedDate()`。
+  - 未改 `InlineAddViewMonth`。
+  - 未改写库逻辑。
+
+- 是否未实现持久浮窗：
+  - 是。
+  - `open_day_panels / close_day_panels` 职责未扩大。
+
+- 是否未接右键菜单：
+  - 是。
+
+- 是否未写数据库：
+  - 是。
+  - 本轮只读调用 `db_manager.get_all_schedules()`。
+
+- 验证命令和结果：
+  - `rg -n "hover|Hover|mouseMove|mouseTracking|setMouseTracking|eventFilter|Leave|MouseMove|indexAt|visualRect|hover_preview|hovered_date|MonthDayHoverPreview|month_day_hover_preview|user_selected_date|calendar\.clicked|calendar\.activated|date_selected\.emit|_on_add_clicked|close_day_panels|open_day_panels" src/ui/month_window.py src/ui/popups`
+    - 结果：hover 事件、popup 组件、viewport 命中链路均已定位到位。
+  - `from src.ui.month_window import MonthWindow, CalendarCellDelegate, InlineAddViewMonth`
+    - 结果：通过。
+  - `from src.ui.popups.month_day_hover_preview import MonthDayHoverPreview`
+    - 结果：通过。
+  - offscreen 构造验证：
+    - `MonthWindow()` 可构造。
+    - `has calendar == True`
+    - `has hover preview attr == True`
+    - `user_selected_date is None`
+  - hover 数据缓存验证：
+    - `hover_schedule_cache` 存在
+    - 当前输出：`hover cache type dict`
+    - 当前输出：`hover cache dates 66`
+  - hover 显示/隐藏验证：
+    - 使用 2026-06 页面的 `model.index(2, 0)` 命中 `2026-06-01`
+    - 调用 `_show_hover_preview(qdate, index)` 后：
+      - `preview visible == True`
+      - `hovered == 2026-06-01`
+      - popup 标题显示 `2026-06-01 周一`
+    - 再向 `eventFilter` 发送 `QEvent.Type.Leave` 后：
+      - 预览立即隐藏
+      - `hovered_date == None`
+  - M-2 行为静态回归：
+    - `calendar.clicked` 仍连接 `_on_calendar_date_clicked`
+    - `calendar.activated` 仍连接 `_on_calendar_date_activated`
+    - `date_selected.emit(...)` 仍只在 activated 路径中
+    - `_on_add_clicked(...)` 仍使用 `selectedDate()`
+  - 语法检查：
+    - 使用 `py_compile.compile(..., cfile=%TEMP%\\*.m3.pyc, doraise=True)` 编译：
+      - `src/ui/month_window.py`
+      - `main.py`
+      - `src/ui/popups/month_day_hover_preview.py`
+    - 结果：通过。
+
+- diff 范围检查结果：
+  - 禁止范围均无 diff：
+    - `src/ui/main_window.py`
+    - `src/ui/calendar_pop.py`
+    - `src/ui/common/action_context_menu.py`
+    - `src/ui/common`
+    - `src/ui/dashboard.py`
+    - `src/ui/week_window.py`
+    - `src/ui/todo.py`
+    - `src/ui/todo_board.py`
+    - `src/controllers`
+    - `src/services`
+    - `src/data`
+    - `src/repositories`
+    - `src/theme`
+    - `src/utils/signals.py`
+    - `src/utils/styles.py`
+    - `assets`
+    - `main.py`
+    - `requirements.txt`
+    - `schedule.db`
+    - `manage_instruction/Work_Formulation.md`
+    - `manage_instruction/Work_Instruction.md`
+    - `manage_instruction/Work_Snapshot.md`
+    - `manage_instruction/History_Instruction.md`
+    - `manage_instruction/History_Log.md`
+    - `manage_instruction/ReconstructionDolder`
+  - 允许范围：
+    - `src/ui/month_window.py`
+    - `src/ui/popups/month_day_hover_preview.py`
+    - `manage_instruction/Work_Log.md`
+    - `manage_instruction/Work_Task_Prompts.md`（开工前既有）
+
+- 未完成事项：
+  - 未实现单击持久浮窗，留待 `M-4`。
+  - 未实现添加按钮优先使用用户选中日期，留待 `M-5`。
+  - 未接入月界面右键菜单，留待 `M-6`。
+
+- 风险或疑点：
+  - 当前 hover 预览在同一日期格内移动时会复用同一个 popup 实例，但仍会重新设置内容和位置；逻辑正确，后续如需进一步减轻重绘可再做优化，不在本轮扩大。
+  - 预览展示顺序当前使用简单稳定排序，而不是单独的月界面专属业务排序；已满足只读预览需求，若后续产品要求更细排序，应另开工单，不在本轮扩大。
+
+- 复核后样式微调：
+  - 触发原因：
+    - 视觉复核指出 hover 预览弹窗圆角未明显生效，且黑底白字与天气 tooltip 不一致。
+  - 实际调整：
+    - `MonthDayHoverPreview` 设置 `objectName="MonthDayHoverPreview"`，样式只作用于根 `QFrame#MonthDayHoverPreview`。
+    - 新增 `WA_TranslucentBackground`，避免顶层窗口矩形背景吃掉圆角。
+    - 样式改为白底、`#333333` 文字、`#0cc0df` 细边框、`8px` 圆角，方向对齐天气 tooltip。
+    - 二次复核发现顶层透明背景下 QSS 白底未稳定绘制，改为在 `paintEvent(...)` 中自绘不透明白色圆角矩形和青色细边框。
+    - 按视觉复核将边框从青色改为 `rgba(0, 0, 0, 26)` 的浅灰细边缘，使其与主界面/周界面右键弹窗的白底浅边框风格一致。
+  - 行为确认：
+    - 本次只改 hover 预览视觉样式。
+    - 不改变 hover 命中、隐藏、只读数据、M-1 角标、M-2 单击/双击语义和添加逻辑。

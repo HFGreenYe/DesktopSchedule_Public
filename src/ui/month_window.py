@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QCalendarWidget, QApplication, QTableView, 
                              QStyledItemDelegate, QStyle, QStyleOptionViewItem,
                              QGridLayout, QTextEdit) 
-from PyQt6.QtCore import Qt, pyqtSignal, QDate, QTime, QTimer, QRectF, QSize
+from PyQt6.QtCore import Qt, pyqtSignal, QDate, QTime, QTimer, QRectF, QSize, QEvent
 from PyQt6.QtGui import QPainter, QPainterPath, QColor, QBrush, QLinearGradient, QIcon, QPen, QPalette, QPixmap
 from PyQt6.QtSvg import QSvgRenderer
 from qframelesswindow import FramelessMainWindow
@@ -16,6 +16,7 @@ from ..utils.win_api import apply_24h2_border_fix
 from ..utils.styles import StyleManager
 from .header import ToolTipFilter
 from .components import get_colored_icon, SharedMoreMenu
+from .popups.month_day_hover_preview import MonthDayHoverPreview
 
 
 class CalendarCellDelegate(QStyledItemDelegate):
@@ -319,7 +320,10 @@ class MonthWindow(FramelessMainWindow):
         self.user_selected_date = None
         self.schedule_marker_cache = {}
         self.schedule_marker_count_cache = {}
+        self.hover_schedule_cache = {}
         self.open_day_panels = []
+        self.hovered_date = None
+        self.hover_preview_popup = None
         self.drag_pos = None
 
         self._setup_ui()
@@ -581,6 +585,11 @@ class MonthWindow(FramelessMainWindow):
         # ==========================================
         
         table_view = self.calendar.findChild(QTableView)
+        self.calendar_table_view = table_view
+        self.calendar_viewport = table_view.viewport()
+        self.calendar_table_view.setMouseTracking(True)
+        self.calendar_viewport.setMouseTracking(True)
+        self.calendar_viewport.installEventFilter(self)
         
         self.cell_delegate = CalendarCellDelegate(
             self.height(), 
@@ -681,8 +690,42 @@ class MonthWindow(FramelessMainWindow):
 
         return marker_cache, marker_count_cache
 
+    def _build_hover_schedule_cache(self):
+        hover_schedule_cache = {}
+
+        for schedule in db_manager.get_all_schedules():
+            if getattr(schedule, "status", 0) == 2:
+                continue
+            if getattr(schedule, "item_type", None) != "schedule":
+                continue
+
+            target_date = (
+                schedule.start_time.date()
+                if schedule.start_time
+                else (schedule.end_time.date() if schedule.end_time else None)
+            )
+            if target_date is None:
+                continue
+
+            hover_schedule_cache.setdefault(target_date, []).append(schedule)
+
+        fallback_time = datetime.datetime.max
+        for schedules in hover_schedule_cache.values():
+            schedules.sort(
+                key=lambda schedule: (
+                    getattr(schedule, "start_time", None)
+                    or getattr(schedule, "end_time", None)
+                    or fallback_time,
+                    -int(getattr(schedule, "priority", 0)),
+                    getattr(schedule, "title", "") or "",
+                )
+            )
+
+        return hover_schedule_cache
+
     def _refresh_schedule_marker_cache(self):
         self.schedule_marker_cache, self.schedule_marker_count_cache = self._build_schedule_marker_cache()
+        self.hover_schedule_cache = self._build_hover_schedule_cache()
         self.cell_delegate.set_calendar_state(
             self.current_date.year(),
             self.current_date.month(),
@@ -691,6 +734,7 @@ class MonthWindow(FramelessMainWindow):
             self.schedule_marker_count_cache,
             self.user_selected_date,
         )
+        self._hide_hover_preview()
         self.calendar.updateCells()
 
     def _start_clock(self):
@@ -738,6 +782,51 @@ class MonthWindow(FramelessMainWindow):
                 pass
         self.open_day_panels.clear()
 
+    def _ensure_hover_preview_popup(self):
+        if self.hover_preview_popup is None:
+            self.hover_preview_popup = MonthDayHoverPreview()
+        return self.hover_preview_popup
+
+    def _hide_hover_preview(self):
+        self.hovered_date = None
+        if self.hover_preview_popup is not None:
+            self.hover_preview_popup.hide()
+
+    def _show_hover_preview(self, qdate, index):
+        popup = self._ensure_hover_preview_popup()
+        self.hovered_date = qdate
+        schedules = self.hover_schedule_cache.get(qdate.toPyDate(), [])
+        popup.set_preview_data(qdate, schedules)
+
+        cell_rect = self.calendar_table_view.visualRect(index)
+        global_anchor = self.calendar_viewport.mapToGlobal(cell_rect.bottomRight())
+        popup.move(global_anchor.x() + 8, global_anchor.y() + 8)
+        popup.show()
+
+    def eventFilter(self, obj, event):
+        if obj == getattr(self, "calendar_viewport", None):
+            if event.type() == QEvent.Type.MouseMove:
+                index = self.calendar_table_view.indexAt(event.pos())
+                if not index.isValid():
+                    self._hide_hover_preview()
+                    return False
+
+                qdate = self.cell_delegate._date_for_index(index)
+                if not qdate.isValid():
+                    self._hide_hover_preview()
+                    return False
+
+                if self.hovered_date != qdate:
+                    self.hovered_date = qdate
+                self._show_hover_preview(qdate, index)
+                return False
+
+            if event.type() == QEvent.Type.Leave:
+                self._hide_hover_preview()
+                return False
+
+        return super().eventFilter(obj, event)
+
     # 绘制青色渐变背景与T形切割线
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -767,6 +856,10 @@ class MonthWindow(FramelessMainWindow):
     def showEvent(self, event):
         super().showEvent(event)
         self._refresh_schedule_marker_cache()
+
+    def hideEvent(self, event):
+        self._hide_hover_preview()
+        super().hideEvent(event)
 
     # 窗口拖拽逻辑
     def mousePressEvent(self, event):
