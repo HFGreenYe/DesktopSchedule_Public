@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QStyledItemDelegate, QStyle, QStyleOptionViewItem,
                              QGridLayout, QTextEdit) 
 from PyQt6.QtCore import Qt, pyqtSignal, QDate, QTime, QTimer, QRectF, QSize, QEvent
-from PyQt6.QtGui import QPainter, QPainterPath, QColor, QBrush, QLinearGradient, QIcon, QPen, QPalette, QPixmap
+from PyQt6.QtGui import QPainter, QPainterPath, QColor, QBrush, QLinearGradient, QIcon, QPen, QPalette, QPixmap, QGuiApplication
 from PyQt6.QtSvg import QSvgRenderer
 from qframelesswindow import FramelessMainWindow
 import datetime
@@ -789,10 +789,27 @@ class MonthWindow(FramelessMainWindow):
                 return panel
         return None
 
-    def _get_day_panel_position(self, index):
+    def _get_day_panel_position(self, index, panel=None):
         month_rect = self.frameGeometry()
-        x = month_rect.topRight().x() + 16
-        y = month_rect.topRight().y() + 24 + index * 36
+        gap = 16
+        y_offset = 24 + index * 36
+        panel_size = panel.sizeHint() if panel is not None else QSize(220, 120)
+        panel_width = max(panel_size.width(), 120)
+        panel_height = max(panel_size.height(), 80)
+
+        x = month_rect.topRight().x() + gap
+        y = month_rect.topRight().y() + y_offset
+
+        screen = QGuiApplication.screenAt(month_rect.center()) or QGuiApplication.primaryScreen()
+        if screen is None:
+            return x, y
+
+        available_rect = screen.availableGeometry()
+        if x + panel_width > available_rect.right():
+            x = month_rect.left() - gap - panel_width
+
+        x = max(available_rect.left(), min(x, available_rect.right() - panel_width))
+        y = max(available_rect.top(), min(y, available_rect.bottom() - panel_height))
         return x, y
 
     def _open_day_panel(self, qdate):
@@ -806,7 +823,7 @@ class MonthWindow(FramelessMainWindow):
         schedules = self.hover_schedule_cache.get(qdate.toPyDate(), [])
         panel = MonthDayPanel(qdate, schedules)
         panel.closed.connect(self._remove_day_panel)
-        panel.move(*self._get_day_panel_position(len(self.open_day_panels)))
+        panel.move(*self._get_day_panel_position(len(self.open_day_panels), panel))
         panel.show()
         self.open_day_panels.append(panel)
         return panel
