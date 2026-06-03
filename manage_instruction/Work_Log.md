@@ -25,6 +25,29 @@
 
 ---
 
+## 2026-06-03 Final_Formulation.md 新增
+
+- 任务目标：
+  - 从 `manage_instruction/ReconstructionDolder/Work_Formulation.md` 中摘取最终目标架构和长期演进原则。
+  - 汇总当前架构改写后累积的技术债，形成后续功能规划优先读取的总纲文件。
+- 实际修改文件：
+  - `manage_instruction/Final_Formulation.md`
+  - `manage_instruction/Work_Log.md`
+- 写入内容：
+  - 最终目标架构与当前实际目录对应关系。
+  - 已完成的架构基础。
+  - 后续功能开发约束。
+  - 当前月界面功能补齐阶段状态。
+  - Data / Repository / Service、Controller / Router / Refresh、Theme/QSS、UI 大文件、Month View、Weather、Git/文档流程等技术债清单。
+  - 后续阶段建议和文档读取顺序。
+- 边界确认：
+  - 未修改 `manage_instruction/ReconstructionDolder/`。
+  - 未修改 `src/`、`assets/`、`main.py`、`requirements.txt`、`schedule.db`。
+- 未完成事项：
+  - 后续若决策窗口认为技术债分类需要调整，可再单独修订本文。
+
+---
+
 ## 2026-06-02 M-0 复核锚点更新
 
 - 任务目标：
