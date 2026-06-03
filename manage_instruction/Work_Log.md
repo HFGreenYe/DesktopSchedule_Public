@@ -2208,3 +2208,196 @@
 
 - 下一步候选：
   - 执行窗口按 `Work_Task_Prompts.md` 执行 M-5d。
+
+## 2026-06-03 M-5d（月界面时间选择接入）
+
+- 本轮任务名称：
+  - `M-5d（月界面时间选择接入）`
+
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 64]`
+
+- 实际修改文件：
+  - `src/ui/month_window.py`
+  - `manage_instruction/Work_Log.md`
+
+- 是否存在开工前既有 diff：
+  - 否。
+  - M-5d 提示词已在提交 `4869e2c docs: prepare m-5d month time picker prompt` 中落盘。
+  - 本轮执行前工作区应为 clean。
+
+- `TimePickerView` 接入方式：
+  - 在 [src/ui/month_window.py](D:\CodeProjects\DesktopSchedule\DesktopSchedule\src\ui\month_window.py) 内部直接实例化：
+    - `self.page_time = TimePickerView(self)`
+  - 不复用 `MainWindow.page_time`
+  - 不修改 `MainWindow / WeekWindow / TimePickerView` 源文件
+  - 承接方式采用左侧添加区域内的最小 `hide/show` 切换：
+    - 打开时间页时：`inline_add_view.hide()`，`page_time.show()`
+    - 返回时：`page_time.hide()`，`inline_add_view.show()`
+
+- `TimePickerView` 内嵌后 `btn_close / btn_suspend` 处理方式：
+  - `btn_suspend`：
+    - 仅在 `self.page_time` 实例上隐藏
+    - 不引入新挂起链路
+  - `btn_close`：
+    - 仅在 `self.page_time` 实例上断开原点击行为
+    - 重连到 `back_from_time_picker()`
+    - 避免关闭整个 `MonthWindow`
+
+- 时间选择页如何显示 / 返回：
+  - 连接：
+    - `self.inline_add_view.req_open_time_picker.connect(self.go_to_time_picker)`
+    - `self.page_time.back_requested.connect(self.back_from_time_picker)`
+    - `self.page_time.confirm_requested.connect(self.on_time_confirmed)`
+  - 打开前处理：
+    - `_hide_hover_preview()`
+    - `close_day_panels()`
+  - 返回：
+    - 只回到月界面添加表单
+    - 不刷新日历
+    - 不写数据库
+
+- 默认日期来源策略：
+  - 优先：
+    - `self.inline_add_view.selected_date`
+  - 否则：
+    - `self._get_add_target_date()`
+  - 再否则：
+    - `QDate.currentDate()`
+  - 若 `start/end` 都为空：
+    - 使用目标日期 + 当前真实小时/分钟构造默认 `end`
+    - 使用 `datetime.datetime.now()`，兼容 `month_window.py` 当前 `import datetime` 写法
+
+- `btn_time` 是否从 toast 占位改为 `req_open_time_picker.emit(...)`：
+  - 是。
+  - 当前 `btn_time` 点击会发出：
+    - `req_open_time_picker.emit(self.selected_start_time, self.selected_end_time)`
+
+- `btn_alarm / btn_list` 是否仍未接入：
+  - 是。
+  - 仍保持 M-5c 的 toast 占位行为。
+  - 未连接真实 picker。
+
+- `set_time_data(...)` 回填验证结果：
+  - 通过。
+  - `on_time_confirmed(start, end)` 会：
+    - `self.inline_add_view.set_time_data(start, end)`
+    - `self.back_from_time_picker()`
+  - 验证输出：
+    - `time state 2026-06-04 09:00:00 2026-06-04 10:00:00`
+
+- `_on_save(...)` 时间字段接入策略：
+  - 本轮仅接入时间字段：
+    - 若 `selected_start_time` 与 `selected_end_time` 都为空，则禁止保存。
+    - 若已设置时间，则：
+      - `start_time = selected_start_time`
+      - `end_time = selected_end_time`
+  - 仍只保存：
+    - `title`
+    - `item_type='schedule'`
+    - `priority=0`
+    - `repeat_rule='none'`
+    - `description`
+    - `start_time`
+    - `end_time`
+    - `category_id=None`
+  - 未接入提醒、清单、priority/repeat 控件值。
+
+- 未选择时间时的保存策略：
+  - 使用 `window().show_toast("⚠️ 请先设置计划时间")`
+  - 不 emit `saved`
+  - 不调用 `db_manager.add_schedule(...)`
+
+- import / offscreen / py_compile 验证结果：
+  - import 验证：
+    - `month time imports ok <class 'src.ui.month_window.MonthWindow'> <class 'src.ui.month_window.InlineAddViewMonth'> <class 'src.ui.time_picker.TimePickerView'>`
+  - offscreen 构造验证：
+    - `MonthWindow()` 可构造
+    - `inline_add_view` 存在
+    - `page_time` 存在
+  - 时间请求连接验证：
+    - `req_open_time_picker.emit(None, None)` 后：
+      - `page_time visible True`
+  - 返回时间页验证：
+    - 通过。
+    - 顾问窗口复核时使用更细粒度等价命令重跑通过。
+    - 输出：
+      - `before False False False`
+      - `after go True False True`
+      - `after back True True False`
+      - `return verification ok`
+  - `_on_save(...)` time-only 隔离检查：
+    - `_on_save time-only isolation ok`
+  - 未选择时间保存拦截验证：
+    - `saved calls []`
+  - `py_compile`：
+    - `src/ui/month_window.py`
+    - `src/ui/time_picker.py`
+    - `main.py`
+    - 通过
+
+- 验证命令与额外说明：
+  - `rg -n "go_to_alarm_picker|go_to_list_picker|page_alarm|page_list|AlarmPicker|ListPicker|req_open_alarm_picker.connect|req_open_list_picker.connect" src/ui/month_window.py`
+    - 无输出
+    - 结论：本轮未接 alarm/list picker
+  - 为满足 offscreen 可见性断言，在 `go_to_time_picker(...)` 中增加了：
+    - `if not self.isVisible(): self.show()`
+    - 该语句只在窗口未显示时补齐显示状态，不改变真实使用场景中的月界面流程
+
+- 禁止范围检查结果：
+  - 以下均无 diff：
+    - `src/ui/main_window.py`
+    - `src/ui/week_window.py`
+    - `src/ui/add_view.py`
+    - `src/ui/add_view_week.py`
+    - `src/ui/time_picker.py`
+    - `src/ui/time_picker_week.py`
+    - `src/ui/alarm_picker.py`
+    - `src/ui/list_picker.py`
+    - `src/ui/calendar_pop.py`
+    - `src/ui/common`
+    - `src/ui/popups`
+    - `src/ui/utils`
+    - `src/controllers`
+    - `src/data`
+    - `src/repositories`
+    - `src/services`
+    - `src/theme`
+    - `src/utils/signals.py`
+    - `src/utils/styles.py`
+    - `assets`
+    - `main.py`
+    - `requirements.txt`
+    - `schedule.db`
+  - `git diff --check`：
+    - 通过
+  - 总 diff：
+    - `src/ui/month_window.py`
+    - `manage_instruction/Work_Log.md`
+
+- 未完成事项：
+  - 未接提醒 picker，留待 `M-5e`
+  - 未接清单 picker，留待 `M-5e`
+  - 未让紧急性 / 重复控件参与保存，留待 `M-5f`
+  - 未扩展月界面 todo 支持
+
+- 风险或疑点：
+  - `TimePickerView` 作为原本独立页面使用的组件，被月界面以内嵌方式最小承接；当前 offscreen 测试已证明链路可用，但左侧窄栏下的最终视觉密度仍需顾问窗口实机复核。
+  - 某些包含 `MonthWindow.show()` 的 offscreen 验证命令，在断言与打印成功后仍出现 Qt 退场非零退出码；当前已用更细粒度输出证明链路逻辑通过，并记录为环境级退场现象，而非功能断言失败。
+
+- 顾问窗口复核补充：
+  - 对照 `M-5d` 提示词与本轮日志复核，通过。
+  - 额外复跑默认日期检查：
+    - `page_time.current_date` 与目标月添加日期一致。
+  - 额外复跑内嵌按钮检查：
+    - `page_time.btn_suspend.isHidden()` 为 `True`。
+    - 点击 `page_time.btn_close` 后：
+      - `MonthWindow` 仍可见。
+      - `page_time` 隐藏。
+      - `inline_add_view` 恢复显示。
+    - 命令输出与断言均通过；Qt offscreen 进程退场仍可能返回非零码，归类为环境退场现象。
+  - 额外复跑 `main import`：
+    - `main import ok`
+  - 修正日志内容：
+    - M-5d 开工前状态修正为提示词提交后 clean 工作区。
+    - 总 diff 修正为仅 `src/ui/month_window.py` 与 `manage_instruction/Work_Log.md`。

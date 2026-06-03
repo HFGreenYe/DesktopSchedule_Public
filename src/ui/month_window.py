@@ -16,6 +16,7 @@ from ..utils.win_api import apply_24h2_border_fix
 from ..utils.styles import StyleManager
 from .header import ToolTipFilter
 from .components import get_colored_icon, SharedMoreMenu
+from .time_picker import TimePickerView
 from .popups.month_day_hover_preview import MonthDayHoverPreview
 from .popups.month_day_panel import MonthDayPanel
 
@@ -250,7 +251,9 @@ class InlineAddViewMonth(QWidget):
         self.btn_alarm = self._create_icon_btn("alarm.svg", "提醒设置待接入")
         self.btn_list = self._create_icon_btn("list.svg", "清单选择待接入")
 
-        self.btn_time.clicked.connect(lambda: self._show_pending_toast("时间选择将在 M-5d 接入"))
+        self.btn_time.clicked.connect(
+            lambda: self.req_open_time_picker.emit(self.selected_start_time, self.selected_end_time)
+        )
         self.btn_alarm.clicked.connect(lambda: self._show_pending_toast("提醒选择将在 M-5e 接入"))
         self.btn_list.clicked.connect(lambda: self._show_pending_toast("清单选择将在 M-5e 接入"))
 
@@ -442,19 +445,19 @@ class InlineAddViewMonth(QWidget):
                 self.window().show_toast("⚠️ 标题不能为空")
             return
 
-        from datetime import datetime
-        # 默认保存为选中日期的 00:00
-        py_date = self.selected_date.toPyDate()
-        start_time = datetime(py_date.year, py_date.month, py_date.day, 0, 0)
+        if not self.selected_start_time and not self.selected_end_time:
+            if hasattr(self.window(), 'show_toast'):
+                self.window().show_toast("⚠️ 请先设置计划时间")
+            return
 
         schedule_data = {
             'title': title,
-            'item_type': 'schedule' if self.is_schedule_mode else 'todo',
+            'item_type': 'schedule',
             'priority': 0,
             'repeat_rule': 'none',
             'description': self.input_desc.toPlainText().strip(), 
-            'start_time': start_time,
-            'end_time': start_time, # 默认结束时间同上
+            'start_time': self.selected_start_time,
+            'end_time': self.selected_end_time,
             'category_id': None
         }
 
@@ -724,7 +727,23 @@ class MonthWindow(FramelessMainWindow):
         self.inline_add_view.hide()
         self.inline_add_view.canceled.connect(self._close_add_view)
         self.inline_add_view.saved.connect(self._on_schedule_saved)
+        self.inline_add_view.req_open_time_picker.connect(self.go_to_time_picker)
         bottom_tools_vbox.addWidget(self.inline_add_view)
+
+        self.page_time = TimePickerView(self)
+        self.page_time.hide()
+        self.page_time.set_title("设置时间")
+        if hasattr(self.page_time, "btn_suspend"):
+            self.page_time.btn_suspend.hide()
+        if hasattr(self.page_time, "btn_close"):
+            try:
+                self.page_time.btn_close.clicked.disconnect()
+            except TypeError:
+                pass
+            self.page_time.btn_close.clicked.connect(self.back_from_time_picker)
+        self.page_time.back_requested.connect(self.back_from_time_picker)
+        self.page_time.confirm_requested.connect(self.on_time_confirmed)
+        bottom_tools_vbox.addWidget(self.page_time)
 
         left_vbox.addLayout(bottom_tools_vbox)
 
@@ -1193,11 +1212,46 @@ class MonthWindow(FramelessMainWindow):
             self.search_box.hide()
             self.view_selector_container.hide()
             self.inline_add_view.reset(target_date)
+            self.page_time.hide()
             self.inline_add_view.show()
 
     def _close_add_view(self):
+        self.page_time.hide()
         self.inline_add_view.hide()
         self.search_box.show()
+
+    def go_to_time_picker(self, start, end):
+        self._hide_hover_preview()
+        self.close_day_panels()
+
+        target_qdate = self.inline_add_view.selected_date or self._get_add_target_date()
+        if target_qdate is None or not target_qdate.isValid():
+            target_qdate = QDate.currentDate()
+
+        target_pydate = target_qdate.toPyDate()
+        now = datetime.datetime.now()
+        default_end = datetime.datetime(
+            target_pydate.year,
+            target_pydate.month,
+            target_pydate.day,
+            now.hour,
+            now.minute,
+        )
+
+        self.page_time.set_title("设置时间")
+        self.page_time.set_initial_data(start, end or default_end)
+        if not self.isVisible():
+            self.show()
+        self.inline_add_view.hide()
+        self.page_time.show()
+
+    def back_from_time_picker(self):
+        self.page_time.hide()
+        self.inline_add_view.show()
+
+    def on_time_confirmed(self, start, end):
+        self.inline_add_view.set_time_data(start, end)
+        self.back_from_time_picker()
 
     def _on_schedule_saved(self):
         self.show_toast("✅ 添加日程成功")
