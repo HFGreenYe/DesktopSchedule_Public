@@ -2401,3 +2401,283 @@
   - 修正日志内容：
     - M-5d 开工前状态修正为提示词提交后 clean 工作区。
     - 总 diff 修正为仅 `src/ui/month_window.py` 与 `manage_instruction/Work_Log.md`。
+
+## M-5e 最终提示词写入
+
+- 时间：2026-06-03
+
+- 任务：
+  - 审核决策窗口提供的 `M-5e（月界面提醒与清单选择接入）` 提示词，并写入最终执行版。
+
+- 实际修改文件：
+  - `manage_instruction/Work_Task_Prompts.md`
+  - `manage_instruction/Work_Log.md`
+
+- 审核结论：
+  - 原方向可采纳：M-5e 应只接月界面提醒 picker 与清单 picker，不接 priority/repeat 保存，不接右键菜单。
+  - 原稿需要补强 `ListPickerView` 自带新增/删除清单能力的边界说明，以及验证不得写库的约束。
+
+- 本次修订重点：
+  - 明确 `ListPickerView` 本身已有新增 / 删除清单 UI，本轮不修改该组件，也不额外屏蔽既有能力。
+  - 明确本轮验证不得通过 UI 或数据库创建、删除真实清单，只允许读取已有清单并回填已有 id 或 `None`。
+  - 明确 `btn_alarm` 必须依赖已选时间，未设置时间时不打开提醒 picker。
+  - 明确 `btn_list` 必须以 `list_type="schedule"` 打开清单 picker。
+  - 明确 `on_list_confirmed(...)` 可通过 `db_manager.get_category(category_id)` 获取清单名称，但不得修改 `ListPickerView.confirm_requested` 签名。
+  - 明确 `_on_save(...)` 只新增提醒 / 清单现有字段，仍不得接入 `combo_priority / combo_repeat`。
+  - 增加 `schedule.db` 无 diff 检查，避免验证过程污染数据库。
+
+- 范围说明：
+  - 本次只写执行提示词和日志。
+  - 不修改源码。
+  - 不进入 M-5e 源码执行。
+
+- 下一步候选：
+  - 执行窗口按 `Work_Task_Prompts.md` 执行 M-5e。
+
+## M-5e：月界面提醒与清单选择接入
+
+- 时间：2026-06-03
+
+- 任务名称：
+  - `M-5e（月界面提醒与清单选择接入）`
+
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 65]`
+  - `M manage_instruction/Work_Log.md`
+  - `M manage_instruction/Work_Task_Prompts.md`
+  - `M src/ui/month_window.py`
+  - 说明：
+    - `src/ui/month_window.py` 与 `manage_instruction/Work_Log.md` 为前序 `M-1 ~ M-5d` 连续改动延续。
+    - `manage_instruction/Work_Task_Prompts.md` 为开工前既有 diff，本轮未修改。
+
+- 实际修改文件：
+  - `src/ui/month_window.py`
+  - `manage_instruction/Work_Log.md`
+
+- AlarmPickerView 接入结果：
+  - 在 `MonthWindow` 内新增：
+    - `self.page_alarm = AlarmPickerView(self)`
+  - 连接关系：
+    - `inline_add_view.req_open_alarm_picker -> go_to_alarm_picker(...)`
+    - `page_alarm.confirm_requested -> on_alarm_confirmed(...)`
+    - `page_alarm.back_requested -> back_from_alarm_picker()`
+  - 视图切换方式：
+    - 仅在月界面左侧区域内部 `hide/show`
+    - 不接 `MainWindow.body_stack`
+    - 不修改主界面 / 周界面提醒 picker 链路
+
+- ListPickerView 接入结果：
+  - 在 `MonthWindow` 内新增：
+    - `self.page_list = ListPickerView(self)`
+  - 连接关系：
+    - `inline_add_view.req_open_list_picker -> go_to_list_picker(...)`
+    - `page_list.confirm_requested -> on_list_confirmed(...)`
+    - `page_list.back_requested -> back_from_list_picker()`
+  - 打开方式：
+    - 强制 `list_type="schedule"`
+    - 不修改 `ListPickerView` 组件本身
+    - 不修改其既有新增/删除清单 UI 能力
+
+- `btn_close / btn_suspend` 实例级处理：
+  - `page_alarm.btn_suspend.hide()`
+  - `page_list.btn_suspend.hide()`
+  - `page_alarm.btn_close` 断开原行为后，重连到 `back_from_alarm_picker()`
+  - `page_list.btn_close` 断开原行为后，重连到 `back_from_list_picker()`
+  - 范围仅限月界面实例，不修改 `alarm_picker.py` / `list_picker.py`
+
+- `btn_alarm` 依赖已选时间的策略：
+  - `InlineAddViewMonth.btn_alarm` 改为触发 `_emit_alarm_request()`
+  - 目标时间优先级：
+    - `selected_start_time`
+    - 否则 `selected_end_time`
+  - 若两者都为空：
+    - 不打开提醒 picker
+    - 只 toast：`⚠️ 请先设置计划时间`
+
+- `btn_list` 打开策略：
+  - `InlineAddViewMonth.btn_list` 触发：
+    - `req_open_list_picker.emit(self.selected_list_id, "schedule")`
+  - 月界面接收后固定：
+    - `page_list.load_data(current_category_id, list_type="schedule")`
+
+- picker 打开前的月界面清理动作：
+  - `go_to_alarm_picker(...)` 前执行：
+    - `_hide_hover_preview()`
+    - `close_day_panels()`
+  - `go_to_list_picker(...)` 前执行：
+    - `_hide_hover_preview()`
+    - `close_day_panels()`
+  - 与 `M-3 / M-4` 保持一致，避免 hover / 持久 panel 干扰 picker
+
+- `on_alarm_confirmed(...)` 回填结果：
+  - 回填到 `InlineAddViewMonth`：
+    - `selected_reminder`
+    - `selected_is_alarm_mode`
+    - `selected_alarm_duration`
+  - 使用既有接口：
+    - `set_alarm_data(remind_dt, is_alarm_mode, alarm_duration)`
+  - 回填后返回表单页，不停留在提醒 picker
+
+- `on_list_confirmed(...)` 回填结果：
+  - 不修改 `ListPickerView.confirm_requested` 签名，仍只接收 `category_id`
+  - 月界面内部只读查询：
+    - `db_manager.get_category(category_id)`
+  - 回填到 `InlineAddViewMonth`：
+    - `selected_list_id`
+    - `selected_list_name`
+  - 使用既有接口：
+    - `set_list_data(category_id, category_name)`
+
+- `_on_save(...)` 提醒 / 清单字段策略：
+  - 在既有最小 `schedule` 保存结构上新增：
+    - `reminder_time`
+    - `is_alarm`
+    - `alarm_duration`
+    - `category_id`
+  - 仍保持：
+    - `item_type = "schedule"`
+    - `priority = 0`
+    - `repeat_rule = "none"`
+  - 明确未接入：
+    - `combo_priority`
+    - `combo_repeat`
+
+- 未修改项确认：
+  - 未修改 `src/ui/alarm_picker.py`
+  - 未修改 `src/ui/list_picker.py`
+  - 未修改 `src/ui/main_window.py`
+  - 未修改 `src/ui/week_window.py`
+  - 未修改 `src/ui/add_view.py`
+  - 未修改 `src/ui/add_view_week.py`
+  - 未修改 `src/ui/common`
+  - 未修改 `src/ui/popups`
+  - 未修改 `src/ui/utils`
+  - 未修改 `src/controllers`
+  - 未修改 `src/data`
+  - 未修改 `src/repositories`
+  - 未修改 `src/services`
+  - 未修改 `src/theme`
+  - 未修改 `src/utils/signals.py`
+  - 未修改 `src/utils/styles.py`
+  - 未修改 `assets`
+  - 未修改 `main.py`
+  - 未修改 `requirements.txt`
+
+- 验证结果：
+  - import 验证：
+    - `MonthWindow`
+    - `InlineAddViewMonth`
+    - `AlarmPickerView`
+    - `ListPickerView`
+    - 通过
+  - offscreen 构造验证：
+    - `MonthWindow()` 可构造
+    - `page_alarm` / `page_list` 存在
+    - 通过
+  - `btn_alarm` 无时间阻断验证：
+    - 点击后 `page_alarm.isVisible() == False`
+    - 通过
+  - `btn_alarm` 有时间打开验证：
+    - 点击后 `page_alarm.isVisible() == True`
+    - `page_alarm.target_time` 与目标结束时间一致
+    - 通过
+  - `on_alarm_confirmed(...)` 回填验证：
+    - `selected_reminder`
+    - `selected_is_alarm_mode`
+    - `selected_alarm_duration`
+    - 通过
+  - `btn_list` 打开验证：
+    - `page_list.isVisible() == True`
+    - `page_list.current_list_type == "schedule"`
+    - 通过
+  - `on_list_confirmed(...)` 回填验证：
+    - 使用现有真实 `schedule` 清单 id 只读验证
+    - `selected_list_id` 正确回填
+    - `selected_list_name` 正确回填
+    - 通过
+  - 内嵌关闭按钮回归：
+    - `page_alarm.btn_close.click()` 后：
+      - `page_alarm` 隐藏
+      - `inline_add_view` 恢复显示
+      - `MonthWindow` 保持可见
+    - `page_list.btn_close.click()` 后：
+      - `page_list` 隐藏
+      - `inline_add_view` 恢复显示
+      - `MonthWindow` 保持可见
+    - 断言与打印输出均通过
+    - 但含 `MonthWindow.show()` 的该条 offscreen 命令在 Qt 退场阶段返回非零码，记录为环境级退场现象，不认定为功能失败
+  - `_on_save(...)` 扩展范围检查：
+    - 已确认仅新增提醒 / 清单字段
+    - 已确认未接入 `combo_priority / combo_repeat`
+    - 通过
+  - `py_compile`：
+    - `src/ui/month_window.py`
+    - `src/ui/alarm_picker.py`
+    - `src/ui/list_picker.py`
+    - `main.py`
+    - 通过
+  - `schedule.db` tracked diff：
+    - 无输出
+    - 通过
+
+- 禁止范围检查结果：
+  - 以下均无 diff：
+    - `src/ui/main_window.py`
+    - `src/ui/week_window.py`
+    - `src/ui/add_view.py`
+    - `src/ui/add_view_week.py`
+    - `src/ui/time_picker.py`
+    - `src/ui/time_picker_week.py`
+    - `src/ui/alarm_picker.py`
+    - `src/ui/list_picker.py`
+    - `src/ui/calendar_pop.py`
+    - `src/ui/common`
+    - `src/ui/popups`
+    - `src/ui/utils`
+    - `src/controllers`
+    - `src/data`
+    - `src/repositories`
+    - `src/services`
+    - `src/theme`
+    - `src/utils/signals.py`
+    - `src/utils/styles.py`
+    - `assets`
+    - `main.py`
+    - `requirements.txt`
+    - `schedule.db`
+
+- 最终 diff 范围：
+  - `src/ui/month_window.py`
+  - `manage_instruction/Work_Log.md`
+  - `manage_instruction/Work_Task_Prompts.md`
+  - 说明：
+    - `manage_instruction/Work_Task_Prompts.md` 为开工前既有 diff，本轮未修改
+
+- 未完成事项：
+  - 未接入 `combo_priority` 保存，留待 `M-5f`
+  - 未接入 `combo_repeat` 保存，留待 `M-5f`
+  - 未扩展月界面 todo 支持
+  - 未处理右键菜单
+
+- 风险或疑点：
+  - `AlarmPickerView` 与 `ListPickerView` 原本设计为独立页面组件，当前采用月界面内部实例级最小接管；链路验证已通过，但左侧窄栏下的最终视觉密度仍需顾问窗口实机复核。
+  - `ListPickerView` 自带新增/删除清单 UI，本轮未改组件；当前执行范围只验证读取已有清单与回填，不通过验证链路创建/删除真实清单，避免污染数据库。
+  - 含 `MonthWindow.show()` 的个别 offscreen 命令在 Qt 退场阶段仍可能出现非零退出码；当前打印与断言均已证明功能链路通过，记录为环境级退场现象，而非功能阻断。
+
+- 顾问窗口复核补充：
+  - 对照 `Work_Task_Prompts.md` 与本轮执行日志复核，通过。
+  - 修正说明：本轮源码修改前，M-5e 提示词与日志已存在管理文档 diff；`src/ui/month_window.py` 不应记录为“开工前既有 diff”，而是本轮源码修改产物。
+  - 复跑 import 验证：通过。
+  - 复跑 offscreen 构造验证：通过。
+  - 复跑无时间提醒阻断验证：通过。
+  - 复跑有时间提醒 picker 打开验证：通过；首次标准命令无输出非零，使用 `-u` / flush 等价命令复跑后断言通过，归类为 Qt offscreen 输出/退场现象。
+  - 复跑提醒确认回填验证：通过。
+  - 复跑清单 picker 打开验证：通过，`current_list_type == "schedule"`。
+  - 复跑清单确认回填验证：通过，使用已有 schedule 清单只读回填，未创建/删除清单。
+  - 复跑内嵌关闭按钮验证：打印与断言显示 alarm/list 返回后均恢复 `inline_add_view` 且 `MonthWindow` 未隐藏；命令退场码为 1，归类为已知 Qt offscreen 退场现象。
+  - 复跑 `_on_save(...)` 字段隔离检查：通过，仅接入 reminder/list 字段，未接 `combo_priority` / `combo_repeat`。
+  - 复跑 `py_compile`：通过。
+  - 复跑 `main import`：通过。
+  - 复跑 `schedule.db` tracked diff：无输出。
+  - 复跑禁止范围检查：无输出。
+  - `Work_Task_Prompts.md` 已更新为 M-5e 复核锚点，下一步候选为 M-5f，并保留 M-5e 已执行提示词全文供对照。

@@ -17,6 +17,8 @@ from ..utils.styles import StyleManager
 from .header import ToolTipFilter
 from .components import get_colored_icon, SharedMoreMenu
 from .time_picker import TimePickerView
+from .alarm_picker import AlarmPickerView
+from .list_picker import ListPickerView
 from .popups.month_day_hover_preview import MonthDayHoverPreview
 from .popups.month_day_panel import MonthDayPanel
 
@@ -254,8 +256,10 @@ class InlineAddViewMonth(QWidget):
         self.btn_time.clicked.connect(
             lambda: self.req_open_time_picker.emit(self.selected_start_time, self.selected_end_time)
         )
-        self.btn_alarm.clicked.connect(lambda: self._show_pending_toast("提醒选择将在 M-5e 接入"))
-        self.btn_list.clicked.connect(lambda: self._show_pending_toast("清单选择将在 M-5e 接入"))
+        self.btn_alarm.clicked.connect(self._emit_alarm_request)
+        self.btn_list.clicked.connect(
+            lambda: self.req_open_list_picker.emit(self.selected_list_id, "schedule")
+        )
 
         icons_layout.addWidget(self.btn_time)
         icons_layout.addWidget(self.btn_alarm)
@@ -370,6 +374,17 @@ class InlineAddViewMonth(QWidget):
         if hasattr(self.window(), "show_toast"):
             self.window().show_toast(message)
 
+    def _emit_alarm_request(self):
+        target_time = self.selected_start_time if self.selected_start_time else self.selected_end_time
+        if not target_time:
+            self._show_pending_toast("⚠️ 请先设置计划时间")
+            return
+        self.req_open_alarm_picker.emit(
+            target_time,
+            self.selected_is_alarm_mode,
+            self.selected_alarm_duration,
+        )
+
     def _format_state_value(self, value):
         if value is None:
             return ""
@@ -458,7 +473,10 @@ class InlineAddViewMonth(QWidget):
             'description': self.input_desc.toPlainText().strip(), 
             'start_time': self.selected_start_time,
             'end_time': self.selected_end_time,
-            'category_id': None
+            'reminder_time': self.selected_reminder,
+            'is_alarm': self.selected_is_alarm_mode,
+            'alarm_duration': self.selected_alarm_duration,
+            'category_id': self.selected_list_id
         }
 
         from ..data.database import db_manager
@@ -728,6 +746,8 @@ class MonthWindow(FramelessMainWindow):
         self.inline_add_view.canceled.connect(self._close_add_view)
         self.inline_add_view.saved.connect(self._on_schedule_saved)
         self.inline_add_view.req_open_time_picker.connect(self.go_to_time_picker)
+        self.inline_add_view.req_open_alarm_picker.connect(self.go_to_alarm_picker)
+        self.inline_add_view.req_open_list_picker.connect(self.go_to_list_picker)
         bottom_tools_vbox.addWidget(self.inline_add_view)
 
         self.page_time = TimePickerView(self)
@@ -744,6 +764,36 @@ class MonthWindow(FramelessMainWindow):
         self.page_time.back_requested.connect(self.back_from_time_picker)
         self.page_time.confirm_requested.connect(self.on_time_confirmed)
         bottom_tools_vbox.addWidget(self.page_time)
+
+        self.page_alarm = AlarmPickerView(self)
+        self.page_alarm.hide()
+        self.page_alarm.set_title("设置提醒")
+        if hasattr(self.page_alarm, "btn_suspend"):
+            self.page_alarm.btn_suspend.hide()
+        if hasattr(self.page_alarm, "btn_close"):
+            try:
+                self.page_alarm.btn_close.clicked.disconnect()
+            except TypeError:
+                pass
+            self.page_alarm.btn_close.clicked.connect(self.back_from_alarm_picker)
+        self.page_alarm.back_requested.connect(self.back_from_alarm_picker)
+        self.page_alarm.confirm_requested.connect(self.on_alarm_confirmed)
+        bottom_tools_vbox.addWidget(self.page_alarm)
+
+        self.page_list = ListPickerView(self)
+        self.page_list.hide()
+        self.page_list.set_title("选择清单")
+        if hasattr(self.page_list, "btn_suspend"):
+            self.page_list.btn_suspend.hide()
+        if hasattr(self.page_list, "btn_close"):
+            try:
+                self.page_list.btn_close.clicked.disconnect()
+            except TypeError:
+                pass
+            self.page_list.btn_close.clicked.connect(self.back_from_list_picker)
+        self.page_list.back_requested.connect(self.back_from_list_picker)
+        self.page_list.confirm_requested.connect(self.on_list_confirmed)
+        bottom_tools_vbox.addWidget(self.page_list)
 
         left_vbox.addLayout(bottom_tools_vbox)
 
@@ -1213,10 +1263,14 @@ class MonthWindow(FramelessMainWindow):
             self.view_selector_container.hide()
             self.inline_add_view.reset(target_date)
             self.page_time.hide()
+            self.page_alarm.hide()
+            self.page_list.hide()
             self.inline_add_view.show()
 
     def _close_add_view(self):
         self.page_time.hide()
+        self.page_alarm.hide()
+        self.page_list.hide()
         self.inline_add_view.hide()
         self.search_box.show()
 
@@ -1242,6 +1296,8 @@ class MonthWindow(FramelessMainWindow):
         self.page_time.set_initial_data(start, end or default_end)
         if not self.isVisible():
             self.show()
+        self.page_alarm.hide()
+        self.page_list.hide()
         self.inline_add_view.hide()
         self.page_time.show()
 
@@ -1252,6 +1308,50 @@ class MonthWindow(FramelessMainWindow):
     def on_time_confirmed(self, start, end):
         self.inline_add_view.set_time_data(start, end)
         self.back_from_time_picker()
+
+    def go_to_alarm_picker(self, target_time, is_alarm, duration):
+        self._hide_hover_preview()
+        self.close_day_panels()
+        self.page_alarm.set_title("设置提醒")
+        self.page_alarm.set_initial_data(target_time, is_alarm, duration)
+        if not self.isVisible():
+            self.show()
+        self.page_time.hide()
+        self.page_list.hide()
+        self.inline_add_view.hide()
+        self.page_alarm.show()
+
+    def back_from_alarm_picker(self):
+        self.page_alarm.hide()
+        self.inline_add_view.show()
+
+    def on_alarm_confirmed(self, remind_dt, is_alarm, duration):
+        self.inline_add_view.set_alarm_data(remind_dt, is_alarm, duration)
+        self.back_from_alarm_picker()
+
+    def go_to_list_picker(self, current_category_id, list_type="schedule"):
+        self._hide_hover_preview()
+        self.close_day_panels()
+        self.page_list.set_title("选择清单")
+        self.page_list.load_data(current_category_id, list_type="schedule")
+        if not self.isVisible():
+            self.show()
+        self.page_time.hide()
+        self.page_alarm.hide()
+        self.inline_add_view.hide()
+        self.page_list.show()
+
+    def back_from_list_picker(self):
+        self.page_list.hide()
+        self.inline_add_view.show()
+
+    def on_list_confirmed(self, category_id):
+        category_name = None
+        if category_id is not None:
+            category = db_manager.get_category(category_id)
+            category_name = category.name if category else None
+        self.inline_add_view.set_list_data(category_id, category_name)
+        self.back_from_list_picker()
 
     def _on_schedule_saved(self):
         self.show_toast("✅ 添加日程成功")
