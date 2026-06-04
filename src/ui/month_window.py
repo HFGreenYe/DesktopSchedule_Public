@@ -16,6 +16,7 @@ from ..utils.win_api import apply_24h2_border_fix
 from ..utils.styles import StyleManager
 from .header import ToolTipFilter
 from .components import get_colored_icon, SharedMoreMenu
+from .common.action_context_menu import ActionContextMenu
 from .time_picker import TimePickerView
 from .alarm_picker import AlarmPickerView
 from .list_picker import ListPickerView
@@ -510,6 +511,7 @@ class MonthWindow(FramelessMainWindow):
         self.hovered_date = None
         self.hover_preview_popup = None
         self.drag_pos = None
+        self.context_menu_date = None
 
         self._setup_ui()
         self._refresh_schedule_marker_cache()
@@ -1092,6 +1094,19 @@ class MonthWindow(FramelessMainWindow):
 
     def eventFilter(self, obj, event):
         if obj == getattr(self, "calendar_viewport", None):
+            if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.RightButton:
+                index = self.calendar_table_view.indexAt(event.pos())
+                if not index.isValid():
+                    return False
+
+                qdate = self.cell_delegate._date_for_index(index)
+                if not qdate.isValid():
+                    return False
+
+                self._hide_hover_preview()
+                self._show_context_menu_for_date(qdate, self.calendar_viewport.mapToGlobal(event.pos()))
+                return True
+
             if event.type() == QEvent.Type.MouseMove:
                 index = self.calendar_table_view.indexAt(event.pos())
                 if not index.isValid():
@@ -1113,6 +1128,57 @@ class MonthWindow(FramelessMainWindow):
                 return False
 
         return super().eventFilter(obj, event)
+
+    def _show_context_menu_for_date(self, qdate, global_pos):
+        self.context_menu_date = qdate
+        menu = ActionContextMenu(self)
+        menu.action_requested.connect(self._handle_context_action)
+        menu.view_requested.connect(self._handle_context_view)
+        menu.exec(global_pos)
+
+    def _handle_context_action(self, action_name):
+        if action_name != "add":
+            return
+
+        target_date = self.context_menu_date
+        if target_date is None or not target_date.isValid():
+            return
+
+        if target_date < QDate.currentDate():
+            self.show_toast("🚫 该日期已过期，无法添加日程")
+            return
+
+        self.search_box.hide()
+        self.view_selector_container.hide()
+        self.page_time.hide()
+        self.page_alarm.hide()
+        self.page_list.hide()
+        self.inline_add_view.reset(target_date)
+        self.inline_add_view.show()
+
+    def _handle_context_view(self, view_name):
+        if view_name == "day":
+            target_date = self.context_menu_date
+            if target_date is None or not target_date.isValid():
+                return
+            self._hide_hover_preview()
+            self.close_day_panels()
+            self.date_selected.emit(target_date)
+            return
+
+        if view_name == "week":
+            self._on_view_selected("week")
+            return
+
+        if view_name == "month":
+            return
+
+        if view_name == "todo":
+            self._on_view_selected("todo")
+            return
+
+        if view_name == "priority":
+            return
 
     # 绘制青色渐变背景与T形切割线
     def paintEvent(self, event):

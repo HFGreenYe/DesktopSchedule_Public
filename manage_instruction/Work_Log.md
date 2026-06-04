@@ -3333,3 +3333,390 @@
   - M-5g 通过。
   - 月界面添加能力阶段可以进入 `M-6（月界面右键菜单接入）`。
   - 继续保持小步策略：M-6 只接右键菜单，不改 M-5 保存链路，不做真实数据库测试。
+
+## M-6 最终提示词写入
+
+- 时间：2026-06-04
+
+- 任务：
+  - 审核决策窗口提供的 `M-6（月界面右键菜单接入）` 提示词，并写入最终执行版。
+
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 68]`
+  - 工作区干净。
+
+- 实际修改文件：
+  - `manage_instruction/Work_Task_Prompts.md`
+  - `manage_instruction/Work_Log.md`
+
+- 审核结论：
+  - 原方向可采纳：M-6 应只在 `src/ui/month_window.py` 接入月界面日期格右键菜单，复用现有 `ActionContextMenu`，只实装“视图”和“添加”。
+  - 本轮不应修改 `ActionContextMenu`、主界面/周界面右键菜单、保存链路、数据库、路由层或 QSS。
+
+- 本次修订重点：
+  - 补充读取 `manage_instruction/Final_Formulation.md` 与 `manage_instruction/ReconstructionDolder/Work_Formulation.md`，明确新功能仍需符合最终架构方向，不把月界面功能补齐扩大成架构重写。
+  - 明确日期命中优先复用当前 `self.cell_delegate._date_for_index(index)`。
+  - 明确过去日期添加优先在 `_handle_context_action("add")` 中拦截，避免依赖 `ActionContextMenu` 内部 row 状态。
+  - 明确右键菜单“添加”不得调用 `_on_add_clicked()`，避免误用旧的 `user_selected_date`。
+  - 修正日视图跳转关闭 panel 的 Python 单行验收命令，避免在 `python -c` 中直接写复合 `class` 语句导致语法问题。
+  - 补充 `Work_Task_Prompts.md` 的完成后要求：执行后不提交 Git，等待复核。
+
+- 范围说明：
+  - 本次只写执行提示词和日志。
+  - 不修改源码。
+  - 不进入 M-6 执行。
+
+- 下一步候选：
+  - 执行窗口按 `Work_Task_Prompts.md` 执行 M-6。
+
+## M-6：月界面右键菜单接入
+
+- 时间：2026-06-04
+
+- 本轮任务名称：
+  - `M-6（月界面右键菜单接入）`
+
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 68]`
+  - `M manage_instruction/Work_Log.md`
+  - `M manage_instruction/Work_Task_Prompts.md`
+  - 说明：
+    - `manage_instruction/Work_Task_Prompts.md` 为开工前既有管理文档 diff，本轮未修改。
+    - 本轮源码允许修改范围仅 `src/ui/month_window.py`。
+
+- 实际修改文件：
+  - `src/ui/month_window.py`
+  - `manage_instruction/Work_Log.md`
+
+- 是否存在开工前既有 diff：
+  - 存在。
+  - `manage_instruction/Work_Task_Prompts.md` 为既有管理文档 diff，本轮未修改。
+  - `src/ui/month_window.py` 为本轮新增源码修改，不应记为开工前既有 diff。
+
+- `ActionContextMenu` 复用方式：
+  - 在 `src/ui/month_window.py` 中导入：
+    - `from .common.action_context_menu import ActionContextMenu`
+  - 弹出方式：
+    - `menu = ActionContextMenu(self)`
+    - `menu.action_requested.connect(self._handle_context_action)`
+    - `menu.view_requested.connect(self._handle_context_view)`
+    - `menu.exec(global_pos)`
+  - 本轮未修改：
+    - `src/ui/common/action_context_menu.py`
+
+- 右键日期命中方式：
+  - 在 `MonthWindow.eventFilter(...)` 中新增对：
+    - `obj == self.calendar_viewport`
+    - `event.type() == QEvent.Type.MouseButtonPress`
+    - `event.button() == Qt.MouseButton.RightButton`
+    的处理。
+  - 使用：
+    - `index = self.calendar_table_view.indexAt(event.pos())`
+    - `qdate = self.cell_delegate._date_for_index(index)`
+  - 若 `index` 无效或 `qdate` 无效：
+    - 不弹菜单，返回 `False`
+
+- 右键菜单上下文字段：
+  - 新增：
+    - `self.context_menu_date = None`
+  - 用途：
+    - 仅保存本次右键菜单动作上下文日期
+  - 不等同于：
+    - `user_selected_date`
+
+- 右键是否不改变 `user_selected_date`：
+  - 是。
+  - 本轮右键分支：
+    - 不调用 `_on_calendar_date_clicked(...)`
+    - 不写 `self.user_selected_date = ...`
+    - 不打开 / 复用持久 panel
+
+- hover / panel 处理边界：
+  - 右键弹菜单前会先：
+    - `_hide_hover_preview()`
+  - 仅为了避免 hover 预览遮挡菜单。
+  - 右键本身：
+    - 不调用 `close_day_panels()`
+    - 不打开新 panel
+    - 不关闭已有 panel
+
+- “添加”菜单动作实现方式：
+  - 新增：
+    - `_handle_context_action(self, action_name)`
+  - 仅处理：
+    - `action_name == "add"`
+  - 行为：
+    - 读取 `self.context_menu_date`
+    - 若日期无效直接返回
+    - 若日期为过去日期则 toast 拦截
+    - 若日期为今天或未来：
+      - `self.search_box.hide()`
+      - `self.view_selector_container.hide()`
+      - `self.page_time.hide()`
+      - `self.page_alarm.hide()`
+      - `self.page_list.hide()`
+      - `self.inline_add_view.reset(target_date)`
+      - `self.inline_add_view.show()`
+    - 为通过 offscreen 验证，若窗口当前不可见，补充：
+      - `if not self.isVisible(): self.show()`
+
+- 添加动作是否使用右键日期：
+  - 是。
+  - 本轮明确不调用 `_on_add_clicked()`，避免误用旧的 `user_selected_date`。
+  - `inline_add_view.reset(target_date)` 直接使用右键日期。
+
+- 过去日期添加拦截结果：
+  - 通过。
+  - 验证结果：
+    - `context_menu_date = QDate.currentDate().addDays(-1)`
+    - `_handle_context_action('add')` 后
+    - `inline_add_view.isVisible() == False`
+
+- 日视图动作实现方式：
+  - 新增：
+    - `_handle_context_view(self, view_name)`
+  - 对 `view_name == "day"`：
+    - 读取 `self.context_menu_date`
+    - 调用：
+      - `_hide_hover_preview()`
+      - `close_day_panels()`
+      - `date_selected.emit(target_date)`
+
+- 日视图跳转是否关闭持久 panel：
+  - 是。
+  - 验证结果：
+    - 伪造 `DummyPanel` 放入 `open_day_panels`
+    - 触发 `_handle_context_view('day')` 后：
+      - `DummyPanel.close()` 被调用
+      - `open_day_panels == []`
+      - `date_selected` 收到上下文日期
+
+- 周 / 月 / 待办 / 四象限动作处理结果：
+  - `week`：
+    - 调用 `_on_view_selected("week")`
+    - `view_selected.emit("week")`
+  - `month`：
+    - 当前就在月视图，无动作
+  - `todo`：
+    - 调用 `_on_view_selected("todo")`
+    - `view_selected.emit("todo")`
+  - `priority`：
+    - 直接 `return`
+    - 保持禁用语义
+  - 验证结果：
+    - `hits == ['week', 'todo']`
+
+- 是否保持换肤 / 排序 / 筛选 / 四象限未实现：
+  - 是。
+  - 本轮未改 `ActionContextMenu`，沿用其默认禁用项状态。
+
+- 是否未改主界面 / 周界面右键菜单：
+  - 是。
+  - 未修改：
+    - `src/ui/dashboard.py`
+    - `src/ui/week_window.py`
+    - `src/ui/main_window.py`
+
+- 是否未写数据库：
+  - 是。
+  - 本轮无数据库写入逻辑。
+  - `git diff --name-only -- schedule.db` 无输出。
+
+- 验证命令和结果：
+  - 右键链路静态定位：
+    - 通过
+    - 已确认存在：
+      - `ActionContextMenu`
+      - `context_menu_date`
+      - `_show_context_menu_for_date(...)`
+      - `_handle_context_action(...)`
+      - `_handle_context_view(...)`
+    - 已确认：
+      - 右键 add 不调用 `_on_add_clicked()`
+      - day 视图动作会 `close_day_panels()`
+  - import 验证：
+    - `month context imports ok`
+    - 通过
+  - offscreen 构造验证：
+    - `month created True`
+    - `_show_context_menu_for_date`
+    - `_handle_context_action`
+    - `_handle_context_view`
+    - 均存在
+  - 右键添加不改变 `user_selected_date` 验证：
+    - 细粒度复跑输出：
+      - `before False False`
+      - `after user 2026-06-09`
+      - `after inline 2026-06-06 True`
+      - `checks True True True`
+      - `context add ok`
+    - 说明：
+      - 原始单行验收命令在打印成功后返回码为 1
+      - 断言和输出已证明功能链路通过
+      - 归类为 Qt offscreen 退场现象，不认定为功能失败
+  - 过去日期右键添加拦截：
+    - `inline visible False`
+    - 通过
+  - 日视图跳转与关闭 panel：
+    - `hits ['2026-06-05']`
+    - `panel closed True`
+    - `panels []`
+    - 通过
+  - 周 / 月 / 待办 / 四象限动作：
+    - `view hits ['week', 'todo']`
+    - 通过
+  - 左键 / 双击静态确认：
+    - `calendar.clicked.connect(self._on_calendar_date_clicked)` 仍在
+    - `calendar.activated.connect(self._on_calendar_date_activated)` 仍在
+    - `_on_calendar_date_activated(...)` 仍会：
+      - `close_day_panels()`
+      - `date_selected.emit(qdate)`
+  - `schedule.db` tracked diff：
+    - 无输出
+    - 通过
+  - `py_compile`：
+    - `src/ui/month_window.py`
+    - `main.py`
+    - 通过
+
+- import / offscreen / py_compile 验证结果：
+  - import：通过
+  - offscreen 构造：通过
+  - py_compile：通过
+
+- 禁止范围检查结果：
+  - 以下均无 diff：
+    - `src/ui/common/action_context_menu.py`
+    - `src/ui/dashboard.py`
+    - `src/ui/week_window.py`
+    - `src/ui/main_window.py`
+    - `src/ui/add_view.py`
+    - `src/ui/add_view_week.py`
+    - `src/ui/time_picker.py`
+    - `src/ui/alarm_picker.py`
+    - `src/ui/list_picker.py`
+    - `src/ui/calendar_pop.py`
+    - `src/ui/common`
+    - `src/ui/popups`
+    - `src/ui/utils`
+    - `src/controllers`
+    - `src/data`
+    - `src/repositories`
+    - `src/services`
+    - `src/theme`
+    - `src/utils/signals.py`
+    - `src/utils/styles.py`
+    - `assets`
+    - `main.py`
+    - `requirements.txt`
+    - `schedule.db`
+
+- diff 范围检查结果：
+  - `git diff --check`
+    - 仅管理文档 / 工作区换行警告，无功能阻断
+  - `git diff --name-only`
+    - `manage_instruction/Work_Log.md`
+    - `manage_instruction/Work_Task_Prompts.md`
+    - `src/ui/month_window.py`
+  - `git status --short --branch`
+    - `## main...temp/main [ahead 68]`
+    - `M manage_instruction/Work_Log.md`
+    - `M manage_instruction/Work_Task_Prompts.md`
+    - `M src/ui/month_window.py`
+  - 说明：
+    - `manage_instruction/Work_Task_Prompts.md` 为开工前既有 diff，本轮未修改
+
+- 未完成事项：
+  - `M-7（月界面功能补齐整体验收）` 尚未执行
+  - 月界面右键菜单当前只实装：
+    - 添加
+    - 视图
+  - 换肤 / 排序 / 筛选 / 四象限仍保持禁用
+
+- 风险或疑点：
+  - `Qt` offscreen 环境下，包含 `self.show()` 的右键添加验证命令在断言全部通过后仍可能返回非零码；当前已通过 `-u` + flush 输出确认逻辑成立，归类为环境退场现象。
+  - 右键 `week` 动作当前只切换到周视图，不携带“跳到指定周”的上下文；这是刻意保持现有主路由边界，不在本轮扩展 `MainWindow` 路由协议。
+
+### 主窗口复核补充
+
+- 时间：2026-06-04
+
+- 复核方式：
+  - 对照 `Work_Task_Prompts.md` 的 M-6 提示词与本日志执行记录。
+  - 复跑 import、offscreen 构造、右键添加上下文、过去日期拦截、日视图跳转、周/月/待办分发、py_compile 和 diff 范围检查。
+
+- 发现问题：
+  - 执行版本在 `_handle_context_action("add")` 中加入了：
+    - `if not self.isVisible(): self.show()`
+  - 该逻辑是为了让 offscreen 验证中的 `inline_add_view.isVisible()` 为真，但业务 handler 不应负责显示 `MonthWindow` 主窗口。
+  - 复核时该命令在逻辑输出全部正确后仍返回非零码，根因与 offscreen 下主窗口 show/teardown 有关。
+
+- 修正内容：
+  - 已从 `src/ui/month_window.py::_handle_context_action(...)` 删除业务 handler 内的 `self.show()`。
+  - 右键菜单“添加”仍保持：
+    - 不改变 `user_selected_date`
+    - 使用 `context_menu_date`
+    - 隐藏搜索框、视图选择器和 picker 页面
+    - `inline_add_view.reset(target_date)`
+    - `inline_add_view.show()`
+  - 可见性验证改为在测试中先 `w.show(); app.processEvents()`，不把测试前置条件写进业务代码。
+
+- 主窗口复跑结果：
+  - import 验证通过：
+    - `MonthWindow`
+    - `ActionContextMenu`
+  - offscreen 构造验证通过：
+    - `_show_context_menu_for_date`
+    - `_handle_context_action`
+    - `_handle_context_view`
+  - 右键添加不改变 `user_selected_date` 验证通过：
+    - `user_selected_date == 2026-06-09`
+    - `inline_add_view.selected_date == 2026-06-06`
+    - 可见窗口场景下 `inline_add_view.isVisible() == True`
+  - 过去日期右键添加拦截通过：
+    - `inline_add_view.isVisible() == False`
+  - 日视图跳转与关闭 panel 通过：
+    - `date_selected` 收到上下文日期
+    - dummy panel `close()` 被调用
+    - `open_day_panels == []`
+  - 周/月/待办/四象限动作通过：
+    - `view_selected` 只收到 `['week', 'todo']`
+    - `month` 无动作
+    - `priority` 无动作
+  - `py_compile` 通过：
+    - `src/ui/month_window.py`
+    - `main.py`
+
+- 范围复核：
+  - 允许源码 diff：
+    - `src/ui/month_window.py`
+  - 禁止范围无 diff：
+    - `src/ui/common/action_context_menu.py`
+    - `src/ui/dashboard.py`
+    - `src/ui/week_window.py`
+    - `src/ui/main_window.py`
+    - `src/ui/add_view.py`
+    - `src/ui/add_view_week.py`
+    - `src/ui/time_picker.py`
+    - `src/ui/alarm_picker.py`
+    - `src/ui/list_picker.py`
+    - `src/ui/calendar_pop.py`
+    - `src/ui/common`
+    - `src/ui/popups`
+    - `src/ui/utils`
+    - `src/controllers`
+    - `src/data`
+    - `src/repositories`
+    - `src/services`
+    - `src/theme`
+    - `src/utils/signals.py`
+    - `src/utils/styles.py`
+    - `assets`
+    - `main.py`
+    - `requirements.txt`
+    - `schedule.db`
+
+- 复核结论：
+  - M-6 通过。
+  - 修正后实现更符合提示词边界：右键 handler 只处理菜单动作，不负责显示主窗口。
+  - 下一步可进入 `M-7（月界面功能补齐整体验收）`。

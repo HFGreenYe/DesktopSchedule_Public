@@ -1,93 +1,112 @@
-# 当前复核锚点：M-5g 已执行
+# 当前复核锚点：M-6 已执行
 
 当前状态：
 
-- `M-5g（月界面添加能力整体验收）` 已执行。
-- 主窗口已按提示词与日志对照复核，并复跑关键验证。
-- 下一步候选：`M-6（月界面右键菜单接入）`。
-- 下方保留 M-5g 已执行提示词全文，供日志对照复核。
+- `M-6（月界面右键菜单接入）` 已执行。
+- 主窗口按提示词和日志对照复核，并对 offscreen 验证中暴露出的业务 handler `self.show()` 进行了最小修正。
+- 下一步候选：`M-7（月界面功能补齐整体验收）`。
+- 下方保留 M-6 已执行提示词全文，供日志对照复核。
 
-## M-5g：月界面添加能力整体验收
+## M-6：月界面右键菜单接入
 
-请执行 `M-5g：月界面添加能力整体验收`。本轮只做整体验收和日志记录，不扩展功能，不改源码。
+请执行 `M-6（月界面右键菜单接入）`。本轮只在月界面日期格空白区域接入右键菜单，复用现有 `ActionContextMenu`，只实装“视图”和“添加”，不扩展其他功能。
 
 ## 1. 本轮目标
 
-基于 `M-5`、`M-5b`、`M-5c`、`M-5d`、`M-5e`、`M-5f` 的完成结果，对月界面添加能力做整体验收。
+基于已完成的：
 
-重点验证：
+- CM 阶段公共 `ActionContextMenu`
+- 主界面右键菜单接入
+- 周界面右键菜单接入
+- M-5 到 M-5g 月界面添加能力补齐
 
-- 月界面添加日期来源：
-  - 有用户选中日期时，添加表单默认使用选中日期。
-  - 无用户选中日期时，fallback 正常。
-  - 过去日期不可添加。
-- 时间选择链路：
-  - `btn_time` 打开月内 `TimePickerView`。
-  - 确认后回填 `selected_start_time / selected_end_time`。
-  - 未设置时间时保存被阻止。
-- 提醒链路：
-  - 未设置时间时不打开提醒 picker。
-  - 有时间时打开月内 `AlarmPickerView`。
-  - 确认后回填 `selected_reminder / selected_is_alarm_mode / selected_alarm_duration`。
-- 清单链路：
-  - `btn_list` 打开月内 `ListPickerView`。
-  - `list_type == "schedule"`。
-  - 确认后回填 `selected_list_id / selected_list_name`。
-- 保存结构：
-  - `priority` 来自 `combo_priority.currentIndex()`。
-  - `repeat_rule` 来自 `combo_repeat.currentText().strip()`。
-  - `reminder_time / is_alarm / alarm_duration / category_id` 使用现有字段。
-  - 不新增 todo 支持。
-  - 不新增每年 / English repeat rule。
-- 月界面刷新链路：
-  - 保存成功后调用 marker / hover cache 刷新入口。
-  - 保存成功后不保留添加页。
-  - 持久日期 panel 关闭链路可用。
-- 主界面 / 周界面添加能力不回归。
-- 最终 `schedule.db` 无 tracked diff。
+本轮为月界面接入右键菜单。
 
-本轮原则：
+目标：
 
-- 不修改 `src/`。
-- 不修改 `main.py`。
-- 不修改 `requirements.txt`。
-- 不修改 `schedule.db`。
-- 不真实保存 `每天 / 每周 / 每月` 重复日程。
-- 保存结构验证必须使用 mock / monkeypatch 截获 `db_manager.add_schedule(...)` 入参。
-- 默认不做真实写库验收。
+- 在月界面日期格空白区域右键，弹出 `ActionContextMenu`。
+- 右键某个日期时，该日期作为本次菜单动作上下文。
+- 右键不改变 `user_selected_date`。
+- 右键不打开 / 关闭持久日期 panel。
+- 右键不影响 hover 预览生命周期，除非弹出菜单前需要隐藏 hover 预览避免遮挡。
+- 菜单“添加”：
+  - 若右键日期是今天或未来，打开月界面添加表单。
+  - 添加表单默认日期为右键日期。
+  - 复用 M-5 到 M-5g 已补齐的月界面添加入口能力。
+  - 若右键日期是过去日期，不打开添加表单，应提示不可添加或保持无动作。
+- 菜单“视图”：
+  - 日视图：跳转右键日期对应的日界面，并关闭月界面全部持久 panel。
+  - 周视图：切换周视图。
+  - 月视图：当前已在月视图，无动作。
+  - 待办：切换待办视图。
+  - 四象限：保持禁用，沿用 `ActionContextMenu` 默认禁用。
+- 菜单“换肤 / 排序 / 筛选”：
+  - 保持禁用 / 占位，不实现。
+- 不修改数据库。
+- 不修改添加保存逻辑。
+- 不修改 `ActionContextMenu` 组件。
+- 不修改主界面 / 周界面右键菜单。
 
-## 2. 允许 / 禁止
+本轮必须保持：
 
-### 允许修改
+- M-1 marker 语义不变。
+- M-2 单击选中 / 双击跳日视图语义不变。
+- M-3 hover 只读预览语义不变。
+- M-4 持久 panel 语义不变。
+- M-5 到 M-5g 添加表单能力不回退。
+- 新功能继续符合 `manage_instruction/Final_Formulation.md` 与 `manage_instruction/ReconstructionDolder/Work_Formulation.md` 的最终架构方向：功能补充可小步修改现有 UI，但不得把月界面功能扩展成新的大范围架构重写。
 
+## 2. 允许/禁止
+
+允许修改：
+
+- `src/ui/month_window.py`
 - `manage_instruction/Work_Log.md`
 - `manage_instruction/Work_Task_Prompts.md`（仅在需要维护本轮复核锚点时）
 
-### 禁止修改
+禁止修改：
 
-- `src/`
+- `src/ui/common/action_context_menu.py`
+- `src/ui/dashboard.py`
+- `src/ui/week_window.py`
+- `src/ui/main_window.py`
+- `src/ui/add_view.py`
+- `src/ui/add_view_week.py`
+- `src/ui/time_picker.py`
+- `src/ui/alarm_picker.py`
+- `src/ui/list_picker.py`
+- `src/ui/calendar_pop.py`
+- `src/ui/common/`
+- `src/ui/popups/`
+- `src/ui/utils/`
+- `src/controllers/`
+- `src/data/`
+- `src/repositories/`
+- `src/services/`
+- `src/theme/`
+- `src/utils/signals.py`
+- `src/utils/styles.py`
 - `assets/`
 - `main.py`
 - `requirements.txt`
 - `schedule.db`
-- `.env`
-- `.gitignore`
 - `manage_instruction/Final_Formulation.md`
 - `manage_instruction/Work_Formulation.md`
 - `manage_instruction/Work_Instruction.md`
 - `manage_instruction/Work_Snapshot.md`
 - `manage_instruction/ReconstructionDolder/`
 
-### 禁止事项
+禁止事项：
 
-- 不改源码。
-- 不新增功能。
-- 不接月界面右键菜单。
-- 不修改 picker 源文件。
-- 不修改数据层 / 服务层 / 控制层。
-- 不真实保存 `每天 / 每周 / 每月` 重复日程。
-- 不真实写入临时日程。
-- 不新增或删除真实清单。
+- 不新增右键菜单组件。
+- 不修改 `ActionContextMenu`。
+- 不修改主界面 / 周界面右键菜单。
+- 不新增 EventBus / global signal。
+- 不修改 `MainWindow` 路由。
+- 不修改数据库和保存逻辑。
+- 不真实写库。
+- 不新增四象限功能。
+- 不实现换肤 / 排序 / 筛选。
 - 不提交 Git。
 
 若开工前已有 diff，必须在 `Work_Log.md` 中单独记录，不视为本轮问题。
@@ -99,196 +118,297 @@
 读取：
 
 ```powershell
+Get-Content -Path manage_instruction\Final_Formulation.md -Encoding UTF8
 Get-Content -Path manage_instruction\Work_Instruction.md -Encoding UTF8
 Get-Content -Path manage_instruction\Work_Log.md -Encoding UTF8
 Get-Content -Path manage_instruction\Work_Task_Prompts.md -Encoding UTF8
+Get-Content -Path manage_instruction\ReconstructionDolder\Work_Formulation.md -Encoding UTF8
 Get-Content -Path src\ui\month_window.py -Encoding UTF8
+Get-Content -Path src\ui\common\action_context_menu.py -Encoding UTF8
+Get-Content -Path src\ui\dashboard.py -Encoding UTF8
+Get-Content -Path src\ui\week_window.py -Encoding UTF8
 ```
 
 重点确认：
 
-- M-5 当前日期来源逻辑。
-- M-5c 表单壳字段。
-- M-5d 时间 picker 接入。
-- M-5e 提醒 / 清单 picker 接入。
-- M-5f 保存结构对齐。
-- M-6 仍未执行，右键菜单仍不在本轮范围。
+- `ActionContextMenu` API：
+  - `action_requested`
+  - `view_requested`
+  - `get_action(...)`
+  - `get_view_action(...)`
+- 主界面右键菜单如何连接 `action_requested / view_requested`。
+- 周界面右键菜单如何用日期上下文调用添加。
+- 月界面当前：
+  - `eventFilter(...)`
+  - `calendar_table_view`
+  - `calendar_viewport`
+  - `_get_add_target_date(...)`
+  - `_on_add_clicked(...)`
+  - `_on_view_selected(...)`
+  - `_on_calendar_date_clicked(...)`
+  - `_on_calendar_date_activated(...)`
+  - `close_day_panels(...)`
+  - `_hide_hover_preview(...)`
+  - `open_day_panels`
+  - `user_selected_date`
 
-### 3.2 静态检查月界面添加链路
+### 3.2 导入 ActionContextMenu
 
-检查以下逻辑是否存在且边界正确：
+在 `src/ui/month_window.py` 中导入：
 
-- `_get_add_target_date(...)`
-- `_on_add_clicked(...)`
-- `InlineAddViewMonth.reset(...)`
-- `InlineAddViewMonth.reset_form(...)`
-- `InlineAddViewMonth._on_save(...)`
-- `go_to_time_picker(...)`
-- `on_time_confirmed(...)`
-- `go_to_alarm_picker(...)`
-- `on_alarm_confirmed(...)`
-- `go_to_list_picker(...)`
-- `on_list_confirmed(...)`
-- `_on_schedule_saved(...)`
-- `_build_schedule_marker_cache(...)`
-- `_build_hover_schedule_cache(...)`
-- `_refresh_schedule_marker_cache(...)`
-- `open_day_panels`
-- `close_day_panels(...)`
-
-### 3.3 mock 验证保存结构
-
-用 mock / monkeypatch 截获 `db_manager.add_schedule(...)` 入参，验证完整字段结构。
+```python
+from .common.action_context_menu import ActionContextMenu
+```
 
 要求：
 
-- 不真实写入数据库。
-- 不生成真实重复日程。
-- 不创建 / 删除清单。
-- 可模拟：
-  - 未来日期
-  - start/end
-  - reminder
-  - category_id
-  - priority 高
-  - repeat_rule 无
-- 不验证 `每天 / 每周 / 每月` 真实保存，只静态确认选项存在。
+- 不修改 `ActionContextMenu`。
+- 不新增公共组件。
+- 不新增 assets。
 
-### 3.4 验证 marker / hover / panel 刷新不回归
+### 3.3 在月历 viewport 右键日期格时弹出菜单
 
-不真实写库的情况下，做静态与 offscreen smoke：
+在 `MonthWindow.eventFilter(...)` 中，对 `self.calendar_viewport` 的右键按下事件做最小处理。
 
-- `_build_schedule_marker_cache()` 可调用。
-- `_build_hover_schedule_cache()` 可调用。
-- `_refresh_schedule_marker_cache()` 可调用。
-- `schedule_marker_cache / schedule_marker_count_cache / hover_schedule_cache` 类型正确。
-- `close_day_panels()` 可调用。
-- `_on_schedule_saved()` 可调用且不会报错。
-- 若某些方法依赖 UI 状态，允许只做 import/offscreen smoke，并在日志说明。
+建议逻辑：
 
-### 3.5 验证主界面 / 周界面不回归
+- 只处理：
+  - `obj is self.calendar_viewport`
+  - `event.type() == QEvent.Type.MouseButtonPress`
+  - `event.button() == Qt.MouseButton.RightButton`
+- 使用当前已有日期命中方式，基于 viewport 的 `indexAt(event.pos())` 获取日期格。
+- 建议复用当前 delegate 的日期解析能力：
+  - `qdate = self.cell_delegate._date_for_index(index)`
+- 若 index 无效或日期无效：
+  - 不弹菜单，交给原逻辑或返回 `False`。
+- 弹出菜单前可调用 `_hide_hover_preview()`，避免 hover 预览遮挡菜单。
+- 不调用 `_on_calendar_date_clicked(...)`。
+- 不修改 `user_selected_date`。
+- 不调用 `_open_day_panel(...)`。
+- 不调用 `close_day_panels()`，除非后续用户选择“日视图”跳转。
+- 弹出菜单后返回 `True`，阻止右键继续传递到其他月历默认行为。
 
-只做 import / py_compile / 静态检查：
+如果当前 `eventFilter(...)` 已经处理 hover / leave / mouse move，必须保持原有逻辑顺序，不破坏 M-3 hover 行为。
 
-- `src/ui/add_view.py`
-- `src/ui/add_view_week.py`
-- `src/ui/main_window.py`
-- `src/ui/week_window.py`
+### 3.4 新增月界面右键上下文字段
 
-不得修改这些文件。
+在 `MonthWindow` 中新增轻量上下文字段，例如：
 
-### 3.6 更新 Work_Log.md
+```python
+self.context_menu_date = None
+```
+
+或等价字段。
+
+要求：
+
+- 只用于当前右键菜单动作。
+- 不等同于 `user_selected_date`。
+- 右键菜单关闭后可清空，也可在下一次右键覆盖。
+- 不影响单击选中日期。
+- 不影响添加按钮默认日期来源，除非是右键菜单“添加”动作显式使用。
+
+### 3.5 新增菜单显示方法
+
+新增方法，例如：
+
+```python
+def _show_context_menu_for_date(self, qdate, global_pos):
+    ...
+```
+
+建议逻辑：
+
+- `self.context_menu_date = qdate`
+- `menu = ActionContextMenu(self)`
+- 连接：
+  - `menu.action_requested.connect(self._handle_context_action)`
+  - `menu.view_requested.connect(self._handle_context_view)`
+- 若右键日期是过去日期：
+  - 本轮优先不动态禁用菜单 row，只在点击 `add` 时按日期拦截并 toast。
+  - 如选择禁用 `menu.get_action("add")`，必须确认不修改 `ActionContextMenu`，并在日志说明禁用是否只影响 QAction 还是也影响视觉 row。
+- 弹出：
+  - `menu.exec(global_pos)`
+
+优先策略：
+
+- 为减少对 `ActionContextMenu` 内部 row 状态依赖，本轮建议不动态禁用 add action，只在 `_handle_context_action("add")` 中拦截过去日期。
+
+### 3.6 新增菜单动作处理
+
+新增方法，例如：
+
+```python
+def _handle_context_action(self, action_name):
+    ...
+```
+
+只处理：
+
+- `action_name == "add"`
+
+行为：
+
+- 获取 `target_date = self.context_menu_date`
+- 若日期无效，返回。
+- 若 `target_date < QDate.currentDate()`：
+  - `show_toast("🚫 该日期已过期，无法添加日程")`
+  - 不打开添加表单。
+- 若日期合法：
+  - 不改变 `user_selected_date`
+  - 关闭/隐藏当前左侧 picker 页面：
+    - `page_time.hide()`
+    - `page_alarm.hide()`
+    - `page_list.hide()`
+  - 隐藏搜索框和视图选择器。
+  - 调用：
+    - `self.inline_add_view.reset(target_date)`
+    - `self.inline_add_view.show()`
+  - 不触发 `_on_add_clicked()`，因为 `_on_add_clicked()` 会使用用户选中日期 fallback，可能误用旧选中日期。
+  - 不写数据库。
+
+禁止：
+
+- 不打开持久 panel。
+- 不改变 `user_selected_date`。
+- 不触发 `date_selected.emit(...)`。
+- 不调用 `db_manager.add_schedule(...)`。
+
+### 3.7 新增菜单视图处理
+
+新增方法，例如：
+
+```python
+def _handle_context_view(self, view_name):
+    ...
+```
+
+处理规则：
+
+- `day`：
+  - 使用右键日期作为上下文。
+  - 先：
+    - `_hide_hover_preview()`
+    - `close_day_panels()`
+  - emit：
+    - `self.date_selected.emit(target_date)`
+  - 这应沿用月界面双击日期跳日视图链路。
+- `week`：
+  - 可直接调用 `_on_view_selected("week")` 或 `self.view_selected.emit("week")`。
+  - 不要求在本轮传递日期上下文，因为现有主路由未定义“跳指定周”的公开 API。
+  - 若代码已有可安全传递日期的既有链路，可记录但不扩展。
+- `month`：
+  - 当前就在月视图，无动作。
+- `todo`：
+  - 调用 `_on_view_selected("todo")` 或 `self.view_selected.emit("todo")`。
+- `priority`：
+  - `ActionContextMenu` 默认禁用，理论上不会触发。
+  - 如触发，直接 return。
+
+禁止：
+
+- 不改 `MainWindow.switch_view(...)`。
+- 不新增路由参数。
+- 不新增四象限功能。
+
+### 3.8 保持现有行为不变
+
+必须确认：
+
+- 左键单击日期仍选中并打开/复用持久 panel。
+- 双击 / activated 日期仍跳日视图并关闭持久 panel。
+- 添加按钮仍使用 `user_selected_date` 或 fallback 日期。
+- 右键不改变添加按钮后续默认日期。
+- 右键菜单“添加”只使用右键日期本次上下文。
+
+### 3.9 更新 Work_Log.md
 
 至少记录：
 
-- 本轮任务名称：`M-5g（月界面添加能力整体验收）`
+- 本轮任务名称：`M-6（月界面右键菜单接入）`
 - 开工前 git 状态
 - 实际修改文件
-- M-5 到 M-5f 完成结论汇总
-- 日期来源验收结果
-- 过去日期不可添加验收结果
-- 时间 picker 验收结果
-- 提醒 picker 验收结果
-- 清单 picker 验收结果
-- 未设置时间保存拦截结果
-- 完整保存结构 mock 验收结果
-- 重复规则是否仅做静态验证
-- marker cache 链路验收结果
-- hover cache 链路验收结果
-- 持久 panel 关闭链路验收结果
-- `_on_schedule_saved(...)` 刷新入口验收结果
-- 主界面 / 周界面添加页回归检查结果
-- 是否未真实写入重复日程
-- 是否未新增 / 删除清单
-- `schedule.db` 是否无 tracked diff
+- 是否存在开工前既有 diff
+- `ActionContextMenu` 复用方式
+- 右键日期命中方式
+- 右键是否不改变 `user_selected_date`
+- “添加”菜单动作实现方式
+- 过去日期添加拦截结果
+- “视图”菜单动作实现方式
+- 日视图跳转是否关闭持久 panel
+- 周/月/待办视图动作处理结果
+- 是否保持换肤/排序/筛选/四象限未实现
+- 是否未改主界面 / 周界面右键菜单
+- 验证命令和结果
 - diff 范围检查结果
 - 未完成事项
 - 风险或疑点
-- 是否建议进入 `M-6（月界面右键菜单接入）`
 
 ## 4. 验收命令
 
-### 4.1 定位月界面添加链路
+### 4.1 定位右键菜单链路
 
 ```powershell
-rg -n "_get_add_target_date|_on_add_clicked|reset_form|def reset\(|def _on_save|go_to_time_picker|on_time_confirmed|go_to_alarm_picker|on_alarm_confirmed|go_to_list_picker|on_list_confirmed|_on_schedule_saved|_build_schedule_marker_cache|_build_hover_schedule_cache|_refresh_schedule_marker_cache|hover_schedule_cache|schedule_marker_cache|schedule_marker_count_cache|MonthDayPanel|open_day_panels|close_day_panels|marker" src/ui/month_window.py
+rg -n "ActionContextMenu|context_menu_date|_show_context_menu_for_date|_handle_context_action|_handle_context_view|MouseButtonPress|RightButton|indexAt|_on_calendar_date_clicked|_on_calendar_date_activated|_get_add_target_date|_on_add_clicked|user_selected_date|date_selected.emit|view_selected.emit|close_day_panels|_hide_hover_preview" src/ui/month_window.py
 ```
+
+预期：
+
+- `ActionContextMenu` 只在 `month_window.py` 中新增月界面复用。
+- 存在右键处理方法。
+- 存在 context date 字段或等价上下文。
+- 右键 add 不调用 `_on_add_clicked()`。
+- 日视图跳转会关闭 panel。
 
 ### 4.2 import 验证
 
 ```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.ui.month_window import MonthWindow, InlineAddViewMonth; from src.ui.add_view import AddScheduleView; from src.ui.add_view_week import AddScheduleViewWeek; print('month/main/week add imports ok', MonthWindow, InlineAddViewMonth, AddScheduleView, AddScheduleViewWeek)"
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.ui.month_window import MonthWindow; from src.ui.common.action_context_menu import ActionContextMenu; print('month context imports ok', MonthWindow, ActionContextMenu)"
 ```
 
-### 4.3 offscreen 月窗口构造
+### 4.3 offscreen 构造验证
 
 ```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from src.ui.month_window import MonthWindow; app=QApplication([]); w=MonthWindow(); print('month created', w is not None); print('has inline', hasattr(w, 'inline_add_view')); print('has page_time', hasattr(w, 'page_time')); print('has page_alarm', hasattr(w, 'page_alarm')); print('has page_list', hasattr(w, 'page_list')); assert hasattr(w, 'inline_add_view'); assert hasattr(w, 'page_time'); assert hasattr(w, 'page_alarm'); assert hasattr(w, 'page_list')"
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from src.ui.month_window import MonthWindow; app=QApplication([]); w=MonthWindow(); print('month created', w is not None); assert hasattr(w, '_show_context_menu_for_date'); assert hasattr(w, '_handle_context_action'); assert hasattr(w, '_handle_context_view')"
 ```
 
-### 4.4 日期来源验证
-
-验证未来选中日期会进入添加表单：
+### 4.4 右键添加不改变 user_selected_date 验证
 
 ```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from PyQt6.QtCore import QDate; from src.ui.month_window import MonthWindow; app=QApplication([]); w=MonthWindow(); target=QDate.currentDate().addDays(3); w.user_selected_date=target; result=w._get_add_target_date(); print('target date', result.toString('yyyy-MM-dd')); assert result == target; w._on_add_clicked(); print('inline selected', w.inline_add_view.selected_date.toString('yyyy-MM-dd')); assert w.inline_add_view.selected_date == target"
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from PyQt6.QtCore import QDate; from src.ui.month_window import MonthWindow; app=QApplication([]); w=MonthWindow(); selected=QDate.currentDate().addDays(5); context=QDate.currentDate().addDays(2); w.user_selected_date=selected; w.context_menu_date=context; w._handle_context_action('add'); print('user selected', w.user_selected_date.toString('yyyy-MM-dd')); print('inline selected', w.inline_add_view.selected_date.toString('yyyy-MM-dd')); assert w.user_selected_date == selected; assert w.inline_add_view.selected_date == context; assert w.inline_add_view.isVisible()"
 ```
 
-验证过去日期不可添加：
+### 4.5 过去日期右键添加拦截验证
 
 ```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from PyQt6.QtCore import QDate; from src.ui.month_window import MonthWindow; app=QApplication([]); w=MonthWindow(); past=QDate.currentDate().addDays(-1); w.user_selected_date=past; w.inline_add_view.hide(); w._on_add_clicked(); after=w.inline_add_view.isVisible(); print('past add visible after', after); assert not after"
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from PyQt6.QtCore import QDate; from src.ui.month_window import MonthWindow; app=QApplication([]); w=MonthWindow(); past=QDate.currentDate().addDays(-1); w.context_menu_date=past; w._handle_context_action('add'); print('inline visible', w.inline_add_view.isVisible()); assert not w.inline_add_view.isVisible()"
 ```
 
-### 4.5 时间 / 提醒 / 清单链路验证
+### 4.6 日视图跳转信号与关闭 panel 验证
 
 ```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from datetime import datetime; from PyQt6.QtWidgets import QApplication; from PyQt6.QtCore import QDate; from src.ui.month_window import MonthWindow; app=QApplication([]); w=MonthWindow(); target=QDate.currentDate().addDays(1); start=datetime(target.year(), target.month(), target.day(), 9, 0); end=datetime(target.year(), target.month(), target.day(), 10, 0); remind=datetime(target.year(), target.month(), target.day(), 8, 50); w.inline_add_view.reset(target); w.on_time_confirmed(start, end); assert w.inline_add_view.selected_start_time == start; assert w.inline_add_view.selected_end_time == end; w.on_alarm_confirmed(remind, True, 1); assert w.inline_add_view.selected_reminder == remind; assert w.inline_add_view.selected_is_alarm_mode is True; assert w.inline_add_view.selected_alarm_duration == 1; w.on_list_confirmed(None); assert w.inline_add_view.selected_list_id is None; print('time/alarm/list callbacks ok')"
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from PyQt6.QtCore import QDate; from src.ui.month_window import MonthWindow; app=QApplication([]); w=MonthWindow(); target=QDate.currentDate().addDays(1); hits=[]; w.date_selected.connect(lambda d: hits.append(d)); p=type('DummyPanel', (), {'close': lambda self: setattr(self, 'closed', True)})(); p.closed=False; w.open_day_panels.append(p); w.context_menu_date=target; w._handle_context_view('day'); print('hits', [d.toString('yyyy-MM-dd') for d in hits]); print('panel closed', p.closed); print('panels', w.open_day_panels); assert hits == [target]; assert p.closed; assert w.open_day_panels == []"
 ```
 
-### 4.6 未设置时间保存拦截验证
+### 4.7 周/月/待办视图动作验证
 
 ```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from PyQt6.QtCore import QDate; from src.ui.month_window import InlineAddViewMonth; app=QApplication([]); v=InlineAddViewMonth(); calls=[]; v.saved.connect(lambda: calls.append('saved')); v.reset(QDate.currentDate().addDays(1)); v.input_title.setText('未设时间测试'); v._on_save(); print('saved calls', calls); assert calls == []"
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from PyQt6.QtCore import QDate; from src.ui.month_window import MonthWindow; app=QApplication([]); w=MonthWindow(); hits=[]; w.view_selected.connect(lambda v: hits.append(v)); w.context_menu_date=QDate.currentDate().addDays(1); w._handle_context_view('week'); w._handle_context_view('month'); w._handle_context_view('todo'); w._handle_context_view('priority'); print('view hits', hits); assert hits == ['week', 'todo']"
 ```
 
-### 4.7 完整保存结构 mock 验证
-
-不得真实写库。用 monkeypatch 截获 `db_manager.add_schedule(...)`。
+### 4.8 左键 / 双击关键链路静态确认
 
 ```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from datetime import datetime; from PyQt6.QtWidgets import QApplication; from PyQt6.QtCore import QDate; from src.ui.month_window import InlineAddViewMonth; from src.data import database; app=QApplication([]); v=InlineAddViewMonth(); target=QDate.currentDate().addDays(1); start=datetime(target.year(), target.month(), target.day(), 9, 0); end=datetime(target.year(), target.month(), target.day(), 10, 0); remind=datetime(target.year(), target.month(), target.day(), 8, 50); v.reset(target); v.input_title.setText('__mock_m5g_month_full_save__'); v.input_desc.setPlainText('mock validation only'); v.set_time_data(start, end); v.set_alarm_data(remind, True, 1); v.set_list_data(12345, 'mock-list'); v.combo_priority.setCurrentIndex(2); v.combo_repeat.setCurrentIndex(0); calls=[]; captured=[]; original=database.db_manager.add_schedule; database.db_manager.add_schedule=lambda data: captured.append(dict(data)) or True; v.saved.connect(lambda: calls.append('saved')); v._on_save(); database.db_manager.add_schedule=original; assert calls == ['saved']; assert len(captured) == 1; data=captured[0]; print('captured', data); assert data['title'] == '__mock_m5g_month_full_save__'; assert data['item_type'] == 'schedule'; assert data['priority'] == 2; assert data['repeat_rule'] == '无'; assert data['description'] == 'mock validation only'; assert data['start_time'] == start; assert data['end_time'] == end; assert data['reminder_time'] == remind; assert data['is_alarm'] is True; assert data['alarm_duration'] == 1; assert data['category_id'] == 12345"
+rg -n "calendar.clicked.connect\(self._on_calendar_date_clicked\)|calendar.activated.connect\(self._on_calendar_date_activated\)|def _on_calendar_date_clicked|def _on_calendar_date_activated|date_selected.emit|close_day_panels|_open_day_panel" src/ui/month_window.py
 ```
 
-### 4.8 重复规则只做静态验证
+预期：
 
-不得真实保存 `每天 / 每周 / 每月`。
+- 左键 clicked 链路仍在。
+- activated / 双击跳日链路仍在。
+- `_on_calendar_date_activated(...)` 仍关闭持久 panel 并 emit `date_selected`。
 
-```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from src.ui.month_window import InlineAddViewMonth; app=QApplication([]); v=InlineAddViewMonth(); repeats=[v.combo_repeat.itemText(i).strip() for i in range(v.combo_repeat.count())]; print('repeat options', repeats); assert repeats == ['无', '每天', '每周', '每月']"
-```
-
-### 4.9 marker / hover / panel smoke 验证
-
-```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from src.ui.month_window import MonthWindow; app=QApplication([]); w=MonthWindow(); marker_cache, marker_count_cache = w._build_schedule_marker_cache(); hover_cache = w._build_hover_schedule_cache(); print('marker cache types', type(marker_cache).__name__, type(marker_count_cache).__name__); print('hover cache type', type(hover_cache).__name__); assert isinstance(marker_cache, dict); assert isinstance(marker_count_cache, dict); assert isinstance(hover_cache, dict); w._refresh_schedule_marker_cache(); assert isinstance(w.schedule_marker_cache, dict); assert isinstance(w.schedule_marker_count_cache, dict); assert isinstance(w.hover_schedule_cache, dict); w.close_day_panels(); print('marker/hover/panel smoke ok')"
-```
-
-### 4.10 保存成功刷新链路 smoke
-
-不得真实写库。只调用刷新入口。
-
-```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from src.ui.month_window import MonthWindow; app=QApplication([]); w=MonthWindow(); w._on_schedule_saved(); print('schedule saved refresh callable ok')"
-```
-
-### 4.11 主界面 / 周界面添加页回归检查
-
-```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src/ui/add_view.py src/ui/add_view_week.py src/ui/main_window.py src/ui/week_window.py
-```
-
-### 4.12 schedule.db diff 检查
+### 4.9 不写数据库验证
 
 ```powershell
 git diff --name-only -- schedule.db
@@ -296,10 +416,35 @@ git diff --name-only -- schedule.db
 
 预期无输出。
 
-### 4.13 禁止范围检查
+### 4.10 语法检查
 
 ```powershell
-git diff --name-only -- src
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src/ui/month_window.py main.py
+```
+
+### 4.11 禁止范围检查
+
+```powershell
+git diff --name-only -- src/ui/common/action_context_menu.py
+git diff --name-only -- src/ui/dashboard.py
+git diff --name-only -- src/ui/week_window.py
+git diff --name-only -- src/ui/main_window.py
+git diff --name-only -- src/ui/add_view.py
+git diff --name-only -- src/ui/add_view_week.py
+git diff --name-only -- src/ui/time_picker.py
+git diff --name-only -- src/ui/alarm_picker.py
+git diff --name-only -- src/ui/list_picker.py
+git diff --name-only -- src/ui/calendar_pop.py
+git diff --name-only -- src/ui/common
+git diff --name-only -- src/ui/popups
+git diff --name-only -- src/ui/utils
+git diff --name-only -- src/controllers
+git diff --name-only -- src/data
+git diff --name-only -- src/repositories
+git diff --name-only -- src/services
+git diff --name-only -- src/theme
+git diff --name-only -- src/utils/signals.py
+git diff --name-only -- src/utils/styles.py
 git diff --name-only -- assets
 git diff --name-only -- main.py
 git diff --name-only -- requirements.txt
@@ -308,7 +453,7 @@ git diff --name-only -- schedule.db
 
 预期以上均无输出。
 
-### 4.14 总范围检查
+### 4.12 总范围检查
 
 ```powershell
 git diff --check
@@ -319,6 +464,7 @@ git status --short --branch
 预期最终只允许：
 
 ```text
+src/ui/month_window.py
 manage_instruction/Work_Log.md
 manage_instruction/Work_Task_Prompts.md
 ```
@@ -329,51 +475,26 @@ manage_instruction/Work_Task_Prompts.md
 
 更新 `manage_instruction/Work_Log.md`，至少记录：
 
-- 本轮任务名称：`M-5g（月界面添加能力整体验收）`
+- 本轮任务名称：`M-6（月界面右键菜单接入）`
 - 开工前 git 状态
 - 实际修改文件
 - 是否存在开工前既有 diff
-- M-5 到 M-5f 完成结论汇总
-- 日期来源验收结果
-- 过去日期不可添加验收结果
-- 时间 picker 链路验收结果
-- 提醒 picker 链路验收结果
-- 清单 picker 链路验收结果
-- 未设置时间保存拦截结果
-- 完整保存结构 mock 验收结果
-- 重复规则是否仅做静态验证
-- marker cache 链路验收结果
-- hover cache 链路验收结果
-- 持久 panel 关闭链路验收结果
-- `_on_schedule_saved(...)` 刷新入口验收结果
-- 主界面 / 周界面添加页回归检查结果
-- 是否未真实写入重复日程
-- 是否未新增 / 删除清单
-- `schedule.db` 是否无 tracked diff
-- diff 范围检查结果
+- `ActionContextMenu` 复用方式
+- 右键日期命中方式
+- 右键菜单上下文字段
+- 右键是否不改变 `user_selected_date`
+- 添加动作是否使用右键日期
+- 过去日期添加拦截结果
+- 日视图动作是否 emit `date_selected(context_date)` 并关闭持久 panel
+- 周/月/待办/四象限动作处理结果
+- 是否保持换肤/排序/筛选禁用
+- 是否未改主界面 / 周界面右键菜单
+- 是否未写数据库
+- import / offscreen / py_compile 验证结果
+- 禁止范围检查结果
 - 未完成事项
 - 风险或疑点
-- 是否建议进入 `M-6（月界面右键菜单接入）`
 
-特别记录：
-
-- 本轮只做整体验收。
-- 本轮不改源码。
-- 本轮不真实写库。
-- 本轮不接右键菜单。
-- 本轮完成后若通过，可进入 `M-6（月界面右键菜单接入）`。
-
-## 6. Work_Task_Prompts.md 处理要求
-
-如需要维护复核锚点，可将当前状态更新为：
-
-```text
-M-5g 已执行，等待决策/顾问窗口复核。
-下一步候选：M-6。
-```
-
-不得在本轮自行写入 `M-6` 的执行提示词。
-
-## 7. 完成后要求
+## 6. 完成后要求
 
 完成后不要提交 Git，等待决策/顾问窗口复核。
