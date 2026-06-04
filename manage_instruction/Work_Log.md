@@ -2964,3 +2964,372 @@
   - 复跑 `main import`：通过。
   - 复跑 `schedule.db` tracked diff：无输出。
   - 复跑禁止范围检查：无输出。
+
+## M-5g 最终提示词写入
+
+- 时间：2026-06-03
+
+- 任务：
+  - 审核决策窗口提供的 `M-5g（月界面添加能力整体验收）` 提示词，并写入最终执行版。
+
+- 实际修改文件：
+  - `manage_instruction/Work_Task_Prompts.md`
+  - `manage_instruction/Work_Log.md`
+
+- 审核结论：
+  - 原方向可采纳：M-5g 应只做月界面添加能力整体验收和日志记录，不改源码、不真实写库、不接右键菜单。
+  - 原稿中 marker / hover 验证命令有少量方法名和属性名风险，需要对齐当前 `month_window.py` 的真实接口。
+
+- 本次修订重点：
+  - 将 marker 验证统一改为当前真实方法：
+    - `_build_schedule_marker_cache()`
+    - `_build_hover_schedule_cache()`
+    - `_refresh_schedule_marker_cache()`
+  - 将缓存属性统一改为当前真实字段：
+    - `schedule_marker_cache`
+    - `schedule_marker_count_cache`
+    - `hover_schedule_cache`
+  - 保留保存结构 mock 验证，明确不得真实写入 `schedule.db`。
+  - 明确 M-5g 不修改 `src/`、不新增功能、不接月界面右键菜单。
+  - 明确 M-5g 通过后下一步候选为 `M-6（月界面右键菜单接入）`。
+
+- 范围说明：
+  - 本次只写执行提示词和日志。
+  - 不修改源码。
+  - 不进入 M-5g 执行。
+
+- 下一步候选：
+  - 执行窗口按 `Work_Task_Prompts.md` 执行 M-5g。
+
+## M-5g：月界面添加能力整体验收
+
+- 时间：2026-06-03
+
+- 本轮任务名称：
+  - `M-5g（月界面添加能力整体验收）`
+
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 67]`
+  - `M manage_instruction/Work_Log.md`
+  - `M manage_instruction/Work_Task_Prompts.md`
+  - 说明：
+    - 本轮开工前 `src/` 已无 diff。
+    - `manage_instruction/Work_Task_Prompts.md` 为开工前既有管理文档 diff，本轮未修改。
+
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+
+- `M-5` 到 `M-5f` 完成结论汇总：
+  - `M-5`：
+    - 月界面“添加”目标日期从 `calendar.selectedDate()` 收口为 `_get_add_target_date()`。
+    - 有用户主动选中日期时优先使用选中日期；无主动选中时 fallback 到 `calendar.selectedDate()`。
+    - 过去日期不可添加。
+  - `M-5b`：
+    - 明确月界面后续承接策略应在 `month_window.py` 内部最小接管。
+    - 复用主版本 picker 语义，不借 `MainWindow.body_stack`，不走周界面历史链路。
+  - `M-5c`：
+    - `InlineAddViewMonth` 补齐时间 / 提醒 / 清单状态字段。
+    - 增加 `set_time_data / set_alarm_data / set_list_data` 与 picker 请求信号壳。
+  - `M-5d`：
+    - 月界面内部接入 `TimePickerView`。
+    - `btn_time` 可打开时间页并回填 `selected_start_time / selected_end_time`。
+    - 未设置时间时保存会被拦截。
+  - `M-5e`：
+    - 月界面内部接入 `AlarmPickerView / ListPickerView`。
+    - `btn_alarm` 依赖已选时间。
+    - `btn_list` 强制 `list_type="schedule"`。
+    - 回填提醒 / 清单字段，不改 picker 源码。
+  - `M-5f`：
+    - `combo_priority` 收口为 `低 / 中 / 高`。
+    - `combo_repeat` 保持 `无 / 每天 / 每周 / 每月`。
+    - `_on_save(...)` 与主界面保存结构对齐。
+
+- 日期来源验收结果：
+  - 通过。
+  - 验证结果：
+    - 人工设置 `user_selected_date = QDate.currentDate().addDays(3)` 后，
+      - `_get_add_target_date()` 返回该选中日期。
+      - `_on_add_clicked()` 后 `inline_add_view.selected_date` 与该日期一致。
+  - 说明：
+    - 本轮已验证“有用户选中日期时优先使用选中日期”的链路。
+    - “无用户选中日期时 fallback 正常”依据当前实现和前序 `M-5` / `M-5d` 结论确认，未单独改源码。
+
+- 过去日期不可添加验收结果：
+  - 通过。
+  - 验证结果：
+    - `user_selected_date = QDate.currentDate().addDays(-1)` 时，
+    - `_on_add_clicked()` 后 `inline_add_view.isVisible() == False`。
+
+- 时间 picker 验收结果：
+  - 通过。
+  - 验证结果：
+    - `on_time_confirmed(start, end)` 后，
+      - `selected_start_time == start`
+      - `selected_end_time == end`
+    - `InlineAddViewMonth` 可正确承接时间回填。
+
+- 提醒 picker 验收结果：
+  - 通过。
+  - 验证结果：
+    - `on_alarm_confirmed(remind, True, 1)` 后，
+      - `selected_reminder == remind`
+      - `selected_is_alarm_mode is True`
+      - `selected_alarm_duration == 1`
+  - 结合前序 `M-5e` 结论：
+    - 未设置时间时 `btn_alarm` 不打开提醒 picker。
+    - 有时间时可打开月内 `AlarmPickerView`。
+
+- 清单 picker 验收结果：
+  - 通过。
+  - 验证结果：
+    - `on_list_confirmed(None)` 后，
+      - `selected_list_id is None`
+    - 前序 `M-5e` 已验证：
+      - `btn_list` 可打开月内 `ListPickerView`
+      - `current_list_type == "schedule"`
+      - 可只读回填已有 `schedule` 清单 id / 名称
+
+- 未设置时间保存拦截结果：
+  - 通过。
+  - 验证结果：
+    - 仅设置标题、不设置时间时执行 `_on_save()`，
+    - `saved` 信号未触发。
+
+- 完整保存结构 mock 验收结果：
+  - 通过。
+  - 使用 monkeypatch 截获：
+    - `db_manager.add_schedule(schedule_data)`
+  - 未真实写入数据库。
+  - 截获字段确认：
+    - `title == '__mock_m5g_month_full_save__'`
+    - `item_type == 'schedule'`
+    - `priority == 2`
+    - `repeat_rule == '无'`
+    - `description == 'mock validation only'`
+    - `start_time == start`
+    - `end_time == end`
+    - `reminder_time == remind`
+    - `is_alarm is True`
+    - `alarm_duration == 1`
+    - `category_id == 12345`
+  - `saved` 信号已触发。
+  - 说明：
+    - 控制台在 `gbk` 环境下打印中文时，`'无'` 可能显示为乱码 `ÎŢ`，但 Python 断言已基于真实字符串值通过，不影响结论。
+
+- 重复规则是否仅做静态验证：
+  - 是。
+  - 本轮只确认选项存在：
+    - `['无', '每天', '每周', '每月']`
+  - 未真实保存：
+    - `每天`
+    - `每周`
+    - `每月`
+  - 原因：
+    - 避免触发批量重复写库。
+
+- marker cache 链路验收结果：
+  - 通过。
+  - 验证结果：
+    - `_build_schedule_marker_cache()` 可调用。
+    - 返回：
+      - `marker_cache` 为 `dict`
+      - `marker_count_cache` 为 `dict`
+
+- hover cache 链路验收结果：
+  - 通过。
+  - 验证结果：
+    - `_build_hover_schedule_cache()` 可调用。
+    - 返回 `hover_cache` 为 `dict`。
+    - `_refresh_schedule_marker_cache()` 调用后：
+      - `schedule_marker_cache` 为 `dict`
+      - `schedule_marker_count_cache` 为 `dict`
+      - `hover_schedule_cache` 为 `dict`
+
+- 持久 panel 关闭链路验收结果：
+  - 通过。
+  - 验证结果：
+    - `close_day_panels()` 可调用且不报错。
+
+- `_on_schedule_saved(...)` 刷新入口验收结果：
+  - 通过。
+  - 验证结果：
+    - `MonthWindow()._on_schedule_saved()` 可调用。
+    - 不报错。
+  - 说明：
+    - 本轮不做真实保存，只验证刷新入口可调用。
+
+- 主界面 / 周界面添加页回归检查结果：
+  - 通过。
+  - `py_compile` 已通过：
+    - `src/ui/add_view.py`
+    - `src/ui/add_view_week.py`
+    - `src/ui/main_window.py`
+    - `src/ui/week_window.py`
+  - import 验证通过：
+    - `MonthWindow`
+    - `InlineAddViewMonth`
+    - `AddScheduleView`
+    - `AddScheduleViewWeek`
+
+- 是否未真实写入重复日程：
+  - 是。
+  - 本轮未真实保存 `每天 / 每周 / 每月`。
+
+- 是否未新增 / 删除清单：
+  - 是。
+  - 本轮未通过 UI 或数据库创建 / 删除真实清单。
+
+- `schedule.db` 是否无 tracked diff：
+  - `git diff --name-only -- schedule.db`
+  - 无输出，通过。
+
+- 验证命令与结果摘要：
+  - `rg -n ... src/ui/month_window.py`
+    - 月界面添加链路相关方法、缓存字段、panel 链路均存在。
+  - import 验证：
+    - `month/main/week add imports ok`
+  - offscreen 构造：
+    - `month created True`
+    - `has inline True`
+    - `has page_time True`
+    - `has page_alarm True`
+    - `has page_list True`
+  - 日期来源验证：
+    - `target date 2026-06-06`
+    - `inline selected 2026-06-06`
+  - 过去日期验证：
+    - `past add visible after False`
+  - 时间 / 提醒 / 清单回调：
+    - `time/alarm/list callbacks ok`
+  - 未设时间保存拦截：
+    - `saved calls []`
+  - mock 保存结构：
+    - `captured {...}`
+    - 断言通过
+  - 重复选项静态确认：
+    - `repeat options ['无', '每天', '每周', '每月']`
+  - marker / hover / panel：
+    - `marker cache types dict dict`
+    - `hover cache type dict`
+    - `marker/hover/panel smoke ok`
+  - 保存成功刷新入口：
+    - `schedule saved refresh callable ok`
+  - 主界面 / 周界面回归：
+    - `py_compile` 通过
+
+- diff 范围检查结果：
+  - `git diff --name-only -- src`
+    - 无输出
+  - `git diff --name-only -- assets`
+    - 无输出
+  - `git diff --name-only -- main.py`
+    - 无输出
+  - `git diff --name-only -- requirements.txt`
+    - 无输出
+  - `git diff --check`
+    - 仅管理文档 CRLF 警告，无源码 diff
+  - `git diff --name-only`
+    - `manage_instruction/Work_Log.md`
+    - `manage_instruction/Work_Task_Prompts.md`
+  - `git status --short --branch`
+    - `## main...temp/main [ahead 67]`
+    - `M manage_instruction/Work_Log.md`
+    - `M manage_instruction/Work_Task_Prompts.md`
+  - 说明：
+    - `manage_instruction/Work_Task_Prompts.md` 为开工前既有 diff，本轮未修改
+
+- 未完成事项：
+  - `M-6（月界面右键菜单接入）` 尚未执行
+  - 月界面 todo 支持仍未进入范围
+
+- 风险或疑点：
+  - `M-5g` 只做了 mock 保存结构验收，没有做真实写库；这是刻意约束，用于避免本地 SQLite 被重复规则测试污染。
+  - 控制台 `gbk` 输出对中文仍可能出现乱码展示，但当前所有关键字段断言均已通过，不影响本轮结论。
+
+- 是否建议进入 `M-6（月界面右键菜单接入）`：
+  - 建议可以进入。
+  - 前提：
+    - 继续保持“不改已有保存链路、不真实写库”的小步策略。
+
+- 特别记录：
+  - 本轮只做整体验收。
+  - 本轮不改源码。
+  - 本轮不真实写库。
+  - 本轮不接右键菜单。
+
+### 主窗口复核补充
+
+- 时间：2026-06-03
+
+- 复核方式：
+  - 对照 `Work_Task_Prompts.md` 的 M-5g 提示词与本日志执行记录。
+  - 复跑关键 Python smoke、mock 保存、缓存刷新和 diff 范围检查。
+
+- 提示词与日志对照结论：
+  - 执行窗口记录覆盖了 M-5g 要求的日期来源、过去日期拦截、time/alarm/list picker 回调、未设时间保存拦截、mock 保存结构、repeat 选项、marker/hover/panel、保存后刷新入口、py_compile 和 diff 范围。
+  - 未发现执行范围扩大到源码修改、真实写库、月界面右键菜单或 todo 支持。
+
+- 主窗口复跑结果：
+  - import 验证通过：
+    - `MonthWindow`
+    - `InlineAddViewMonth`
+    - `AddScheduleView`
+    - `AddScheduleViewWeek`
+  - offscreen `MonthWindow` 构造通过：
+    - `inline_add_view`
+    - `page_time`
+    - `page_alarm`
+    - `page_list`
+  - 添加日期来源验证通过：
+    - 用户选中 `2026-06-06` 后，添加表单 `selected_date` 为 `2026-06-06`。
+  - 过去日期拦截验证通过：
+    - 过去日期触发添加后，`inline_add_view.isVisible()` 为 `False`。
+  - time / alarm / list 回调验证通过：
+    - `selected_start_time`
+    - `selected_end_time`
+    - `selected_reminder`
+    - `selected_is_alarm_mode`
+    - `selected_alarm_duration`
+    - `selected_list_id`
+    - `selected_list_name`
+  - 未设置时间保存拦截验证通过：
+    - mock `add_schedule` 未被调用。
+  - mock 完整保存结构验证通过：
+    - `item_type == "schedule"`
+    - `priority == 2`
+    - `repeat_rule == "无"`
+    - `reminder_time`
+    - `is_alarm`
+    - `alarm_duration`
+    - `category_id`
+  - repeat 选项静态验证通过：
+    - `['无', '每天', '每周', '每月']`
+  - marker / hover / panel smoke 通过：
+    - `_build_schedule_marker_cache()`
+    - `_build_hover_schedule_cache()`
+    - `_refresh_schedule_marker_cache()`
+    - `close_day_panels()`
+  - 保存后刷新入口验证通过：
+    - `_on_schedule_saved()` 可调用。
+  - 语法检查通过：
+    - `src/ui/add_view.py`
+    - `src/ui/add_view_week.py`
+    - `src/ui/main_window.py`
+    - `src/ui/week_window.py`
+    - `src/ui/month_window.py`
+    - `main.py`
+
+- 编码说明：
+  - Windows 控制台中 mock 保存结构曾将中文 `无` 显示为乱码，但 Python 断言通过，实际字段值为 `无`，不影响结论。
+
+- 主窗口 diff 复核：
+  - `git diff --name-only -- src` 无输出。
+  - `git diff --name-only -- schedule.db` 无输出。
+  - 当前 diff 仅为管理文档：
+    - `manage_instruction/Work_Log.md`
+    - `manage_instruction/Work_Task_Prompts.md`
+
+- 复核结论：
+  - M-5g 通过。
+  - 月界面添加能力阶段可以进入 `M-6（月界面右键菜单接入）`。
+  - 继续保持小步策略：M-6 只接右键菜单，不改 M-5 保存链路，不做真实数据库测试。
