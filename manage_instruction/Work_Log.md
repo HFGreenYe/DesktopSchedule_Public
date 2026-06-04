@@ -3720,3 +3720,281 @@
   - M-6 通过。
   - 修正后实现更符合提示词边界：右键 handler 只处理菜单动作，不负责显示主窗口。
   - 下一步可进入 `M-7（月界面功能补齐整体验收）`。
+
+## M-7 最终提示词写入
+
+- 时间：2026-06-04
+
+- 任务：
+  - 审核 `M-6` 主窗口复核后的当前工作区状态。
+  - 自行复跑关键检查。
+  - 将 `manage_instruction/Work_Task_Prompts.md` 切换为 `M-7（月界面功能补齐整体验收）` 的最终执行提示词。
+
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 69]`
+  - 工作区干净，无源码 diff。
+
+- 实际修改文件：
+  - `manage_instruction/Work_Task_Prompts.md`
+  - `manage_instruction/Work_Log.md`
+
+- 自行复跑检查结果：
+  - `MonthWindow / ActionContextMenu` import：通过
+  - 右键“添加”上下文验证：通过
+    - 先 `w.show(); app.processEvents()`
+    - `user_selected_date` 不变
+    - `inline_add_view.selected_date == context_menu_date`
+    - `inline_add_view.isVisible() == True`
+  - 右键 `week/month/todo/priority` 视图动作验证：通过
+    - `view_selected` 仅收到 `['week', 'todo']`
+  - `py_compile`：
+    - `src/ui/month_window.py`
+    - `main.py`
+    - 通过
+
+- 提示词切换结果：
+  - 已将 `manage_instruction/Work_Task_Prompts.md` 从 `M-6` 复核锚点切换为：
+    - `M-7（月界面功能补齐整体验收）`
+  - 新提示词原则：
+    - 只做总体验收
+    - 不改源码
+    - 不真实写库
+    - 只允许管理文档 diff
+
+- 当前 diff 范围：
+  - `manage_instruction/Work_Log.md`
+  - `manage_instruction/Work_Task_Prompts.md`
+
+- 未完成事项：
+  - 待执行窗口按新提示词执行 `M-7`
+
+- 风险或疑点：
+  - 月界面 `M-7` 仍会在 offscreen 环境下遇到中文控制台输出乱码与个别 Qt 退场噪音；执行窗口应继续以断言结果为准，不把控制台编码现象误判为功能失败。
+
+## M-7：月界面功能补齐整体验收
+
+- 时间：2026-06-04
+
+- 本轮任务名称：
+  - `M-7（月界面功能补齐整体验收）`
+
+- 开工前 git 状态：
+  - `## main...temp/main [ahead 69]`
+  - `M manage_instruction/Work_Log.md`
+  - `M manage_instruction/Work_Task_Prompts.md`
+  - 说明：
+    - 本轮开工前 `src/` 无 diff。
+    - `manage_instruction/Work_Task_Prompts.md` 为开工前既有管理文档 diff，本轮未继续修改。
+    - `manage_instruction/Work_Instruction.md` 仍停留在较早阶段说明，但执行窗口按当前最终提示词 `M-7` 行动。
+
+- 实际修改文件：
+  - `manage_instruction/Work_Log.md`
+
+- 是否存在开工前既有 diff：
+  - 存在。
+  - `manage_instruction/Work_Task_Prompts.md` 为既有管理文档 diff，本轮未修改。
+  - 本轮未产生任何 `src/` 源码 diff。
+
+- `M-1 ~ M-6` 完成结论汇总：
+  - `M-1`：
+    - 月格状态角标 / 数量角标和今天金色日期已接入。
+  - `M-2`：
+    - 单击日期选中。
+    - `activated` 跳日视图并关闭持久 panel。
+  - `M-3`：
+    - hover 只读预览已接入。
+  - `M-4`：
+    - 单击日期持久 panel 已接入，可关闭、可清理。
+  - `M-5 ~ M-5g`：
+    - 月界面添加表单、time/alarm/list picker 承接和保存结构已补齐并通过 mock 验收。
+  - `M-6`：
+    - 月界面右键菜单已接入，复用 `ActionContextMenu`，只实装“添加 / 视图”。
+
+- marker / 今天金色日期静态验收结果：
+  - 通过。
+  - 静态命中已确认仍存在：
+    - `today_date`
+    - `schedule_marker_cache`
+    - `schedule_marker_count_cache`
+    - `_draw_label_marker(...)`
+    - `paint(...)`
+    - `set_calendar_state(...)`
+  - 绘制逻辑仍包含：
+    - 今天日期 `QColor("#FFD700")`
+    - 当前月/非当前月颜色分支
+    - marker / count 文本绘制
+    - `user_selected_date` 高亮填充
+  - 说明：
+    - 本轮只做静态与行为验收，不做像素级视觉验收。
+
+- 单击 / activated 验收结果：
+  - 通过。
+  - 静态确认：
+    - `calendar.clicked.connect(self._on_calendar_date_clicked)` 仍在。
+    - `calendar.activated.connect(self._on_calendar_date_activated)` 仍在。
+  - 当前行为边界：
+    - 单击：
+      - 设置 `user_selected_date`
+      - 刷新 marker cache
+      - 隐藏 hover
+      - 打开 / 复用持久 panel
+    - activated：
+      - 设置 `user_selected_date`
+      - 刷新 marker cache
+      - 隐藏 hover
+      - `close_day_panels()`
+      - `date_selected.emit(qdate)`
+
+- hover preview 验收结果：
+  - 通过。
+  - offscreen smoke 已验证：
+    - `_build_hover_schedule_cache()` 可调用
+    - `_refresh_schedule_marker_cache()` 后 `hover_schedule_cache` 为 `dict`
+  - 事件过滤链路仍在：
+    - `MouseMove` 命中日期时 `_show_hover_preview(...)`
+    - `Leave` 时 `_hide_hover_preview()`
+
+- 持久 panel 验收结果：
+  - 通过。
+  - `close_day_panels()` 可调用。
+  - `M-6` 右键 `day` 动作回归已再次确认：
+    - 跳日视图前会关闭全部持久 panel。
+
+- 添加链路验收结果：
+  - 通过。
+  - 已验证：
+    - `user_selected_date` 优先于 `calendar.selectedDate()`
+    - 过去日期不可添加
+    - `_on_add_clicked()` 后 `inline_add_view.selected_date` 与目标日期一致
+
+- time / alarm / list picker 验收结果：
+  - 通过。
+  - `offscreen` 构造下确认存在：
+    - `inline_add_view`
+    - `page_time`
+    - `page_alarm`
+    - `page_list`
+  - 前序链路在本轮总验收中保持成立：
+    - `go_to_time_picker(...) / on_time_confirmed(...)`
+    - `go_to_alarm_picker(...) / on_alarm_confirmed(...)`
+    - `go_to_list_picker(...) / on_list_confirmed(...)`
+
+- mock 保存结构验收结果：
+  - 通过。
+  - 使用 monkeypatch 截获：
+    - `db_manager.add_schedule(schedule_data)`
+  - 未真实写库。
+  - 断言通过：
+    - `item_type == 'schedule'`
+    - `priority == 2`
+    - `repeat_rule == '无'`
+    - `reminder_time == remind`
+    - `is_alarm is True`
+    - `alarm_duration == 1`
+    - `category_id == 12345`
+  - 未设置时间保存拦截也通过：
+    - `saved` 信号未触发
+
+- 右键菜单验收结果：
+  - 通过。
+  - 已验证：
+    - 右键添加不改变 `user_selected_date`
+    - 右键添加使用 `context_menu_date`
+    - 过去日期右键添加被拦截
+    - `day` 动作：
+      - `close_day_panels()`
+      - `date_selected.emit(context_date)`
+    - `week / todo`：
+      - 正常发出视图切换
+    - `month / priority`：
+      - 无动作
+
+- 主界面 / 周界面回归结果：
+  - 通过。
+  - import 验证通过：
+    - `MonthWindow`
+    - `InlineAddViewMonth`
+    - `ActionContextMenu`
+    - `AddScheduleView`
+    - `AddScheduleViewWeek`
+  - `py_compile` 通过：
+    - `src/ui/dashboard.py`
+    - `src/ui/week_window.py`
+    - `src/ui/main_window.py`
+    - `src/ui/add_view.py`
+    - `src/ui/add_view_week.py`
+    - `src/ui/month_window.py`
+    - `main.py`
+  - `main import` 通过：
+    - `main import ok`
+
+- 是否未真实写库：
+  - 是。
+  - 本轮所有保存相关验收都使用 mock / monkeypatch。
+  - 未新增 / 删除真实清单。
+  - 未真实保存重复日程。
+
+- `schedule.db` 是否无 tracked diff：
+  - `git diff --name-only -- schedule.db`
+  - 无输出，通过。
+
+- 验证命令和结果摘要：
+  - 功能链路静态定位：通过
+  - 视觉状态静态定位：通过
+  - import 验证：
+    - `month phase imports ok`
+  - offscreen 构造与缓存 smoke：
+    - `month created True`
+    - `marker types dict dict`
+    - `hover type dict`
+    - `month smoke ok`
+  - 添加链路回归：
+    - `add chain regression ok`
+  - 右键菜单回归：
+    - `context menu regression ok`
+  - 主界面 / 周界面回归：
+    - `py_compile` 通过
+  - 默认入口 import：
+    - `main import ok`
+
+- diff 范围检查结果：
+  - `git diff --name-only -- src`
+    - 无输出
+  - `git diff --name-only -- assets`
+    - 无输出
+  - `git diff --name-only -- main.py`
+    - 无输出
+  - `git diff --name-only -- requirements.txt`
+    - 无输出
+  - `git diff --check`
+    - 仅管理文档 CRLF 警告
+  - `git diff --name-only`
+    - `manage_instruction/Work_Log.md`
+    - `manage_instruction/Work_Task_Prompts.md`
+  - `git status --short --branch`
+    - `## main...temp/main [ahead 69]`
+    - `M manage_instruction/Work_Log.md`
+    - `M manage_instruction/Work_Task_Prompts.md`
+  - 说明：
+    - `manage_instruction/Work_Task_Prompts.md` 为开工前既有 diff，本轮未修改
+
+- 是否建议月界面功能补齐阶段通过：
+  - 建议通过。
+  - 结论：
+    - `M-1 ~ M-6` 的功能链路、回归链路和无写库边界均已通过当前总验收。
+
+- 下一步建议：
+  - 可进入 `M-8（月界面阶段归档 / 后续功能规划）` 或按决策窗口安排进入下一阶段。
+  - 若继续月界面开发，建议优先单独评估：
+    - 视觉适配 / marker 位置微调
+    - 真实写库场景下的完整人工验收
+    - 月界面右键菜单扩展是否仍有必要
+
+- 未完成事项：
+  - 本轮不处理像素级视觉适配
+  - 本轮不做真实写库验收
+  - 本轮不处理四象限、换肤、排序、筛选的实装
+
+- 风险或疑点：
+  - Windows `gbk` 控制台对中文输出仍可能乱码；当前以 Python 断言结果为准。
+  - Qt offscreen 环境仍可能在某些窗口显示/退场场景下产生噪音；本轮关键断言均已通过，不影响验收结论。
