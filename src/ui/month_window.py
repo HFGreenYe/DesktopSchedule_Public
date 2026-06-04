@@ -3,17 +3,25 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QFrame, QToolButton, QLineEdit, 
                              QCalendarWidget, QApplication, QTableView, 
                              QStyledItemDelegate, QStyle, QStyleOptionViewItem,
-                             QGridLayout, QTextEdit) 
-from PyQt6.QtCore import Qt, pyqtSignal, QDate, QTime, QTimer, QRectF, QSize
-from PyQt6.QtGui import QPainter, QPainterPath, QColor, QBrush, QLinearGradient, QIcon, QPen, QPalette, QPixmap
+                             QGridLayout, QTextEdit, QComboBox)
+from PyQt6.QtCore import Qt, pyqtSignal, QDate, QTime, QTimer, QRectF, QSize, QEvent
+from PyQt6.QtGui import QPainter, QPainterPath, QColor, QBrush, QLinearGradient, QIcon, QPen, QPalette, QPixmap, QGuiApplication
 from PyQt6.QtSvg import QSvgRenderer
 from qframelesswindow import FramelessMainWindow
+import datetime
 
 from ..config import AppConfig
+from ..data.database import db_manager
 from ..utils.win_api import apply_24h2_border_fix
 from ..utils.styles import StyleManager
 from .header import ToolTipFilter
 from .components import get_colored_icon, SharedMoreMenu
+from .common.action_context_menu import ActionContextMenu
+from .time_picker import TimePickerView
+from .alarm_picker import AlarmPickerView
+from .list_picker import ListPickerView
+from .popups.month_day_hover_preview import MonthDayHoverPreview
+from .popups.month_day_panel import MonthDayPanel
 
 
 class CalendarCellDelegate(QStyledItemDelegate):
@@ -23,6 +31,60 @@ class CalendarCellDelegate(QStyledItemDelegate):
         self.grad_start = QColor(grad_start_str)
         self.grad_end = QColor(grad_end_str)
         self.table_view = table_view
+        self.calendar_widget = parent
+        self.visible_year = QDate.currentDate().year()
+        self.visible_month = QDate.currentDate().month()
+        self.today_date = QDate.currentDate()
+        self.marker_cache = {}
+        self.marker_count_cache = {}
+        self.user_selected_date = None
+
+    def set_calendar_state(self, visible_year, visible_month, today_date, marker_cache, marker_count_cache=None, user_selected_date=None):
+        self.visible_year = visible_year
+        self.visible_month = visible_month
+        self.today_date = today_date
+        self.marker_cache = dict(marker_cache)
+        self.marker_count_cache = dict(marker_count_cache or {})
+        self.user_selected_date = user_selected_date
+
+    def _date_for_index(self, index):
+        first_of_month = QDate(self.visible_year, self.visible_month, 1)
+        first_day_of_week = self.calendar_widget.firstDayOfWeek().value
+        offset = (first_of_month.dayOfWeek() - first_day_of_week) % 7
+        if index.row() == 0:
+            return QDate()
+
+        if offset == 0:
+            offset = 7
+
+        first_visible_date = first_of_month.addDays(-offset)
+        day_offset = (index.row() - 1) * 7 + index.column()
+        return first_visible_date.addDays(day_offset)
+
+    def _draw_label_marker(self, painter, rect, color, count):
+        label_size = 22
+        label_path = QPainterPath()
+        label_path.moveTo(rect.left(), rect.top())
+        label_path.lineTo(rect.left() + label_size, rect.top())
+        label_path.lineTo(rect.left(), rect.top() + label_size)
+        label_path.closeSubpath()
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(color))
+        painter.drawPath(label_path)
+
+        count_text = "9+" if count > 9 else str(count)
+        font = painter.font()
+        font.setPointSize(6)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.setPen(QColor("#FFFFFF"))
+        text_rect = QRectF(rect.left(), rect.top(), 14, 14)
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, count_text)
+        painter.restore()
+
 
     # 计算全局 Y 坐标对应的颜色（线性插值）
     def get_color_for_y(self, y):
@@ -63,6 +125,11 @@ class CalendarCellDelegate(QStyledItemDelegate):
 
         # 获取当前格子的文字
         date_str = str(index.data())
+        cell_date = self._date_for_index(index)
+        cell_py_date = cell_date.toPyDate() if cell_date.isValid() else None
+        is_today = cell_date == self.today_date
+        marker_color = self.marker_cache.get(cell_py_date)
+        marker_count = self.marker_count_cache.get(cell_py_date, 0)
         
         # 核心逻辑：判断当前格子里是不是纯数字（表头"周一"不是，日期"27"是）
         is_date = date_str.isdigit() 
@@ -73,8 +140,8 @@ class CalendarCellDelegate(QStyledItemDelegate):
         if is_date:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
             
-            # 1. 设置边框颜色和宽度 (3px 纯白边框)
-            card_pen = QPen(QColor(255, 255, 255,90)) 
+            # 1. 设置边框颜色和宽度 (保持原白色细边框)
+            card_pen = QPen(QColor(255, 255, 255, 90))
             card_pen.setWidth(0)
             painter.setPen(card_pen)
             
@@ -89,8 +156,8 @@ class CalendarCellDelegate(QStyledItemDelegate):
 
         # 3. 画交互状态（悬停、选中遮罩）—— 【只给日期画】
         if is_date:
-            if option.state & QStyle.StateFlag.State_Selected:
-                painter.fillRect(inner_rect, QColor(255, 255, 255, 40)) 
+            if self.user_selected_date is not None and cell_date == self.user_selected_date:
+                painter.fillRect(inner_rect, QColor(255, 255, 255, 40))
             elif option.state & QStyle.StateFlag.State_MouseOver:
                 painter.fillRect(inner_rect, QColor(255, 255, 255, 10))
 
@@ -102,50 +169,50 @@ class CalendarCellDelegate(QStyledItemDelegate):
             is_date = date_str.isdigit() 
             
             if is_date:
-                # ==========================================
-                # 利用网格数学规律判断是否为本月
-                # ==========================================
-                day_num = int(date_str)
-                is_current_month = True
-                
-                # 兼容表头占据 Row 0 的情况：上个月的日期只可能出现在前两行，且数字必然 > 20
-                if index.row() <= 1 and day_num > 20:
-                    is_current_month = False
-                # 下个月的日期只会出现在倒数两行（Row 4 及以后），且数字必然 < 15
-                elif index.row() >= 4 and day_num < 15:
-                    is_current_month = False
+                is_current_month = (
+                    cell_date.year() == self.visible_year and
+                    cell_date.month() == self.visible_month
+                )
 
-                # ==========================================
-                # 🎨 根据判定结果上色
-                # ==========================================
-                if is_current_month:
-                    # 本月日期：通过列索引区分工作日和周末
-                    # 第一列是周一(0)，周六是(5)，周日是(6)
-                    if index.column() in (5, 6):
-                        painter.setPen(QColor(255, 60, 60))   # 周末：红色
+                if is_today:
+                    painter.setPen(QColor("#FFD700"))
+                elif is_current_month:
+                    if cell_date.dayOfWeek() in (6, 7):
+                        painter.setPen(QColor(255, 60, 60))
                     else:
-                        painter.setPen(QColor(255, 255, 255)) # 周一至周五：纯白
+                        painter.setPen(QColor(255, 255, 255))
                 else:
-                    # 非本月日期：半透明灰色（降低视觉干扰）
-                    painter.setPen(QColor(128, 128, 128, 100)) 
+                    painter.setPen(QColor(128, 128, 128, 100))
             else:
-                # 表头文字 (周一至周日)：保持纯白
                 painter.setPen(QColor(255, 255, 255))
 
             # 居中写字
             painter.drawText(inner_rect, Qt.AlignmentFlag.AlignCenter, date_str)
+            if marker_color is not None:
+                self._draw_label_marker(painter, inner_rect, marker_color, marker_count)
         painter.restore()
 
 class InlineAddViewMonth(QWidget):
     """月视图左侧专属的极简添加组件"""
     saved = pyqtSignal()
     canceled = pyqtSignal()
+    req_open_time_picker = pyqtSignal(object, object)
+    req_open_alarm_picker = pyqtSignal(object, bool, int)
+    req_open_list_picker = pyqtSignal(object, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.selected_date = None
         self.is_schedule_mode = True
+        self.selected_start_time = None
+        self.selected_end_time = None
+        self.selected_reminder = None
+        self.selected_alarm_duration = 0
+        self.selected_list_id = None
+        self.selected_list_name = None
+        self.selected_is_alarm_mode = False
         self._setup_ui()
+        self._update_summary_labels()
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -182,20 +249,74 @@ class InlineAddViewMonth(QWidget):
         icons_layout = QHBoxLayout()
         icons_layout.setContentsMargins(0, 0, 0, 0)
         icons_layout.setSpacing(4)
-        
-        for icon_name in ["time.svg", "alarm.svg", "list.svg"]:
-            btn = QPushButton()
-            btn.setFixedSize(22, 22)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            pixmap = get_colored_icon(icon_name, "#FFFFFF", 14)
-            if not pixmap.isNull(): btn.setIcon(QIcon(pixmap))
-            btn.setStyleSheet("QPushButton { background: transparent; border: none; } QPushButton:hover { background: rgba(255,255,255,0.2); border-radius: 3px; }")
-            icons_layout.addWidget(btn)
-        
+
+        self.btn_time = self._create_icon_btn("time.svg", "时间设置待接入")
+        self.btn_alarm = self._create_icon_btn("alarm.svg", "提醒设置待接入")
+        self.btn_list = self._create_icon_btn("list.svg", "清单选择待接入")
+
+        self.btn_time.clicked.connect(
+            lambda: self.req_open_time_picker.emit(self.selected_start_time, self.selected_end_time)
+        )
+        self.btn_alarm.clicked.connect(self._emit_alarm_request)
+        self.btn_list.clicked.connect(
+            lambda: self.req_open_list_picker.emit(self.selected_list_id, "schedule")
+        )
+
+        icons_layout.addWidget(self.btn_time)
+        icons_layout.addWidget(self.btn_alarm)
+        icons_layout.addWidget(self.btn_list)
         icons_layout.addStretch()
         layout.addLayout(icons_layout)
 
-        # 4. 底部按钮
+        # 4. 轻量状态壳：紧急性 / 重复
+        shell_row = QHBoxLayout()
+        shell_row.setContentsMargins(0, 0, 0, 0)
+        shell_row.setSpacing(6)
+
+        self.lbl_priority = QLabel("紧急性")
+        self.lbl_priority.setStyleSheet("color: rgba(255,255,255,0.85); font-size: 11px; font-family: 'Microsoft YaHei';")
+        self.combo_priority = QComboBox()
+        self.combo_priority.addItems(["低", "中", "高"])
+        self.combo_priority.setFixedHeight(22)
+        self.combo_priority.setStyleSheet(self._combo_style())
+
+        self.lbl_repeat = QLabel("重复")
+        self.lbl_repeat.setStyleSheet("color: rgba(255,255,255,0.85); font-size: 11px; font-family: 'Microsoft YaHei';")
+        self.combo_repeat = QComboBox()
+        self.combo_repeat.addItems(["无", "每天", "每周", "每月"])
+        self.combo_repeat.setFixedHeight(22)
+        self.combo_repeat.setStyleSheet(self._combo_style())
+
+        shell_row.addWidget(self.lbl_priority)
+        shell_row.addWidget(self.combo_priority, 1)
+        shell_row.addSpacing(8)
+        shell_row.addWidget(self.lbl_repeat)
+        shell_row.addWidget(self.combo_repeat, 1)
+        layout.addLayout(shell_row)
+
+        # 5. 当前状态摘要
+        self.info_card = QFrame()
+        self.info_card.setStyleSheet("""
+            QFrame {
+                background: rgba(255, 255, 255, 0.08);
+                border: 1px solid rgba(255,255,255,0.15);
+                border-radius: 6px;
+            }
+        """)
+        info_layout = QVBoxLayout(self.info_card)
+        info_layout.setContentsMargins(8, 8, 8, 8)
+        info_layout.setSpacing(4)
+
+        self.lbl_info_time = QLabel("时间未设置")
+        self.lbl_info_alarm = QLabel("无提醒")
+        self.lbl_info_list = QLabel("清单未选择")
+        for label in (self.lbl_info_time, self.lbl_info_alarm, self.lbl_info_list):
+            label.setStyleSheet("color: rgba(255,255,255,0.88); font-size: 11px; font-family: 'Microsoft YaHei';")
+            info_layout.addWidget(label)
+
+        layout.addWidget(self.info_card)
+
+        # 6. 底部按钮
         btn_layout = QHBoxLayout()
         btn_layout.setContentsMargins(0, 0, 0, 0)
         
@@ -215,10 +336,123 @@ class InlineAddViewMonth(QWidget):
         btn_layout.addWidget(self.btn_save)
         layout.addLayout(btn_layout)
 
-    def reset(self, target_date):
-        self.selected_date = target_date
+    def _create_icon_btn(self, icon_name, tooltip_text):
+        btn = QPushButton()
+        btn.setFixedSize(22, 22)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        pixmap = get_colored_icon(icon_name, "#FFFFFF", 14)
+        if not pixmap.isNull():
+            btn.setIcon(QIcon(pixmap))
+        btn.setStyleSheet(
+            "QPushButton { background: transparent; border: none; } "
+            "QPushButton:hover { background: rgba(255,255,255,0.2); border-radius: 3px; }"
+        )
+        btn._tooltip = ToolTipFilter(tooltip_text, btn)
+        btn.installEventFilter(btn._tooltip)
+        return btn
+
+    def _combo_style(self):
+        return """
+            QComboBox {
+                background: rgba(255, 255, 255, 0.08);
+                border: 1px solid rgba(255,255,255,0.25);
+                border-radius: 4px;
+                color: white;
+                font-size: 11px;
+                padding-left: 6px;
+                font-family: 'Microsoft YaHei';
+            }
+            QComboBox::drop-down { border: none; width: 14px; }
+            QComboBox QAbstractItemView {
+                background: white;
+                color: #333333;
+                border: 1px solid #dddddd;
+                outline: none;
+            }
+        """
+
+    def _show_pending_toast(self, message):
+        if hasattr(self.window(), "show_toast"):
+            self.window().show_toast(message)
+
+    def _emit_alarm_request(self):
+        target_time = self.selected_start_time if self.selected_start_time else self.selected_end_time
+        if not target_time:
+            self._show_pending_toast("⚠️ 请先设置计划时间")
+            return
+        self.req_open_alarm_picker.emit(
+            target_time,
+            self.selected_is_alarm_mode,
+            self.selected_alarm_duration,
+        )
+
+    def _format_state_value(self, value):
+        if value is None:
+            return ""
+        return str(value)
+
+    def _update_summary_labels(self):
+        start_text = self._format_state_value(self.selected_start_time)
+        end_text = self._format_state_value(self.selected_end_time)
+        reminder_text = self._format_state_value(self.selected_reminder)
+
+        if start_text and end_text:
+            self.lbl_info_time.setText(f"时间：{start_text} - {end_text}")
+        elif end_text:
+            self.lbl_info_time.setText(f"时间：{end_text}")
+        elif start_text:
+            self.lbl_info_time.setText(f"时间：{start_text}")
+        else:
+            self.lbl_info_time.setText("时间未设置")
+
+        if reminder_text:
+            alarm_prefix = "强提醒 " if self.selected_is_alarm_mode else ""
+            self.lbl_info_alarm.setText(f"提醒：{alarm_prefix}{reminder_text}")
+        else:
+            self.lbl_info_alarm.setText("无提醒")
+
+        if self.selected_list_name:
+            self.lbl_info_list.setText(f"清单：{self.selected_list_name}")
+        elif self.selected_list_id is not None:
+            self.lbl_info_list.setText(f"清单：#{self.selected_list_id}")
+        else:
+            self.lbl_info_list.setText("清单未选择")
+
+    def set_time_data(self, start_time, end_time):
+        self.selected_start_time = start_time
+        self.selected_end_time = end_time
+        self._update_summary_labels()
+
+    def set_alarm_data(self, reminder_time, is_alarm_mode=False, alarm_duration=0):
+        self.selected_reminder = reminder_time
+        self.selected_is_alarm_mode = is_alarm_mode
+        self.selected_alarm_duration = alarm_duration
+        self._update_summary_labels()
+
+    def set_list_data(self, category_id, category_name):
+        self.selected_list_id = category_id
+        self.selected_list_name = category_name
+        self._update_summary_labels()
+
+    def reset_form(self, target_date=None):
+        if target_date is not None:
+            self.selected_date = target_date
+
         self.input_title.clear()
         self.input_desc.clear()
+        self.selected_start_time = None
+        self.selected_end_time = None
+        self.selected_reminder = None
+        self.selected_alarm_duration = 0
+        self.selected_list_id = None
+        self.selected_list_name = None
+        self.selected_is_alarm_mode = False
+        self.combo_priority.setCurrentIndex(0)
+        self.combo_repeat.setCurrentIndex(0)
+        self._update_summary_labels()
+
+    def reset(self, target_date):
+        self.reset_form(target_date)
 
     def _on_save(self):
         title = self.input_title.text().strip()
@@ -227,20 +461,23 @@ class InlineAddViewMonth(QWidget):
                 self.window().show_toast("⚠️ 标题不能为空")
             return
 
-        from datetime import datetime
-        # 默认保存为选中日期的 00:00
-        py_date = self.selected_date.toPyDate()
-        start_time = datetime(py_date.year, py_date.month, py_date.day, 0, 0)
+        if not self.selected_start_time and not self.selected_end_time:
+            if hasattr(self.window(), 'show_toast'):
+                self.window().show_toast("⚠️ 请先设置计划时间")
+            return
 
         schedule_data = {
             'title': title,
-            'item_type': 'schedule' if self.is_schedule_mode else 'todo',
-            'priority': 0,
-            'repeat_rule': 'none',
+            'item_type': 'schedule',
+            'priority': self.combo_priority.currentIndex(),
+            'repeat_rule': self.combo_repeat.currentText().strip(),
             'description': self.input_desc.toPlainText().strip(), 
-            'start_time': start_time,
-            'end_time': start_time, # 默认结束时间同上
-            'category_id': None
+            'start_time': self.selected_start_time,
+            'end_time': self.selected_end_time,
+            'reminder_time': self.selected_reminder,
+            'is_alarm': self.selected_is_alarm_mode,
+            'alarm_duration': self.selected_alarm_duration,
+            'category_id': self.selected_list_id
         }
 
         from ..data.database import db_manager
@@ -266,9 +503,18 @@ class MonthWindow(FramelessMainWindow):
         self.titleBar.hide()
 
         self.current_date = QDate.currentDate()
+        self.user_selected_date = None
+        self.schedule_marker_cache = {}
+        self.schedule_marker_count_cache = {}
+        self.hover_schedule_cache = {}
+        self.open_day_panels = []
+        self.hovered_date = None
+        self.hover_preview_popup = None
         self.drag_pos = None
+        self.context_menu_date = None
 
         self._setup_ui()
+        self._refresh_schedule_marker_cache()
         self._start_clock()
         
         # 挂载 24H2 边框与黑屏修复
@@ -501,7 +747,55 @@ class MonthWindow(FramelessMainWindow):
         self.inline_add_view.hide()
         self.inline_add_view.canceled.connect(self._close_add_view)
         self.inline_add_view.saved.connect(self._on_schedule_saved)
+        self.inline_add_view.req_open_time_picker.connect(self.go_to_time_picker)
+        self.inline_add_view.req_open_alarm_picker.connect(self.go_to_alarm_picker)
+        self.inline_add_view.req_open_list_picker.connect(self.go_to_list_picker)
         bottom_tools_vbox.addWidget(self.inline_add_view)
+
+        self.page_time = TimePickerView(self)
+        self.page_time.hide()
+        self.page_time.set_title("设置时间")
+        if hasattr(self.page_time, "btn_suspend"):
+            self.page_time.btn_suspend.hide()
+        if hasattr(self.page_time, "btn_close"):
+            try:
+                self.page_time.btn_close.clicked.disconnect()
+            except TypeError:
+                pass
+            self.page_time.btn_close.clicked.connect(self.back_from_time_picker)
+        self.page_time.back_requested.connect(self.back_from_time_picker)
+        self.page_time.confirm_requested.connect(self.on_time_confirmed)
+        bottom_tools_vbox.addWidget(self.page_time)
+
+        self.page_alarm = AlarmPickerView(self)
+        self.page_alarm.hide()
+        self.page_alarm.set_title("设置提醒")
+        if hasattr(self.page_alarm, "btn_suspend"):
+            self.page_alarm.btn_suspend.hide()
+        if hasattr(self.page_alarm, "btn_close"):
+            try:
+                self.page_alarm.btn_close.clicked.disconnect()
+            except TypeError:
+                pass
+            self.page_alarm.btn_close.clicked.connect(self.back_from_alarm_picker)
+        self.page_alarm.back_requested.connect(self.back_from_alarm_picker)
+        self.page_alarm.confirm_requested.connect(self.on_alarm_confirmed)
+        bottom_tools_vbox.addWidget(self.page_alarm)
+
+        self.page_list = ListPickerView(self)
+        self.page_list.hide()
+        self.page_list.set_title("选择清单")
+        if hasattr(self.page_list, "btn_suspend"):
+            self.page_list.btn_suspend.hide()
+        if hasattr(self.page_list, "btn_close"):
+            try:
+                self.page_list.btn_close.clicked.disconnect()
+            except TypeError:
+                pass
+            self.page_list.btn_close.clicked.connect(self.back_from_list_picker)
+        self.page_list.back_requested.connect(self.back_from_list_picker)
+        self.page_list.confirm_requested.connect(self.on_list_confirmed)
+        bottom_tools_vbox.addWidget(self.page_list)
 
         left_vbox.addLayout(bottom_tools_vbox)
 
@@ -518,13 +812,19 @@ class MonthWindow(FramelessMainWindow):
         self.calendar.setNavigationBarVisible(False) 
         self.calendar.setVerticalHeaderFormat(QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader)
         self.calendar.currentPageChanged.connect(self._on_calendar_page_changed)
-        self.calendar.clicked.connect(self.date_selected.emit)
+        self.calendar.clicked.connect(self._on_calendar_date_clicked)
+        self.calendar.activated.connect(self._on_calendar_date_activated)
         
         # ==========================================
         # 绘制挂载
         # ==========================================
         
         table_view = self.calendar.findChild(QTableView)
+        self.calendar_table_view = table_view
+        self.calendar_viewport = table_view.viewport()
+        self.calendar_table_view.setMouseTracking(True)
+        self.calendar_viewport.setMouseTracking(True)
+        self.calendar_viewport.installEventFilter(self)
         
         self.cell_delegate = CalendarCellDelegate(
             self.height(), 
@@ -573,6 +873,105 @@ class MonthWindow(FramelessMainWindow):
         content_layout.addWidget(right_panel, stretch=1)
         main_layout.addWidget(content_area, stretch=1)
 
+    def _build_schedule_marker_cache(self):
+        marker_cache = {}
+        marker_count_cache = {}
+        today = datetime.date.today()
+        grouped = {}
+
+        for schedule in db_manager.get_all_schedules():
+            if getattr(schedule, "status", 0) == 2:
+                continue
+            if getattr(schedule, "item_type", None) != "schedule":
+                continue
+
+            target_date = (
+                schedule.start_time.date()
+                if schedule.start_time
+                else (schedule.end_time.date() if schedule.end_time else None)
+            )
+            if target_date is None:
+                continue
+
+            info = grouped.setdefault(
+                target_date,
+                {"has_any": False, "all_completed": True, "max_priority": None, "count": 0},
+            )
+            info["has_any"] = True
+            info["count"] += 1
+
+            if getattr(schedule, "status", 0) != 1:
+                info["all_completed"] = False
+                priority = int(getattr(schedule, "priority", 0))
+                if info["max_priority"] is None or priority > info["max_priority"]:
+                    info["max_priority"] = priority
+
+        for target_date, info in grouped.items():
+            marker_count_cache[target_date] = info["count"]
+            if target_date < today:
+                marker_cache[target_date] = (
+                    QColor("#FFFFFF") if info["all_completed"] else QColor("#999999")
+                )
+                continue
+
+            if info["max_priority"] is None:
+                continue
+
+            marker_cache[target_date] = {
+                2: QColor("#FF4D4F"),
+                1: QColor("#FAAD14"),
+                0: QColor("#52C41A"),
+            }.get(info["max_priority"], QColor("#52C41A"))
+
+        return marker_cache, marker_count_cache
+
+    def _build_hover_schedule_cache(self):
+        hover_schedule_cache = {}
+
+        for schedule in db_manager.get_all_schedules():
+            if getattr(schedule, "status", 0) == 2:
+                continue
+            if getattr(schedule, "item_type", None) != "schedule":
+                continue
+
+            target_date = (
+                schedule.start_time.date()
+                if schedule.start_time
+                else (schedule.end_time.date() if schedule.end_time else None)
+            )
+            if target_date is None:
+                continue
+
+            hover_schedule_cache.setdefault(target_date, []).append(schedule)
+
+        fallback_time = datetime.datetime.max
+        for schedules in hover_schedule_cache.values():
+            schedules.sort(
+                key=lambda schedule: (
+                    getattr(schedule, "start_time", None)
+                    or getattr(schedule, "end_time", None)
+                    or fallback_time,
+                    -int(getattr(schedule, "priority", 0)),
+                    getattr(schedule, "title", "") or "",
+                )
+            )
+
+        return hover_schedule_cache
+
+    def _refresh_schedule_marker_cache(self):
+        self.schedule_marker_cache, self.schedule_marker_count_cache = self._build_schedule_marker_cache()
+        self.hover_schedule_cache = self._build_hover_schedule_cache()
+        self.cell_delegate.set_calendar_state(
+            self.current_date.year(),
+            self.current_date.month(),
+            QDate.currentDate(),
+            self.schedule_marker_cache,
+            self.schedule_marker_count_cache,
+            self.user_selected_date,
+        )
+        self._hide_hover_preview()
+        self.calendar.updateCells()
+
     def _start_clock(self):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._update_time)
@@ -598,6 +997,188 @@ class MonthWindow(FramelessMainWindow):
         self.current_date = QDate(year, month, 1)
         # 2. 同步更新左侧月份标签
         self.lbl_month.setText(f"{month}月")
+        self._refresh_schedule_marker_cache()
+
+    def _on_calendar_date_clicked(self, qdate):
+        self.user_selected_date = qdate
+        self._refresh_schedule_marker_cache()
+        self._hide_hover_preview()
+        self._open_day_panel(qdate)
+
+    def _on_calendar_date_activated(self, qdate):
+        self.user_selected_date = qdate
+        self._refresh_schedule_marker_cache()
+        self._hide_hover_preview()
+        self.close_day_panels()
+        self.date_selected.emit(qdate)
+
+    def _remove_day_panel(self, panel):
+        if panel in self.open_day_panels:
+            self.open_day_panels.remove(panel)
+
+    def _find_open_day_panel(self, qdate):
+        self.open_day_panels = [panel for panel in self.open_day_panels if panel is not None]
+        for panel in self.open_day_panels:
+            if getattr(panel, "panel_date", None) == qdate:
+                return panel
+        return None
+
+    def _get_day_panel_position(self, index, panel=None):
+        month_rect = self.frameGeometry()
+        gap = 16
+        y_offset = 24 + index * 36
+        panel_size = panel.sizeHint() if panel is not None else QSize(220, 120)
+        panel_width = max(panel_size.width(), 120)
+        panel_height = max(panel_size.height(), 80)
+
+        x = month_rect.topRight().x() + gap
+        y = month_rect.topRight().y() + y_offset
+
+        screen = QGuiApplication.screenAt(month_rect.center()) or QGuiApplication.primaryScreen()
+        if screen is None:
+            return x, y
+
+        available_rect = screen.availableGeometry()
+        if x + panel_width > available_rect.right():
+            x = month_rect.left() - gap - panel_width
+
+        x = max(available_rect.left(), min(x, available_rect.right() - panel_width))
+        y = max(available_rect.top(), min(y, available_rect.bottom() - panel_height))
+        return x, y
+
+    def _open_day_panel(self, qdate):
+        existing_panel = self._find_open_day_panel(qdate)
+        if existing_panel is not None:
+            existing_panel.show()
+            existing_panel.raise_()
+            existing_panel.activateWindow()
+            return existing_panel
+
+        schedules = self.hover_schedule_cache.get(qdate.toPyDate(), [])
+        panel = MonthDayPanel(qdate, schedules)
+        panel.closed.connect(self._remove_day_panel)
+        panel.move(*self._get_day_panel_position(len(self.open_day_panels), panel))
+        panel.show()
+        self.open_day_panels.append(panel)
+        return panel
+
+    def close_day_panels(self):
+        for panel in list(self.open_day_panels):
+            try:
+                if panel is not None and hasattr(panel, "close"):
+                    panel.close()
+            finally:
+                pass
+        self.open_day_panels.clear()
+
+    def _ensure_hover_preview_popup(self):
+        if self.hover_preview_popup is None:
+            self.hover_preview_popup = MonthDayHoverPreview()
+        return self.hover_preview_popup
+
+    def _hide_hover_preview(self):
+        self.hovered_date = None
+        if self.hover_preview_popup is not None:
+            self.hover_preview_popup.hide()
+
+    def _show_hover_preview(self, qdate, index):
+        popup = self._ensure_hover_preview_popup()
+        self.hovered_date = qdate
+        schedules = self.hover_schedule_cache.get(qdate.toPyDate(), [])
+        popup.set_preview_data(qdate, schedules)
+
+        cell_rect = self.calendar_table_view.visualRect(index)
+        global_anchor = self.calendar_viewport.mapToGlobal(cell_rect.bottomRight())
+        popup.move(global_anchor.x() + 8, global_anchor.y() + 8)
+        popup.show()
+
+    def eventFilter(self, obj, event):
+        if obj == getattr(self, "calendar_viewport", None):
+            if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.RightButton:
+                index = self.calendar_table_view.indexAt(event.pos())
+                if not index.isValid():
+                    return False
+
+                qdate = self.cell_delegate._date_for_index(index)
+                if not qdate.isValid():
+                    return False
+
+                self._hide_hover_preview()
+                self._show_context_menu_for_date(qdate, self.calendar_viewport.mapToGlobal(event.pos()))
+                return True
+
+            if event.type() == QEvent.Type.MouseMove:
+                index = self.calendar_table_view.indexAt(event.pos())
+                if not index.isValid():
+                    self._hide_hover_preview()
+                    return False
+
+                qdate = self.cell_delegate._date_for_index(index)
+                if not qdate.isValid():
+                    self._hide_hover_preview()
+                    return False
+
+                if self.hovered_date != qdate:
+                    self.hovered_date = qdate
+                self._show_hover_preview(qdate, index)
+                return False
+
+            if event.type() == QEvent.Type.Leave:
+                self._hide_hover_preview()
+                return False
+
+        return super().eventFilter(obj, event)
+
+    def _show_context_menu_for_date(self, qdate, global_pos):
+        self.context_menu_date = qdate
+        menu = ActionContextMenu(self)
+        menu.action_requested.connect(self._handle_context_action)
+        menu.view_requested.connect(self._handle_context_view)
+        menu.exec(global_pos)
+
+    def _handle_context_action(self, action_name):
+        if action_name != "add":
+            return
+
+        target_date = self.context_menu_date
+        if target_date is None or not target_date.isValid():
+            return
+
+        if target_date < QDate.currentDate():
+            self.show_toast("🚫 该日期已过期，无法添加日程")
+            return
+
+        self.search_box.hide()
+        self.view_selector_container.hide()
+        self.page_time.hide()
+        self.page_alarm.hide()
+        self.page_list.hide()
+        self.inline_add_view.reset(target_date)
+        self.inline_add_view.show()
+
+    def _handle_context_view(self, view_name):
+        if view_name == "day":
+            target_date = self.context_menu_date
+            if target_date is None or not target_date.isValid():
+                return
+            self._hide_hover_preview()
+            self.close_day_panels()
+            self.date_selected.emit(target_date)
+            return
+
+        if view_name == "week":
+            self._on_view_selected("week")
+            return
+
+        if view_name == "month":
+            return
+
+        if view_name == "todo":
+            self._on_view_selected("todo")
+            return
+
+        if view_name == "priority":
+            return
 
     # 绘制青色渐变背景与T形切割线
     def paintEvent(self, event):
@@ -624,6 +1205,20 @@ class MonthWindow(FramelessMainWindow):
         painter.drawLine(156, 24, 156, self.height() - 2)
         
         painter.restore()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._refresh_schedule_marker_cache()
+
+    def hideEvent(self, event):
+        self.close_day_panels()
+        self._hide_hover_preview()
+        super().hideEvent(event)
+
+    def closeEvent(self, event):
+        self.close_day_panels()
+        self._hide_hover_preview()
+        super().closeEvent(event)
 
     # 窗口拖拽逻辑
     def mousePressEvent(self, event):
@@ -709,13 +1304,20 @@ class MonthWindow(FramelessMainWindow):
         else:
             self.view_selected.emit(vid)
 
+    def _get_add_target_date(self):
+        if self.user_selected_date is not None and self.user_selected_date.isValid():
+            return self.user_selected_date
+        return self.calendar.selectedDate()
+
     def _on_add_clicked(self):
         # 1. 验证日期是否过期
         today = QDate.currentDate()
-        # 这里验证的是“右侧日历当前选中的日期”，而不是月历翻到的月份
-        selected_date = self.calendar.selectedDate() 
+        target_date = self._get_add_target_date()
+
+        if not target_date.isValid():
+            return
         
-        if selected_date < today:
+        if target_date < today:
             self.show_toast("🚫 该日期已过期，无法添加日程")
             return
             
@@ -725,18 +1327,102 @@ class MonthWindow(FramelessMainWindow):
         else:
             self.search_box.hide()
             self.view_selector_container.hide()
-            self.inline_add_view.reset(selected_date)
+            self.inline_add_view.reset(target_date)
+            self.page_time.hide()
+            self.page_alarm.hide()
+            self.page_list.hide()
             self.inline_add_view.show()
 
     def _close_add_view(self):
+        self.page_time.hide()
+        self.page_alarm.hide()
+        self.page_list.hide()
         self.inline_add_view.hide()
         self.search_box.show()
+
+    def go_to_time_picker(self, start, end):
+        self._hide_hover_preview()
+        self.close_day_panels()
+
+        target_qdate = self.inline_add_view.selected_date or self._get_add_target_date()
+        if target_qdate is None or not target_qdate.isValid():
+            target_qdate = QDate.currentDate()
+
+        target_pydate = target_qdate.toPyDate()
+        now = datetime.datetime.now()
+        default_end = datetime.datetime(
+            target_pydate.year,
+            target_pydate.month,
+            target_pydate.day,
+            now.hour,
+            now.minute,
+        )
+
+        self.page_time.set_title("设置时间")
+        self.page_time.set_initial_data(start, end or default_end)
+        if not self.isVisible():
+            self.show()
+        self.page_alarm.hide()
+        self.page_list.hide()
+        self.inline_add_view.hide()
+        self.page_time.show()
+
+    def back_from_time_picker(self):
+        self.page_time.hide()
+        self.inline_add_view.show()
+
+    def on_time_confirmed(self, start, end):
+        self.inline_add_view.set_time_data(start, end)
+        self.back_from_time_picker()
+
+    def go_to_alarm_picker(self, target_time, is_alarm, duration):
+        self._hide_hover_preview()
+        self.close_day_panels()
+        self.page_alarm.set_title("设置提醒")
+        self.page_alarm.set_initial_data(target_time, is_alarm, duration)
+        if not self.isVisible():
+            self.show()
+        self.page_time.hide()
+        self.page_list.hide()
+        self.inline_add_view.hide()
+        self.page_alarm.show()
+
+    def back_from_alarm_picker(self):
+        self.page_alarm.hide()
+        self.inline_add_view.show()
+
+    def on_alarm_confirmed(self, remind_dt, is_alarm, duration):
+        self.inline_add_view.set_alarm_data(remind_dt, is_alarm, duration)
+        self.back_from_alarm_picker()
+
+    def go_to_list_picker(self, current_category_id, list_type="schedule"):
+        self._hide_hover_preview()
+        self.close_day_panels()
+        self.page_list.set_title("选择清单")
+        self.page_list.load_data(current_category_id, list_type="schedule")
+        if not self.isVisible():
+            self.show()
+        self.page_time.hide()
+        self.page_alarm.hide()
+        self.inline_add_view.hide()
+        self.page_list.show()
+
+    def back_from_list_picker(self):
+        self.page_list.hide()
+        self.inline_add_view.show()
+
+    def on_list_confirmed(self, category_id):
+        category_name = None
+        if category_id is not None:
+            category = db_manager.get_category(category_id)
+            category_name = category.name if category else None
+        self.inline_add_view.set_list_data(category_id, category_name)
+        self.back_from_list_picker()
 
     def _on_schedule_saved(self):
         self.show_toast("✅ 添加日程成功")
         self._close_add_view()
-        # 触发底层日历重绘，把新日程的小圆点画出来
-        self.calendar.updateCells()
+        self._refresh_schedule_marker_cache()
 
     def show_toast(self, message):
         from PyQt6.QtWidgets import QLabel
