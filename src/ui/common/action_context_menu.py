@@ -121,9 +121,13 @@ class ActionContextMenu(QMenu):
         self.view_actions_by_id = {}
         self.view_action = None
         self.view_menu = QMenu("视图", self)
+        self._view_hover_timer = QTimer(self)
+        self._view_hover_timer.setInterval(30)
+        self._view_hover_timer.timeout.connect(self._close_view_menu_if_cursor_outside)
         self._apply_menu_style(self, self.MAIN_MENU_WIDTH)
         self._apply_menu_style(self.view_menu, self.VIEW_MENU_WIDTH)
         self.aboutToHide.connect(self.view_menu.close)
+        self.view_menu.aboutToHide.connect(self._clear_view_row_hover)
         self._build_menu()
 
     def _build_menu(self):
@@ -244,21 +248,35 @@ class ActionContextMenu(QMenu):
         action_rect = self.actionGeometry(view_widget_action)
         popup_pos = self.mapToGlobal(QPoint(self.width(), action_rect.top()))
         self.view_menu.popup(popup_pos)
+        if not self._view_hover_timer.isActive():
+            self._view_hover_timer.start()
 
     def _hide_view_menu(self):
+        self._view_hover_timer.stop()
+        self._clear_view_row_hover()
+        self.view_menu.close()
+
+    def _clear_view_row_hover(self):
         view_row = self.rows_by_id.get("view")
         if view_row:
+            view_row.set_hovered(False)
             view_row.set_forced_hovered(False)
-        self.view_menu.close()
 
     def _hide_view_menu_if_cursor_left(self):
         QTimer.singleShot(0, self._close_view_menu_if_cursor_outside)
 
     def _close_view_menu_if_cursor_outside(self):
+        if not self.view_menu.isVisible():
+            self._view_hover_timer.stop()
+            self._clear_view_row_hover()
+            return
         cursor_pos = QCursor.pos()
-        main_rect = QRect(self.mapToGlobal(QPoint(0, 0)), self.size())
+        view_row = self.rows_by_id.get("view")
+        view_row_rect = QRect()
+        if view_row:
+            view_row_rect = QRect(view_row.mapToGlobal(QPoint(0, 0)), view_row.size())
         view_rect = QRect(self.view_menu.mapToGlobal(QPoint(0, 0)), self.view_menu.size())
-        if not main_rect.contains(cursor_pos) and not view_rect.contains(cursor_pos):
+        if not view_row_rect.contains(cursor_pos) and not view_rect.contains(cursor_pos):
             self._hide_view_menu()
 
     @staticmethod
