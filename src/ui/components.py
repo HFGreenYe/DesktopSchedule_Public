@@ -368,6 +368,7 @@ class SharedMoreMenu(QMenu):
         self.chk_week = add_checkable_option(" 📅 显示周数", False, lambda checked: None)
 
         self.addSeparator()
+        add_centered_btn("坐标显示", "axis", self._on_show_axis)
         add_centered_btn("待办显示", "todo", self._on_show_todo)
         add_centered_btn("导出日程", "export", self._on_export_schedule)
         add_centered_btn("全部日程", "history", self._on_show_history)
@@ -446,6 +447,9 @@ class SharedMoreMenu(QMenu):
 
     def _on_show_history(self):
         print(f"[{self.parent_window.__class__.__name__}] 点击了全部日程")
+
+    def _on_show_axis(self):
+        print(f"[{self.parent_window.__class__.__name__}] 点击了坐标显示")
 
     def _on_show_todo(self):
         # 检查主窗口是否已经实例化了看板，没有则新建
