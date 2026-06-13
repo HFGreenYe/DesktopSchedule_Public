@@ -171,7 +171,7 @@ class AddScheduleView(QWidget):
         details_btn_layout.addWidget(self.btn_collapse_details)
 
         # Properties
-        self.priority_container, self.combo_priority = self._create_property_group("紧急性：", ["   低", "   中", "   高"])
+        self.priority_container, self.combo_priority = self._create_property_group("重要性：", ["   低", "   中", "   高"])
         self.repeat_container, self.combo_repeat = self._create_property_group("重复：", ["   无", "  每天", "  每周", "  每月"])
 
         # Info Card

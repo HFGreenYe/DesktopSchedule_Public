@@ -138,9 +138,9 @@ class ActionContextMenu(QMenu):
             enabled=False,
         )
 
-        self._create_view_action("day", "日视图", ("Calendar.svg",))
-        self._create_view_action("week", "周视图", ("week_top_color.svg", "view.svg"))
-        self._create_view_action("month", "月视图", ("Calendar.svg",))
+        self._create_view_action("day", "日视图", ("interface-day.svg", "Calendar.svg"))
+        self._create_view_action("week", "周视图", ("interface-week.svg", "week_top_color.svg", "view.svg"))
+        self._create_view_action("month", "月视图", ("interface-month.svg", "Calendar.svg"))
         self._create_view_action("todo", "待办", ("todo.svg",))
 
         self.view_action = self._create_main_action(

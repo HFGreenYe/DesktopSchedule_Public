@@ -1,11 +1,30 @@
 # src/ui/add_view_week.py
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                              QLineEdit, QPushButton, QComboBox, QListView, 
-                             QFrame, QTextEdit, QStackedWidget)
+                             QFrame, QTextEdit, QStackedWidget, QStyle,
+                             QStyleOptionComboBox, QStylePainter)
 from PyQt6.QtCore import Qt, QSize, QEvent, QObject, pyqtSignal, QTimer, QPoint
 from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QImage, QPen
 from PyQt6.QtSvg import QSvgRenderer
 from ..data.database import db_manager
+
+
+class CenteredComboBox(QComboBox):
+    def paintEvent(self, event):
+        painter = QStylePainter(self)
+        option = QStyleOptionComboBox()
+        self.initStyleOption(option)
+        current_text = self.currentText().strip()
+        option.currentText = ""
+        painter.drawComplexControl(QStyle.ComplexControl.CC_ComboBox, option)
+        text_rect = self.style().subControlRect(
+            QStyle.ComplexControl.CC_ComboBox,
+            option,
+            QStyle.SubControl.SC_ComboBoxEditField,
+            self,
+        )
+        painter.setPen(QColor("#ffffff"))
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, current_text)
 
 class CustomToolTip(QLabel):
     def __init__(self, text, parent=None, border_color="#0cc0df"):
@@ -148,8 +167,8 @@ class AddScheduleViewWeek(QWidget):
         self.lbl_char_count = QLabel("0/150")
         self.lbl_char_count.setStyleSheet("color: rgba(255,255,255,0.6); font-size: 12px;")
 
-        # 5. 紧急性与重复 
-        self.priority_container, self.combo_priority = self._create_property_group("紧急性：", ["   低", "   中", "   高"])
+        # 5. 重要性与重复 
+        self.priority_container, self.combo_priority = self._create_property_group("重要性：", ["   低", "   中", "   高"])
         self.repeat_container, self.combo_repeat = self._create_property_group("重复：", ["   无", "  每天", "  每周", "  每月"])
 
         # 6. 信息结果卡片 
@@ -213,7 +232,7 @@ class AddScheduleViewWeek(QWidget):
         
         self.left_panel.addStretch(1) # 等量分割区域 3
 
-        # 第四行：紧急性与重复属性
+        # 第四行：重要性与重复属性
         self.status_wrapper = QWidget()
         self.status_layout = QHBoxLayout(self.status_wrapper)
         self.status_layout.setContentsMargins(0, 0, 0, 0)
@@ -337,13 +356,19 @@ class AddScheduleViewWeek(QWidget):
         lbl = QLabel(label_text)
         lbl.setStyleSheet("color: rgba(255, 255, 255, 0.9); font-size: 12px; font-family: 'Microsoft YaHei'; font-weight: bold;")
         
-        combo = QComboBox()
-        combo.addItems(items)
+        combo = CenteredComboBox()
+        combo.addItems([item.strip() for item in items])
+        for index in range(combo.count()):
+            combo.setItemData(
+                index,
+                Qt.AlignmentFlag.AlignCenter,
+                Qt.ItemDataRole.TextAlignmentRole,
+            )
         combo.setFixedSize(65, 26)
         combo.setCursor(Qt.CursorShape.PointingHandCursor)
         combo.setView(QListView())
         combo.setStyleSheet("""
-            QComboBox { background-color: transparent; border: 1px solid rgba(255, 255, 255, 0.7); color: #ffffff; border-radius: 4px; padding-left: 5px; font-family: 'Microsoft YaHei'; font-size: 12px; }
+            QComboBox { background-color: transparent; border: 1px solid rgba(255, 255, 255, 0.7); color: #ffffff; border-radius: 4px; padding-left: 0px; font-family: 'Microsoft YaHei'; font-size: 12px; }
             QComboBox:hover { background-color: rgba(255, 255, 255, 0.1); border: 1px solid #ffffff; }
             QComboBox::drop-down { border: none; width: 0px; }
             QListView { background-color: #ffffff; color: #333333; border: 1px solid #dddddd; outline: 0px; }
