@@ -332,6 +332,7 @@ class TodoView(QWidget):
 
         # 实例化视图选择器 
         self.view_selector = ViewSelectorCard(self)
+        self.view_selector.set_current_view("todo")
         self.view_selector.hide()
         self.view_selector.view_selected.connect(self.req_change_view.emit)
         layout.addWidget(self.view_selector)
