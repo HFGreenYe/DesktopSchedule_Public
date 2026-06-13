@@ -650,7 +650,7 @@ class MainWindow(FramelessMainWindow):
             
         elif route_action == "priority":
 
-            self.show_toast("准备切换至：四象限视图")
+            self.show_toast("该视图入口已调整")
         else:
             self.show_toast(f"准备切换至：{view_name}")
 

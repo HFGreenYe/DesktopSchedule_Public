@@ -715,7 +715,7 @@ class MonthWindow(FramelessMainWindow):
         vs_layout.setContentsMargins(2, 2, 2, 2)
         vs_layout.setSpacing(2)
 
-        views = {"day": "日", "week": "周", "month": "月", "priority": "象限", "todo": "待办"}
+        views = {"day": "日", "week": "周", "month": "月", "todo": "待办"}
         for vid, vname in views.items():
             v_btn = QPushButton(vname)
             v_btn.setCursor(Qt.CursorShape.PointingHandCursor)

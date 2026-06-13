@@ -74,7 +74,6 @@ class ViewSelectorCard(QFrame):
             "day": "日视图",
             "week": "周视图",
             "month": "月视图",
-            "priority": "四象限",
             "todo": "待办"
         }
 

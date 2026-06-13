@@ -330,6 +330,7 @@ class WeekWindow(FramelessMainWindow):
         
         # 2. 视图选择器 
         self.view_selector_container = QFrame()
+        self.view_selector_container.setFixedWidth(124)
         self.view_selector_container.setFixedHeight(22) 
         self.view_selector_container.setStyleSheet("""
             QFrame {
@@ -339,7 +340,7 @@ class WeekWindow(FramelessMainWindow):
             QPushButton {
                 background: transparent; color: white;
                 font-family: 'Microsoft YaHei'; font-size: 11px; font-weight: bold;
-                border-radius: 4px; border: none; padding: 2px 8px;
+                border-radius: 4px; border: none; padding: 2px 5px;
             }
             QPushButton:hover { background-color: rgba(255, 255, 255, 0.2); }
         """)
@@ -347,7 +348,7 @@ class WeekWindow(FramelessMainWindow):
         vs_layout.setContentsMargins(2, 2, 2, 2) 
         vs_layout.setSpacing(2)
         
-        views = {"day": "日视图", "week": "周视图", "month": "月视图", "priority": "四象限", "todo": "待办"}
+        views = {"day": "日", "week": "周", "month": "月", "todo": "待办"}
         for vid, vname in views.items():
             v_btn = QPushButton(vname)
             v_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -356,7 +357,7 @@ class WeekWindow(FramelessMainWindow):
                 v_btn.setStyleSheet("background-color: rgba(0, 0, 0, 0.15); color: white;")
                 
             v_btn.clicked.connect(lambda _, v=vid: self._on_view_selected(v))
-            vs_layout.addWidget(v_btn)
+            vs_layout.addWidget(v_btn, 1)
             
         self.view_selector_container.hide()
         bottom_action_row = QHBoxLayout()
