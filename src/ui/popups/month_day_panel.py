@@ -24,7 +24,7 @@ class MonthDayPanel(QWidget):
 
         self.date_label = QLabel()
         self.date_label.setStyleSheet(
-            "color: #333333; font-family: 'Microsoft YaHei'; font-size: 12px; font-weight: bold;"
+            "color: #0cc0df; font-family: 'Microsoft YaHei'; font-size: 12px; font-weight: bold;"
         )
         header_layout.addWidget(self.date_label)
         header_layout.addStretch()
