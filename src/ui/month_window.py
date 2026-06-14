@@ -1062,6 +1062,11 @@ class MonthWindow(FramelessMainWindow):
         self.user_selected_date = qdate
         self._refresh_schedule_marker_cache()
         self._hide_hover_preview()
+        existing_panel = self._find_open_day_panel(qdate)
+        if existing_panel is not None:
+            existing_panel.close()
+            return
+
         self._open_day_panel(qdate)
 
     def _on_calendar_date_activated(self, qdate):

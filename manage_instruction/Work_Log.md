@@ -233,3 +233,39 @@
   - 不新增网络请求。
   - 不修改天气 UI 布局，仅替换天气图标 label 的内部显示状态。
   - 不修改 `.env` 或 API 配置读取方式。
+
+---
+
+## 2026-06-15 月界面日期弹窗 toggle 与右键菜单细节小修
+
+- 背景：
+  - 月界面日期格当前单击会打开该日期持久弹窗，但再次点击同一日期只会重新激活弹窗，不能收回。
+  - 月界面 hover 预览弹窗的日期标题颜色仍为普通文本色，用户希望与主题青色保持一致。
+  - 页面级右键菜单图标需要继续向更多菜单的图标行风格收口。
+- 本次代码改动：
+  - `src/ui/month_window.py`：
+    - `_on_calendar_date_clicked(qdate)` 增加同日期弹窗检测。
+    - 如果该日期持久弹窗已打开，再次单击会关闭该弹窗并返回。
+    - `calendar.activated` 双击 / 激活跳日视图链路保持不变，仍会关闭所有持久弹窗并发出 `date_selected`。
+  - `src/ui/popups/month_day_hover_preview.py`：
+    - hover 预览弹窗日期标题改为主题青色 `#0cc0df`。
+    - 正文颜色和白底圆角弹窗样式保持不变。
+  - `src/ui/popups/month_day_panel.py`：
+    - 单击日期打开的持久弹窗日期标题改为主题青色 `#0cc0df`。
+    - 正文颜色、关闭按钮和白底圆角样式保持不变。
+  - `src/ui/common/action_context_menu.py`：
+    - `_MenuRow` 增加统一 `ICON_SIZE = 18`。
+    - 图标 label 固定槽位并居中。
+    - 禁用项图标使用禁用灰 `#777777`，启用项仍使用 `#333333`。
+- 范围说明：
+  - 本次不修改右键菜单信号、动作 id 或主/周/月接入逻辑。
+  - 本次不修改月界面添加、保存、picker、marker、hover cache 或数据库逻辑。
+  - 本次不改 `ActionContextMenu` 菜单尺寸和子菜单关闭策略。
+  - 右键菜单图标仍存在轻微模糊感，本次暂缓处理，后续应单独比较 `QPixmap` 直载与 `load_colored_svg_pixmap` 染色路径。
+- 验证记录：
+  - `py_compile` 覆盖 `src/ui/month_window.py`、`src/ui/popups/month_day_hover_preview.py`、`src/ui/common/action_context_menu.py`、`main.py`：通过。
+  - offscreen 验证月界面同日期 panel 第一次点击打开、第二次点击关闭：通过。
+  - offscreen 验证月界面 `activated` 跳转会关闭已打开 panel 并发出 `date_selected`：通过。
+  - offscreen 验证 hover 预览标题样式包含 `#0cc0df`：通过。
+  - offscreen 验证持久弹窗日期标题样式包含 `#0cc0df`：通过。
+  - offscreen 验证 `ActionContextMenu` 可构造，`skin/sort/filter` 仍禁用，`add` 和视图项仍启用：通过。

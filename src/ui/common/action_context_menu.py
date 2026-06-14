@@ -13,6 +13,7 @@ class _MenuRow(QFrame):
     TEXT_COLOR = "#333333"
     DISABLED_TEXT_COLOR = "#777777"
     HOVER_BG = "rgba(12, 192, 223, 0.1)"
+    ICON_SIZE = 18
 
     def __init__(
         self,
@@ -46,10 +47,14 @@ class _MenuRow(QFrame):
         layout.setSpacing(12)
 
         icon_label = QLabel()
-        icon_label.setFixedSize(18, 18)
+        icon_label.setFixedSize(self.ICON_SIZE, self.ICON_SIZE)
+        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         icon_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         if icon_path:
-            icon_label.setPixmap(load_colored_svg_pixmap(icon_path, self.ICON_COLOR, 18, 18))
+            icon_color = self.ICON_COLOR if enabled else self.DISABLED_TEXT_COLOR
+            icon_label.setPixmap(
+                load_colored_svg_pixmap(icon_path, icon_color, self.ICON_SIZE, self.ICON_SIZE)
+            )
         layout.addWidget(icon_label)
 
         text_label = QLabel(text)
