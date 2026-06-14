@@ -156,3 +156,80 @@
   - 本次不修改主界面 / 周界面 / 月界面的右键接入逻辑。
   - 本次不修改待办图标。
   - 新增图标文件由用户放入 `assets/icons/`，当前作为待提交资源。
+
+---
+
+## 2026-06-14 天气服务失败兜底小修
+
+- 背景：
+  - 运行期曾出现 `天气服务错误: Expecting value: line 1 column 1 (char 0)`。
+  - 原因判断：定位服务或天气服务返回空响应 / 非 JSON 响应时，`response.json()` 会抛异常。
+  - 原实现失败后只打印错误并 `emit({})`，`HeaderBar` / `WeekWindow` / `MonthWindow` 会直接忽略空数据，界面可能停留在旧天气或等待态。
+- 本次代码改动：
+  - `src/services/weather_service.py`：
+    - 新增 `_read_json_response(response, source_name)`。
+    - 对 HTTP 状态、空响应、非 JSON 响应做显式校验。
+    - 对缺失 API 配置、定位失败、缺少经纬度、天气 API code 非 `200`、缺少 `now.temp/icon/text` 做明确错误。
+    - 新增 `_fallback_result(error_message)`，失败时发出结构完整的兜底天气数据：
+      - `temp: "--"`
+      - `icon: "999"`
+      - `text: "天气暂不可用"`
+      - `city: "未知位置"`
+      - `available: False`
+      - `error: <失败原因>`
+    - 成功数据新增 `available: True`。
+- 兼容说明：
+  - 本次不修改 `HeaderBar` / `WeekWindow` / `MonthWindow` 的天气布局和数据绑定方式。
+  - fallback 数据保留既有 `temp`、`icon`、`text`、`city` 字段，现有 UI 可继续使用同一更新路径。
+  - fallback icon `999` 对应 `assets/weather/999-fill.svg`，作为天气不可用图标。
+  - 若 `999-fill.svg` 异常缺失，则清空天气图标，不再使用普通问号或 emoji。
+- UI 图标替换：
+  - 新增 `src/ui/common/weather_icon_label.py`：
+    - 使用双层隔离结构：loading label 只负责沙漏动画，weather label 只负责真实天气 / `999-fill.svg`。
+    - 使用 `assets/icons/hourglass.svg` 作为加载中图标。
+    - 使用 `QTimer` 按固定帧率做上下翻转动画，翻转轴为沙漏画布几何中心的水平线。
+    - 沙漏按 loading 画布 78% 尺寸居中绘制；上下翻转不会产生外接矩形裁剪问题。
+    - 修正高 DPI source rect：翻转绘制时使用 `_loading_base.rect()` 读取完整物理 pixmap，避免 DPR>1 时只采样左上角导致沙漏天生显示不全。
+    - `HeaderBar` 保持天气图标 label 原有固定高度和右上对齐；过渡动画隔离在 loading label 中，不改变真实天气图标布局。
+    - 加载动画最长显示 3000ms，超时后自动切换到 `assets/weather/999-fill.svg`。
+    - loading 期间若先收到 fallback `999-fill.svg`，不立即打断沙漏动画，仍等待 3000ms 后切换；真实天气图标返回时则立即停止动画并显示真实天气。
+    - 收到真实天气图标后停止动画并显示 API 对应天气 SVG。
+  - `src/ui/header.py`：天气 SVG 加载失败时使用 `assets/weather/999-fill.svg`。
+  - `src/ui/week_window.py`：天气 SVG 加载失败时使用 `assets/weather/999-fill.svg`。
+  - `src/ui/month_window.py`：天气 SVG 加载失败时使用 `assets/weather/999-fill.svg`。
+  - `HeaderBar` / `WeekWindow` / `MonthWindow` 的初始化天气图标改为上下翻转 `hourglass.svg`，去除网络失败前短暂显示 emoji 中间态。
+  - 新增资源：`assets/icons/hourglass.svg`。
+- 验证记录：
+  - `py_compile` 覆盖 `src/ui/common/weather_icon_label.py`、`src/services/weather_service.py`、`src/ui/header.py`、`src/ui/week_window.py`、`src/ui/month_window.py`、`main.py`：通过。
+  - `_fallback_result(...)` 直接验证：通过。
+  - monkeypatch 成功路径验证：
+    - 模拟定位成功与天气 API 成功，输出 `available=True`、`temp=18`、`city=测试城`。
+  - monkeypatch 空响应验证：
+    - 模拟定位服务空响应，输出 `available=False`、`temp=--`，错误包含 `响应为空`。
+  - monkeypatch 非 JSON 验证：
+    - 模拟定位服务返回 HTML，输出 `available=False`，错误包含 `非 JSON`。
+  - 缺失 API 配置验证：
+    - `WeatherWorker('', '')` 输出 fallback，错误包含 `配置缺失`。
+  - 999-fill SVG 验证：
+    - `assets/weather/999-fill.svg` 可加载并染色为白色 pixmap。
+  - hourglass SVG 验证：
+    - `assets/icons/hourglass.svg` 可加载并染色为白色 pixmap。
+    - `WeatherIconLabel.start_loading()` 会启动上下翻转动画。
+    - 1100ms 时动画仍保持运行。
+    - 3150ms 后动画自动停止，并切换到 `assets/weather/999-fill.svg` pixmap。
+    - loading 期间提前收到 `assets/weather/999-fill.svg` 时，仍等到 3150ms 后切换，不再短暂显示普通问号或提前结束。
+    - 0/18/36/54/72/90/126/180/234/270/315 翻转相位边缘 alpha 均为 0，确认沙漏翻转不触边裁剪。
+    - `HeaderBar` 初始化验证：天气图标 label 保持固定高度 70，loading pixmap 存在且动画运行。
+  - UI fallback 验证：
+    - `HeaderBar.update_weather_ui(...)` 使用 fallback 数据时，天气图标显示 `assets/weather/999-fill.svg`，温度显示 `--°C`。
+    - `WeekWindow.update_weather_ui(...)` 使用 fallback 数据时，天气图标显示 `assets/weather/999-fill.svg`，温度显示 `--°C`。
+    - `MonthWindow.update_weather_ui(...)` 使用 fallback 数据时，天气图标显示 `assets/weather/999-fill.svg`，温度显示 `--°C`。
+  - UI 初始化态验证：
+    - `HeaderBar`、`WeekWindow`、`MonthWindow` 初始化天气图标不再显示 emoji 中间态，直接启动 `hourglass.svg` 上下翻转动画。
+  - 真实天气图标回归：
+    - `WeatherIconLabel.set_weather_icon('assets/weather/100-fill.svg')` 会停止动画并显示真实天气图标。
+- 范围说明：
+  - 本次只处理天气服务失败兜底。
+  - 不新增网络请求。
+  - 不修改天气 UI 布局，仅替换天气图标 label 的内部显示状态。
+  - 不修改 `.env` 或 API 配置读取方式。

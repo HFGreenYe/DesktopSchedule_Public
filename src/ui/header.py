@@ -11,6 +11,7 @@ from ..config import AppConfig
 from ..utils.win_api import apply_24h2_border_fix
 from src.services.weather_service import WeatherWorker
 from .utils.icon_loader import load_colored_svg_pixmap
+from .common.weather_icon_label import WeatherIconLabel
 
 import os
 from dotenv import load_dotenv
@@ -142,10 +143,15 @@ class HeaderBar(QWidget):
     def _init_weather_service(self):
         self.weather_worker = WeatherWorker(self.my_api_key, self.my_api_host)
         self.weather_worker.data_received.connect(self.update_weather_ui)
-        self.weather_worker.start()
+        self._start_weather_fetch()
         self.weather_timer = QTimer(self)
-        self.weather_timer.timeout.connect(self.weather_worker.start)
+        self.weather_timer.timeout.connect(self._start_weather_fetch)
         self.weather_timer.start(1800 * 1000)
+
+    def _start_weather_fetch(self):
+        if not self.current_weather_data and hasattr(self, "lbl_weather_icon"):
+            self.lbl_weather_icon.start_loading()
+        self.weather_worker.start()
 
     def _setup_search_ui(self):
         self.search = QLineEdit()
@@ -233,9 +239,10 @@ class HeaderBar(QWidget):
         right_container.setSpacing(0)
         spacer = QSpacerItem(0, 8)
         right_container.addSpacerItem(spacer)
-        self.lbl_weather_icon = QLabel(" ⛅ ")
+        self.lbl_weather_icon = WeatherIconLabel(50, self)
         self.lbl_weather_icon.setFixedHeight(70)
         self.lbl_weather_icon.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+        self.lbl_weather_icon.start_loading()
         self.lbl_temp = QLabel("--°C")
         self.lbl_temp.setAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignTop)
         self.lbl_temp.setStyleSheet('font-size: 18px; padding-bottom: 0px;')
@@ -291,12 +298,7 @@ class HeaderBar(QWidget):
         self.weather_updated.emit(data)
         icon_code = data['icon']
         svg_path = f"assets/weather/{icon_code}-fill.svg"
-        colored_pixmap = self._load_colored_svg(svg_path, "#FFFFFF", 50, 50)
-        if not colored_pixmap.isNull():
-            self.lbl_weather_icon.setPixmap(colored_pixmap)
-            self.lbl_weather_icon.setText("") 
-        else:
-            self.lbl_weather_icon.setText("❓")
+        self.lbl_weather_icon.set_weather_icon(svg_path)
         self.lbl_temp.setText(f"{data['temp']}°C")
         tooltip = f"{data['city']}: {data['text']} {data['temp']}°C"
         self.lbl_weather_icon.setToolTip(tooltip)

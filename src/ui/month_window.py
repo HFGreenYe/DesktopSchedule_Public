@@ -18,6 +18,7 @@ from ..utils.styles import StyleManager
 from .header import ToolTipFilter
 from .components import get_colored_icon, SharedMoreMenu
 from .common.action_context_menu import ActionContextMenu
+from .common.weather_icon_label import WeatherIconLabel
 from .time_picker import TimePickerView
 from .alarm_picker import AlarmPickerView
 from .list_picker import ListPickerView
@@ -673,10 +674,11 @@ class MonthWindow(FramelessMainWindow):
         top_grid.addWidget(self.lbl_time, 0, 0, alignment=Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignLeft)
 
         # --- 第0行，第1列：天气图标 ---
-        self.lbl_weather_icon = QLabel("⌛")
+        self.lbl_weather_icon = WeatherIconLabel(30, self)
         self.lbl_weather_icon.setFixedSize(30, 30) # 固定大小，确保居中不会乱跑
         self.lbl_weather_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_weather_icon.setStyleSheet('color: white; font-size: 16px; background: transparent;')
+        self.lbl_weather_icon.start_loading()
         top_grid.addWidget(self.lbl_weather_icon, 0, 1, alignment=Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignHCenter)
 
         # --- 第1行，第0列：月份切换器 ---
@@ -1295,12 +1297,7 @@ class MonthWindow(FramelessMainWindow):
         if not data: return
         icon_code = data['icon']
         svg_path = f"assets/weather/{icon_code}-fill.svg"
-        colored_pixmap = self._load_colored_svg(svg_path, "#FFFFFF", 30, 30) 
-        if not colored_pixmap.isNull():
-            self.lbl_weather_icon.setPixmap(colored_pixmap)
-            self.lbl_weather_icon.setText("") 
-        else:
-            self.lbl_weather_icon.setText("❓")
+        self.lbl_weather_icon.set_weather_icon(svg_path)
             
         self.lbl_temp.setText(f"{data['temp']}°C")
         tooltip = f"{data['city']}: {data['text']} {data['temp']}°C"

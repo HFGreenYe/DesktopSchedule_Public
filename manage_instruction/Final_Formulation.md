@@ -297,21 +297,36 @@ src/
 
 ### 6.6 Weather
 
-当前观察到运行期错误：
+已处理的基础兜底：
 
-```text
-天气服务错误: Expecting value: line 1 column 1 (char 0)
-```
+- `weather_service` 已对 API 配置缺失、HTTP 错误、空响应、非 JSON、定位失败、天气 API code 异常和关键字段缺失做显式校验。
+- 失败时不再向 UI 发空 dict，而是发结构完整的 fallback 数据：
+  - `temp = "--"`
+  - `icon = "999"`
+  - `text = "天气暂不可用"`
+  - `city = "未知位置"`
+  - `available = False`
+  - `error = <失败原因>`
+- 成功数据增加 `available = True`。
+- `HeaderBar`、`WeekWindow`、`MonthWindow` 初始化等待阶段使用 `assets/icons/hourglass.svg` 做上下翻转过渡，最长 3000ms。
+- 沙漏在独立 loading label 内按 78% 尺寸居中绘制，并围绕画布几何中心水平线做上下翻转；weather label 独立显示真实天气 / `999-fill.svg`，避免过渡动画影响正常天气图标位置。
+- 若 3000ms 内未收到天气结果，UI 自动切换到 `assets/weather/999-fill.svg`。
+- 若 loading 期间先收到 fallback `999-fill.svg`，仍等到 3000ms 后切换；真实天气数据返回时立即停止 loading 并显示真实天气 SVG。
+- 若后续收到真实天气数据，UI 停止加载态并显示 API 对应天气 SVG。
+- 天气图标加载失败时使用 `assets/weather/999-fill.svg`，不再使用天气 emoji 或普通问号作为中间态。
+- 如果 `999-fill.svg` 也异常缺失，则清空天气图标，不再显示普通问号。
 
-判断：
+仍未实现：
 
-- 更像网络/API 返回空响应或非 JSON。
-- 与月界面 hover / marker / popup 改动无直接关系。
+- 不自动重试。
+- 不缓存上一次成功天气。
+- 不切换备用天气源。
+- 不提供用户可见的详细错误面板。
 
 建议：
 
-- 后续可单独开小工单增强 `weather_service` 的响应校验与失败兜底。
-- 不应混入月界面功能阶段。
+- 若后续继续增强天气模块，应单独开小工单处理重试、缓存上次成功天气或备用天气源。
+- 天气增强不应混入月界面 UI 适配、坐标显示或导出功能阶段。
 
 ### 6.7 Git / 文档 / 流程
 

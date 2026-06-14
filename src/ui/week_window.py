@@ -26,6 +26,7 @@ from .dashboard import AdaptiveLabel
 from .components import CountdownToolTipFilter, get_colored_icon
 from .common.week_day_block import DayBlock
 from .common.action_context_menu import ActionContextMenu
+from .common.weather_icon_label import WeatherIconLabel
 
 class WeekScheduleCard(QFrame):
     """周视图中的单条日程小卡片"""
@@ -279,9 +280,10 @@ class WeekWindow(FramelessMainWindow):
         weather_layout.setSpacing(2)
         weather_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
 
-        self.lbl_weather_icon = QLabel("⌛")
+        self.lbl_weather_icon = WeatherIconLabel(28, self)
         self.lbl_weather_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_weather_icon.setStyleSheet('color: white; font-size: 18px;')
+        self.lbl_weather_icon.start_loading()
         self.lbl_temp = QLabel("--°C")
         self.lbl_temp.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_temp.setStyleSheet('color: white; font-size: 10px;') 
@@ -976,12 +978,7 @@ class WeekWindow(FramelessMainWindow):
         icon_code = data['icon']
         svg_path = f"assets/weather/{icon_code}-fill.svg"
         
-        colored_pixmap = self._load_colored_svg(svg_path, "#FFFFFF", 28, 28) 
-        if not colored_pixmap.isNull():
-            self.lbl_weather_icon.setPixmap(colored_pixmap)
-            self.lbl_weather_icon.setText("") 
-        else:
-            self.lbl_weather_icon.setText("❓")
+        self.lbl_weather_icon.set_weather_icon(svg_path)
             
         self.lbl_temp.setText(f"{data['temp']}°C")
         tooltip = f"{data['city']}: {data['text']} {data['temp']}°C"
