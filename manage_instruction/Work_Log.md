@@ -257,11 +257,13 @@
     - `_MenuRow` 增加统一 `ICON_SIZE = 18`。
     - 图标 label 固定槽位并居中。
     - 禁用项图标使用禁用灰 `#777777`，启用项仍使用 `#333333`。
+    - 右键菜单图标清晰度跟进：先尝试仿照 `SharedMoreMenu` 使用原始 SVG，发现部分 SVG 为白色导致白底菜单中融入背景。
+    - 最终方案改为使用 `load_colored_svg_pixmap(...)` 统一将右键菜单图标染为 `#333333`，并以 `ICON_DPR = 2.0` 渲染 18px 逻辑尺寸，避免最早低分辨率染色发虚。
 - 范围说明：
   - 本次不修改右键菜单信号、动作 id 或主/周/月接入逻辑。
   - 本次不修改月界面添加、保存、picker、marker、hover cache 或数据库逻辑。
   - 本次不改 `ActionContextMenu` 菜单尺寸和子菜单关闭策略。
-  - 右键菜单图标仍存在轻微模糊感，本次暂缓处理，后续应单独比较 `QPixmap` 直载与 `load_colored_svg_pixmap` 染色路径。
+  - 右键菜单图标颜色本次统一为深灰 `#333333`；视觉清晰度仍以用户本地运行截图为准。
 - 验证记录：
   - `py_compile` 覆盖 `src/ui/month_window.py`、`src/ui/popups/month_day_hover_preview.py`、`src/ui/common/action_context_menu.py`、`main.py`：通过。
   - offscreen 验证月界面同日期 panel 第一次点击打开、第二次点击关闭：通过。
@@ -269,3 +271,7 @@
   - offscreen 验证 hover 预览标题样式包含 `#0cc0df`：通过。
   - offscreen 验证持久弹窗日期标题样式包含 `#0cc0df`：通过。
   - offscreen 验证 `ActionContextMenu` 可构造，`skin/sort/filter` 仍禁用，`add` 和视图项仍启用：通过。
+  - `ActionContextMenu` 图标路径静态检查：图标统一经 `load_colored_svg_pixmap(..., "#333333", 18, 18, 2.0)` 渲染：通过。
+  - `ActionContextMenu` 图标 pixmap 验证：`Skin/view/add/sort/filter/interface-day/interface-week/interface-month/todo` 均能渲染为非空 36x36、DPR 2.0 pixmap：通过。
+  - `py_compile` 覆盖 `src/ui/common/action_context_menu.py`、`main.py`：通过。
+  - offscreen 验证 `ActionContextMenu` 可构造，主动作与视图动作字典完整，启用 / 禁用状态保持不变：通过。

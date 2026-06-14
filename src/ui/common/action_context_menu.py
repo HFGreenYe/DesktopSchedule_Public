@@ -14,6 +14,7 @@ class _MenuRow(QFrame):
     DISABLED_TEXT_COLOR = "#777777"
     HOVER_BG = "rgba(12, 192, 223, 0.1)"
     ICON_SIZE = 18
+    ICON_DPR = 2.0
 
     def __init__(
         self,
@@ -49,12 +50,10 @@ class _MenuRow(QFrame):
         icon_label = QLabel()
         icon_label.setFixedSize(self.ICON_SIZE, self.ICON_SIZE)
         icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_label.setScaledContents(True)
         icon_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         if icon_path:
-            icon_color = self.ICON_COLOR if enabled else self.DISABLED_TEXT_COLOR
-            icon_label.setPixmap(
-                load_colored_svg_pixmap(icon_path, icon_color, self.ICON_SIZE, self.ICON_SIZE)
-            )
+            icon_label.setPixmap(self._load_menu_icon_pixmap(icon_path))
         layout.addWidget(icon_label)
 
         text_label = QLabel(text)
@@ -109,6 +108,16 @@ class _MenuRow(QFrame):
     def _refresh_hover_style(self):
         bg = self.HOVER_BG if (self._hovered or self._forced_hovered) else "transparent"
         self.setStyleSheet(f"background-color: {bg}; border-radius: 8px;")
+
+    @classmethod
+    def _load_menu_icon_pixmap(cls, icon_path):
+        return load_colored_svg_pixmap(
+            icon_path,
+            cls.ICON_COLOR,
+            cls.ICON_SIZE,
+            cls.ICON_SIZE,
+            cls.ICON_DPR,
+        )
 
 
 class ActionContextMenu(QMenu):
@@ -288,7 +297,7 @@ class ActionContextMenu(QMenu):
     def _load_icon(icon_names):
         path = ActionContextMenu._first_existing_icon_path(icon_names)
         if path:
-            return QIcon(load_colored_svg_pixmap(path, _MenuRow.ICON_COLOR, 18, 18))
+            return QIcon(_MenuRow._load_menu_icon_pixmap(path))
         return QIcon()
 
     @staticmethod
