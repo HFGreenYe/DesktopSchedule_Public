@@ -146,9 +146,11 @@ class AddScheduleView(QWidget):
         self.txt_details = QTextEdit()
         self.txt_details.setPlaceholderText("添加描述 (150字以内)...")
         self.txt_details.setFixedHeight(80) 
+        self.txt_details.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.txt_details.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.txt_details.setStyleSheet("""
-            QTextEdit { background-color: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 8px; color: white; font-size: 14px; font-family: 'Microsoft YaHei'; padding: 8px; }
-            QTextEdit:focus { border: 1px solid rgba(255, 255, 255, 0.6); background-color: rgba(255, 255, 255, 0.15); }
+            QTextEdit { background-color: rgba(0, 0, 0, 0.08); border: 1px solid rgba(255, 255, 255, 0.35); border-radius: 8px; color: white; font-size: 14px; font-family: 'Microsoft YaHei'; padding: 8px; }
+            QTextEdit:focus { border: 1px solid rgba(255, 255, 255, 0.6); background-color: rgba(0, 0, 0, 0.12); }
         """)
         
         self.details_bottom_widget = QWidget()
@@ -386,7 +388,7 @@ class AddScheduleView(QWidget):
         self._update_info_card()
 
     def _toggle_details(self):
-        if self.details_container.isVisible():
+        if not self.details_container.isHidden():
             self._hide_details()
         else:
             self._show_details()
@@ -413,10 +415,9 @@ class AddScheduleView(QWidget):
         self._update_detail_btn_state()
 
     def _update_detail_btn_state(self):
-        is_visible = self.details_container.isVisible()
-        has_text = len(self.txt_details.toPlainText().strip()) > 0
+        is_expanded = not self.details_container.isHidden()
         
-        if is_visible or has_text:
+        if is_expanded:
             self.btn_detail.setStyleSheet("background-color: rgba(255, 255, 255, 0.3); border-radius: 4px;")
         else:
             self.btn_detail.setStyleSheet("background-color: transparent; border: none; border-radius: 4px;")

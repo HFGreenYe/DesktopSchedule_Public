@@ -1,6 +1,6 @@
 # src/ui/components.py
 from PyQt6.QtWidgets import QWidget, QListWidget, QListWidgetItem, QScroller, QFrame, QLabel, QMenu, QWidgetAction, QHBoxLayout
-from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, pyqtProperty, QTimer,QPoint, QEvent, QObject
+from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, pyqtProperty, QTimer,QPoint, QEvent, QObject, QRect
 from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen, QCursor
 from datetime import datetime
 from src.ui.todo_board import TodoBoardWindow
@@ -296,9 +296,27 @@ class SharedMoreMenu(QMenu):
 
         text_color = "#333333" 
         hover_bg = "rgba(12, 192, 223, 0.1)" 
+        self._more_hover_bg = hover_bg
+        self._help_row = None
+        self._help_widget_action = None
+        self.help_menu = QMenu("使用帮助", self)
+        self.help_menu.setFixedWidth(150)
+        self.help_menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.help_menu.setWindowFlags(
+            Qt.WindowType.Popup
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.NoDropShadowWindowHint
+        )
+        self.help_menu.setStyleSheet(StyleManager.get_menu_style())
+        self.help_menu.aboutToHide.connect(self._clear_help_row_hover)
+        self.aboutToHide.connect(self.help_menu.close)
+        self._help_hover_timer = QTimer(self)
+        self._help_hover_timer.setInterval(30)
+        self._help_hover_timer.timeout.connect(self._close_help_menu_if_cursor_outside)
 
-        def add_centered_btn(text, icon_name, callback):
-            action = QWidgetAction(self)
+        def add_centered_btn(text, icon_name, callback, menu=None, arrow=False, close_on_click=True, on_enter=None, on_leave=None):
+            target_menu = menu or self
+            action = QWidgetAction(target_menu)
             btn_frame = QFrame()
             btn_frame.setCursor(Qt.CursorShape.PointingHandCursor)
             btn_frame.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -322,22 +340,59 @@ class SharedMoreMenu(QMenu):
             text_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             layout.addWidget(text_label)
             layout.addStretch() 
+
+            if arrow:
+                arrow_label = QLabel("›")
+                arrow_label.setStyleSheet(
+                    "color: #0cc0df; font-family: 'Microsoft YaHei UI'; "
+                    "font-size: 18px; font-weight: bold; background: transparent; border: none;"
+                )
+                arrow_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+                layout.addWidget(arrow_label)
             
             def enter_event(event):
                 btn_frame.setStyleSheet(f"background-color: {hover_bg}; border-radius: 4px;")
+                if on_enter:
+                    on_enter()
             def leave_event(event):
-                btn_frame.setStyleSheet("background-color: transparent;")
+                if btn_frame is self._help_row and self.help_menu.isVisible():
+                    btn_frame.setStyleSheet(f"background-color: {hover_bg}; border-radius: 4px;")
+                else:
+                    btn_frame.setStyleSheet("background-color: transparent;")
+                if on_leave:
+                    on_leave()
             def mouse_release(event):
                 if event.button() == Qt.MouseButton.LeftButton:
-                    self.close() 
-                    callback()            
+                    if close_on_click:
+                        self.help_menu.close()
+                        self.close()
+                    callback()
 
             btn_frame.enterEvent = enter_event
             btn_frame.leaveEvent = leave_event
             btn_frame.mouseReleaseEvent = mouse_release
             
             action.setDefaultWidget(btn_frame)
+            target_menu.addAction(action)
+            return action, btn_frame
+
+        def add_menu_separator():
+            action = QWidgetAction(self)
+            container = QWidget()
+            container.setObjectName("more_menu_separator_container")
+            layout = QHBoxLayout(container)
+            layout.setContentsMargins(10, 4, 10, 4)
+            layout.setSpacing(0)
+
+            line = QFrame()
+            line.setObjectName("more_menu_separator_line")
+            line.setFixedHeight(1)
+            line.setStyleSheet("background-color: #dcdcdc; border: none;")
+            layout.addWidget(line)
+
+            action.setDefaultWidget(container)
             self.addAction(action)
+            return action
 
         def add_checkable_option(text, is_checked, callback, icon_path=None):
             container = QWidget()
@@ -363,15 +418,71 @@ class SharedMoreMenu(QMenu):
             icon_path=pin_icon_path
         )
 
-        self.addSeparator()
+        add_menu_separator()
         self.chk_lunar = add_checkable_option(" 🌙 显示农历", True, lambda checked: None)
         self.chk_week = add_checkable_option(" 📅 显示周数", False, lambda checked: None)
 
-        self.addSeparator()
+        add_menu_separator()
         add_centered_btn("坐标显示", "axis", self._on_show_axis)
         add_centered_btn("待办显示", "todo", self._on_show_todo)
         add_centered_btn("导出日程", "export", self._on_export_schedule)
         add_centered_btn("全部日程", "history", self._on_show_history)
+        add_menu_separator()
+        self._help_widget_action, self._help_row = add_centered_btn(
+            "使用帮助",
+            "help",
+            self._show_help_menu,
+            arrow=True,
+            close_on_click=False,
+            on_enter=self._show_help_menu,
+            on_leave=self._schedule_help_menu_hide,
+        )
+        add_centered_btn("使用手册", "user_manual", self._on_show_help_manual, menu=self.help_menu)
+        add_centered_btn("帮助助手", "assistant", self._on_show_help_assistant, menu=self.help_menu)
+
+    def _set_help_row_hover(self, hovered):
+        if not self._help_row:
+            return
+        if hovered:
+            self._help_row.setStyleSheet(
+                f"background-color: {getattr(self, '_more_hover_bg', 'rgba(12, 192, 223, 0.1)')}; border-radius: 4px;"
+            )
+        else:
+            self._help_row.setStyleSheet("background-color: transparent;")
+
+    def _show_help_menu(self):
+        if not self._help_widget_action:
+            return
+        self._set_help_row_hover(True)
+        action_rect = self.actionGeometry(self._help_widget_action)
+        popup_pos = self.mapToGlobal(QPoint(self.width(), action_rect.top()))
+        self.help_menu.popup(popup_pos)
+        if not self._help_hover_timer.isActive():
+            self._help_hover_timer.start()
+
+    def _schedule_help_menu_hide(self):
+        QTimer.singleShot(0, self._close_help_menu_if_cursor_outside)
+
+    def _hide_help_menu(self):
+        self._help_hover_timer.stop()
+        self._clear_help_row_hover()
+        self.help_menu.close()
+
+    def _clear_help_row_hover(self):
+        self._set_help_row_hover(False)
+
+    def _close_help_menu_if_cursor_outside(self):
+        if not hasattr(self, "help_menu") or not self.help_menu.isVisible():
+            self._help_hover_timer.stop()
+            self._clear_help_row_hover()
+            return
+        cursor_pos = QCursor.pos()
+        help_row_rect = QRect()
+        if self._help_row:
+            help_row_rect = QRect(self._help_row.mapToGlobal(QPoint(0, 0)), self._help_row.size())
+        help_menu_rect = QRect(self.help_menu.mapToGlobal(QPoint(0, 0)), self.help_menu.size())
+        if not help_row_rect.contains(cursor_pos) and not help_menu_rect.contains(cursor_pos):
+            self._hide_help_menu()
 
     def show_menu(self):
         from PyQt6.QtCore import Qt
@@ -450,6 +561,12 @@ class SharedMoreMenu(QMenu):
 
     def _on_show_axis(self):
         print(f"[{self.parent_window.__class__.__name__}] 点击了坐标显示")
+
+    def _on_show_help_manual(self):
+        print(f"[{self.parent_window.__class__.__name__}] 点击了使用手册")
+
+    def _on_show_help_assistant(self):
+        print(f"[{self.parent_window.__class__.__name__}] 点击了帮助助手")
 
     def _on_show_todo(self):
         # 检查主窗口是否已经实例化了看板，没有则新建

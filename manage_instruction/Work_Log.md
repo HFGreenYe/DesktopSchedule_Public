@@ -275,3 +275,98 @@
   - `ActionContextMenu` 图标 pixmap 验证：`Skin/view/add/sort/filter/interface-day/interface-week/interface-month/todo` 均能渲染为非空 36x36、DPR 2.0 pixmap：通过。
   - `py_compile` 覆盖 `src/ui/common/action_context_menu.py`、`main.py`：通过。
   - offscreen 验证 `ActionContextMenu` 可构造，主动作与视图动作字典完整，启用 / 禁用状态保持不变：通过。
+
+---
+
+## 2026-06-16 日界面详情框与后续规划补充
+
+- 任务 1：日界面添加表单详情框视觉小修。
+- 背景：
+  - 主界面 / 日界面添加日程时，详情填写框内容超过高度后会显示右侧滚动条，视觉上较突兀。
+  - 详情框原背景偏亮，白色文字与青色主背景融合较明显。
+- 本次代码改动：
+  - `src/ui/add_view.py`：
+    - `self.txt_details` 增加 `Qt.ScrollBarPolicy.ScrollBarAlwaysOff`，隐藏垂直和水平滚动条。
+    - 详情框普通态背景从浅白透明改为 `rgba(0, 0, 0, 0.08)`。
+    - 详情框 focus 态背景改为 `rgba(0, 0, 0, 0.12)`。
+- 范围说明：
+  - 本次只修改日界面 `AddScheduleView` 的详情输入框。
+  - 不修改 `src/ui/add_view_week.py`。
+  - 不修改月界面添加表单。
+- 任务 2：最终规划补充。
+- 本次文档改动：
+  - `manage_instruction/Final_Formulation.md`：
+    - 在云功能之前新增“自定义重复规则”阶段。
+    - 自定义重复规则规划为打开日历弹窗，支持任意单击选择多个日期，也支持按住鼠标左键滑动选择连续日期。
+    - 明确实现前必须审查当前 `repeat_rule`、重复日程写入和编辑逻辑，不在 UI 阶段直接改数据库结构。
+    - 在云功能之前新增“弹窗统一检查与美化”阶段。
+    - 弹窗美化阶段聚焦圆角、边框、背景透明度、标题颜色、图标颜色、二级菜单 hover/leave、屏幕边界和样式一致性，不混入业务逻辑重构。
+- 任务 3：更多菜单使用帮助入口。
+- 本次代码改动：
+  - `src/ui/components.py`：
+    - 在 `SharedMoreMenu` 底部新增“使用帮助”菜单项。
+    - 新增 `self.help_menu` 二级菜单，包含“使用手册”和“帮助助手”两个占位项。
+    - 二级菜单使用与更多菜单一致的 `StyleManager.get_menu_style()`。
+    - “使用帮助”主项 hover 时在右侧弹出二级菜单。
+    - 鼠标离开“使用帮助”主项和二级菜单区域后，通过 30ms timer 检测并立即关闭二级菜单，行为对齐页面级右键菜单的视图子菜单。
+    - 当前“使用手册”和“帮助助手”仅打印占位日志，不接入真实手册或 AI 助手。
+- 范围说明：
+  - 本次不实现使用手册内容。
+  - 本次不实现帮助助手能力。
+  - 本次不修改云服务或导出逻辑。
+  - `Final_Formulation.md` 已将“使用帮助”真实内容和帮助助手能力记录为可选增强，可在云功能前后单独规划。
+- 后续修正：
+  - 日界面详情按钮高亮逻辑改为仅在详情框展开时高亮；关闭详情框后即使已有详情文字，也会清除按钮高亮。
+  - 详情框展开判断改用 `details_container.isHidden()`，避免 offscreen / 父窗口未显示时 `isVisible()` 不能反映逻辑展开状态。
+  - `SharedMoreMenu` 内部追加 2px separator 样式，统一更多菜单分隔线粗细。
+  - 使用用户新增图标替换帮助菜单占位图标：
+    - `help.svg`：使用帮助。
+    - `user_manual.svg`：使用手册。
+    - `assistant.svg`：帮助助手。
+  - `Final_Formulation.md` 中“使用文档”同步改为“使用手册”。
+- 验证记录：
+  - `py_compile` 覆盖 `src/ui/add_view.py`、`src/ui/components.py`、`main.py`：通过。
+  - 静态定位确认日界面详情框隐藏水平 / 垂直滚动条：通过。
+  - offscreen 验证 `AddScheduleView.txt_details` 的水平 / 垂直 scrollbar policy 均为 `ScrollBarAlwaysOff`：通过。
+  - offscreen 验证 `SharedMoreMenu` 可构造，`help_menu.title() == "使用帮助"` 且包含 2 个二级菜单动作：通过。
+  - offscreen 验证日界面详情按钮：详情框展开时高亮，关闭后清除高亮，即使详情文本仍存在：通过。
+  - offscreen 验证更多菜单帮助子菜单文案为“使用手册 / 帮助助手”，不再出现“使用文档”：通过。
+  - offscreen 验证更多菜单 stylesheet 包含 `height: 2px` separator 规则：通过。
+  - offscreen 验证 `help.svg`、`user_manual.svg`、`assistant.svg` 均可作为 `QIcon` 加载：通过。
+
+---
+
+## 2026-06-16 更多菜单分隔线一致性修正
+
+- 背景：
+  - 用户截图显示 `SharedMoreMenu` 中多条分隔线视觉粗细不一致。
+  - 代码中已设置 `QMenu::separator height: 2px`，但实际显示仍不稳定。
+- 原因判断：
+  - `SharedMoreMenu` 内部大量使用 `QWidgetAction` 自定义菜单项。
+  - 原生 `QMenu::separator` 与 `QWidgetAction` 混排时，在透明弹窗 / 高 DPI / Qt 样式绘制下存在视觉不一致风险。
+  - 因此问题不适合继续只调 `QMenu::separator` QSS。
+- 本次代码改动：
+  - `src/ui/components.py`：
+    - 删除 `SharedMoreMenu` 对 `QMenu::separator height: 2px` 的局部依赖。
+    - 新增 `add_menu_separator()` 内部 helper。
+    - 用 `QWidgetAction + QWidget + QFrame` 绘制固定 1px 高度分隔线。
+    - 分隔线颜色改为不透明浅灰 `#dcdcdc`，避免半透明线条叠加菜单背景后出现粗细 / 深浅不一致。
+    - 将 `SharedMoreMenu` 中三处 `self.addSeparator()` 替换为 `add_menu_separator()`。
+    - 自定义分隔线容器 objectName 为 `more_menu_separator_container`。
+    - 自定义分隔线线条 objectName 为 `more_menu_separator_line`。
+- 范围说明：
+  - 本次只修改 `SharedMoreMenu` 的分隔线实现。
+  - 不修改 `ScheduleContextMenu` 的 separator。
+  - 不修改更多菜单动作、二级帮助菜单、图标、信号或业务逻辑。
+- 验证记录：
+  - 静态定位确认 `SharedMoreMenu` 三处调用均为 `add_menu_separator()`：通过。
+  - `py_compile` 覆盖 `src/ui/components.py`、`main.py`：通过。
+  - offscreen 验证 `SharedMoreMenu` 原生 separator 数量为 0：通过。
+  - offscreen 验证自定义分隔线数量为 3：通过。
+  - offscreen 验证三条自定义分隔线高度均为 1px：通过。
+  - offscreen 验证三条自定义分隔线样式均为 `background-color: #dcdcdc; border: none;`：通过。
+- 后续结论：
+  - 用户本地截图仍显示更多菜单分隔线存在肉眼粗细 / 观感不一致。
+  - 当前代码验证只能确认三条线的 widget 高度和样式一致，不能消除 Windows / PyQt6 / 半透明弹窗 / 高 DPI 下的最终视觉差异。
+  - 本轮停止继续微调，不再重复尝试 `QMenu::separator`、`2px rgba` 或 `1px #dcdcdc` 这类局部参数。
+  - 已将该问题写入 `Final_Formulation.md` 的“弹窗统一检查与美化”阶段，作为后续统一弹窗视觉验收项处理。
