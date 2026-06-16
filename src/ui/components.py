@@ -274,6 +274,8 @@ class SharedMoreMenu(QMenu):
     通用型更多菜单管理类
     支持跨窗口实例调用，可自动处理置顶、悬浮、边框修复及菜单项渲染
     """
+    _schedule_display_mode = "card"
+
     def __init__(self, parent_window, anchor_button):
         # parent_window 必须是顶级窗口 
         super().__init__(parent_window)
@@ -297,8 +299,27 @@ class SharedMoreMenu(QMenu):
         text_color = "#333333" 
         hover_bg = "rgba(12, 192, 223, 0.1)" 
         self._more_hover_bg = hover_bg
+        self._mode_row = None
+        self._mode_widget_action = None
+        self._mode_menu_locked = False
+        self._mode_option_rows = {}
+        self.mode_menu = QMenu("模式切换", self)
+        self.mode_menu.setFixedWidth(150)
+        self.mode_menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.mode_menu.setWindowFlags(
+            Qt.WindowType.Popup
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.NoDropShadowWindowHint
+        )
+        self.mode_menu.setStyleSheet(StyleManager.get_menu_style())
+        self.mode_menu.aboutToHide.connect(self._clear_mode_row_hover)
+        self._mode_hover_timer = QTimer(self)
+        self._mode_hover_timer.setInterval(30)
+        self._mode_hover_timer.timeout.connect(self._close_mode_menu_if_cursor_outside)
+
         self._help_row = None
         self._help_widget_action = None
+        self._help_menu_locked = False
         self.help_menu = QMenu("使用帮助", self)
         self.help_menu.setFixedWidth(150)
         self.help_menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -309,6 +330,7 @@ class SharedMoreMenu(QMenu):
         )
         self.help_menu.setStyleSheet(StyleManager.get_menu_style())
         self.help_menu.aboutToHide.connect(self._clear_help_row_hover)
+        self.aboutToHide.connect(self.mode_menu.close)
         self.aboutToHide.connect(self.help_menu.close)
         self._help_hover_timer = QTimer(self)
         self._help_hover_timer.setInterval(30)
@@ -355,7 +377,13 @@ class SharedMoreMenu(QMenu):
                 if on_enter:
                     on_enter()
             def leave_event(event):
-                if btn_frame is self._help_row and self.help_menu.isVisible():
+                if (
+                    btn_frame is self._mode_row
+                    and self.mode_menu.isVisible()
+                ) or (
+                    btn_frame is self._help_row
+                    and self.help_menu.isVisible()
+                ):
                     btn_frame.setStyleSheet(f"background-color: {hover_bg}; border-radius: 4px;")
                 else:
                     btn_frame.setStyleSheet("background-color: transparent;")
@@ -365,6 +393,7 @@ class SharedMoreMenu(QMenu):
                 if event.button() == Qt.MouseButton.LeftButton:
                     if close_on_click:
                         self.help_menu.close()
+                        self.mode_menu.close()
                         self.close()
                     callback()
 
@@ -374,6 +403,56 @@ class SharedMoreMenu(QMenu):
             
             action.setDefaultWidget(btn_frame)
             target_menu.addAction(action)
+            return action, btn_frame
+
+        def add_mode_option(text, icon_name, mode_id):
+            action = QWidgetAction(self.mode_menu)
+            btn_frame = QFrame()
+            btn_frame.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn_frame.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+
+            layout = QHBoxLayout(btn_frame)
+            layout.setContentsMargins(0, 6, 0, 6)
+            layout.setSpacing(8)
+            layout.addStretch()
+
+            icon_label = QLabel()
+            icon_label.setFixedSize(18, 18)
+            icon_label.setScaledContents(True)
+            icon_label.setPixmap(QPixmap(f"assets/icons/{icon_name}.svg"))
+            icon_label.setStyleSheet("background: transparent; border: none;")
+            icon_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            layout.addWidget(icon_label)
+
+            text_label = QLabel(text)
+            text_label.setStyleSheet(
+                f"color: {text_color}; font-family: 'Microsoft YaHei UI'; font-size: 13px; "
+                "background: transparent; border: none;"
+            )
+            text_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            layout.addWidget(text_label)
+            layout.addStretch()
+
+            def enter_event(event):
+                self._set_mode_option_style(mode_id, hovered=True)
+
+            def leave_event(event):
+                self._set_mode_option_style(mode_id, hovered=False)
+
+            def mouse_release(event):
+                if event.button() == Qt.MouseButton.LeftButton:
+                    self._on_schedule_mode_selected(mode_id)
+                    self._mode_menu_locked = False
+                    self.mode_menu.close()
+                    self.close()
+
+            btn_frame.enterEvent = enter_event
+            btn_frame.leaveEvent = leave_event
+            btn_frame.mouseReleaseEvent = mouse_release
+
+            action.setDefaultWidget(btn_frame)
+            self.mode_menu.addAction(action)
+            self._mode_option_rows[mode_id] = btn_frame
             return action, btn_frame
 
         def add_menu_separator():
@@ -428,10 +507,23 @@ class SharedMoreMenu(QMenu):
         add_centered_btn("导出日程", "export", self._on_export_schedule)
         add_centered_btn("全部日程", "history", self._on_show_history)
         add_menu_separator()
+        self._mode_widget_action, self._mode_row = add_centered_btn(
+            "模式切换",
+            "model_switch",
+            self._toggle_mode_menu_lock,
+            arrow=True,
+            close_on_click=False,
+            on_enter=self._show_mode_menu,
+            on_leave=self._schedule_mode_menu_hide,
+        )
+        add_mode_option("卡片模式", "schedule_card", "card")
+        add_mode_option("课表模式", "timetable", "timetable")
+        self._refresh_mode_option_styles()
+        add_menu_separator()
         self._help_widget_action, self._help_row = add_centered_btn(
             "使用帮助",
             "help",
-            self._show_help_menu,
+            self._toggle_help_menu_lock,
             arrow=True,
             close_on_click=False,
             on_enter=self._show_help_menu,
@@ -439,6 +531,92 @@ class SharedMoreMenu(QMenu):
         )
         add_centered_btn("使用手册", "user_manual", self._on_show_help_manual, menu=self.help_menu)
         add_centered_btn("帮助助手", "assistant", self._on_show_help_assistant, menu=self.help_menu)
+
+    def _set_mode_row_hover(self, hovered):
+        if not self._mode_row:
+            return
+        if hovered:
+            self._mode_row.setStyleSheet(
+                f"background-color: {getattr(self, '_more_hover_bg', 'rgba(12, 192, 223, 0.1)')}; border-radius: 4px;"
+            )
+        else:
+            self._mode_row.setStyleSheet("background-color: transparent;")
+
+    def _set_mode_option_style(self, mode_id, hovered=False):
+        row = self._mode_option_rows.get(mode_id)
+        if not row:
+            return
+        is_current = self.__class__._schedule_display_mode == mode_id
+        if is_current:
+            row.setStyleSheet("background-color: rgba(12, 192, 223, 0.16); border-radius: 4px;")
+        elif hovered:
+            row.setStyleSheet("background-color: rgba(12, 192, 223, 0.1); border-radius: 4px;")
+        else:
+            row.setStyleSheet("background-color: transparent;")
+
+    def _refresh_mode_option_styles(self):
+        for mode_id in self._mode_option_rows:
+            self._set_mode_option_style(mode_id, hovered=False)
+
+    def _show_mode_menu(self):
+        if not self._mode_widget_action:
+            return
+        self._help_menu_locked = False
+        self.help_menu.close()
+        self._set_mode_row_hover(True)
+        self._refresh_mode_option_styles()
+        action_rect = self.actionGeometry(self._mode_widget_action)
+        popup_pos = self.mapToGlobal(QPoint(self.width(), action_rect.top()))
+        self.mode_menu.popup(popup_pos)
+        if not self._mode_hover_timer.isActive():
+            self._mode_hover_timer.start()
+
+    def _toggle_mode_menu_lock(self):
+        if self._mode_menu_locked:
+            self._mode_menu_locked = False
+            self._close_mode_menu_if_cursor_outside()
+            return
+        self._mode_menu_locked = True
+        self._show_mode_menu()
+        self._mode_hover_timer.stop()
+
+    def _schedule_mode_menu_hide(self):
+        if self._mode_menu_locked:
+            return
+        QTimer.singleShot(0, self._close_mode_menu_if_cursor_outside)
+
+    def _hide_mode_menu(self):
+        self._mode_hover_timer.stop()
+        self._mode_menu_locked = False
+        self._clear_mode_row_hover()
+        self.mode_menu.close()
+
+    def _clear_mode_row_hover(self):
+        self._set_mode_row_hover(False)
+
+    def _close_mode_menu_if_cursor_outside(self):
+        if self._mode_menu_locked:
+            self._mode_hover_timer.stop()
+            return
+        if not hasattr(self, "mode_menu") or not self.mode_menu.isVisible():
+            self._mode_hover_timer.stop()
+            self._clear_mode_row_hover()
+            return
+        cursor_pos = QCursor.pos()
+        mode_row_rect = QRect()
+        if self._mode_row:
+            mode_row_rect = QRect(self._mode_row.mapToGlobal(QPoint(0, 0)), self._mode_row.size())
+        mode_menu_rect = QRect(self.mode_menu.mapToGlobal(QPoint(0, 0)), self.mode_menu.size())
+        if not mode_row_rect.contains(cursor_pos) and not mode_menu_rect.contains(cursor_pos):
+            self._hide_mode_menu()
+
+    def _on_schedule_mode_selected(self, mode_id):
+        if mode_id not in {"card", "timetable"}:
+            return
+        self.__class__._schedule_display_mode = mode_id
+        self._refresh_mode_option_styles()
+        mode_label = {"card": "卡片模式", "timetable": "课表模式"}[mode_id]
+        print(f"[{self.parent_window.__class__.__name__}] 选择日程显示模式：{mode_label}（功能待接入）")
 
     def _set_help_row_hover(self, hovered):
         if not self._help_row:
@@ -453,6 +631,8 @@ class SharedMoreMenu(QMenu):
     def _show_help_menu(self):
         if not self._help_widget_action:
             return
+        self._mode_menu_locked = False
+        self.mode_menu.close()
         self._set_help_row_hover(True)
         action_rect = self.actionGeometry(self._help_widget_action)
         popup_pos = self.mapToGlobal(QPoint(self.width(), action_rect.top()))
@@ -460,11 +640,23 @@ class SharedMoreMenu(QMenu):
         if not self._help_hover_timer.isActive():
             self._help_hover_timer.start()
 
+    def _toggle_help_menu_lock(self):
+        if self._help_menu_locked:
+            self._help_menu_locked = False
+            self._close_help_menu_if_cursor_outside()
+            return
+        self._help_menu_locked = True
+        self._show_help_menu()
+        self._help_hover_timer.stop()
+
     def _schedule_help_menu_hide(self):
+        if self._help_menu_locked:
+            return
         QTimer.singleShot(0, self._close_help_menu_if_cursor_outside)
 
     def _hide_help_menu(self):
         self._help_hover_timer.stop()
+        self._help_menu_locked = False
         self._clear_help_row_hover()
         self.help_menu.close()
 
@@ -472,6 +664,9 @@ class SharedMoreMenu(QMenu):
         self._set_help_row_hover(False)
 
     def _close_help_menu_if_cursor_outside(self):
+        if self._help_menu_locked:
+            self._help_hover_timer.stop()
+            return
         if not hasattr(self, "help_menu") or not self.help_menu.isVisible():
             self._help_hover_timer.stop()
             self._clear_help_row_hover()
@@ -512,6 +707,12 @@ class SharedMoreMenu(QMenu):
 
     def _on_menu_closing(self):
         from PyQt6.QtCore import QTimer
+        self._mode_menu_locked = False
+        self._help_menu_locked = False
+        self._mode_hover_timer.stop()
+        self._help_hover_timer.stop()
+        self._clear_mode_row_hover()
+        self._clear_help_row_hover()
         self._ignore_next_click = True
         QTimer.singleShot(300, lambda: setattr(self, '_ignore_next_click', False))
 
