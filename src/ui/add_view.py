@@ -149,8 +149,8 @@ class AddScheduleView(QWidget):
         self.txt_details.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.txt_details.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.txt_details.setStyleSheet("""
-            QTextEdit { background-color: rgba(0, 0, 0, 0.08); border: 1px solid rgba(255, 255, 255, 0.35); border-radius: 8px; color: white; font-size: 14px; font-family: 'Microsoft YaHei'; padding: 8px; }
-            QTextEdit:focus { border: 1px solid rgba(255, 255, 255, 0.6); background-color: rgba(0, 0, 0, 0.12); }
+            QTextEdit { background-color: rgba(12, 192, 223, 0.9); border: 1px solid rgba(255, 255, 255, 0.6); border-radius: 8px; color: white; font-size: 14px; font-family: 'Microsoft YaHei'; padding: 8px; }
+            QTextEdit:focus { border: 1px solid rgba(255, 255, 255, 0.9); background-color: rgba(12, 192, 223, 0.9); }
         """)
         
         self.details_bottom_widget = QWidget()
