@@ -185,3 +185,125 @@
 - 换肤、排序、筛选、四象限仍未实现。
 - 月界面右键 `week` 动作只切换周视图，不携带指定日期上下文，保持既有主路由边界。
 - Windows 控制台可能出现中文编码显示问题；验收以 Python 断言和实际行为为准。
+
+---
+
+### 2026-06-13 至 2026-06-17：功能补充与 UI 细修阶段归档
+
+阶段范围：
+
+- 坐标显示入口调整。
+- 待办看板文字截断与紧凑视图状态修正。
+- 添加表单“紧急性”语义调整为“重要性”。
+- 右键菜单视图子菜单图标替换。
+- 天气服务失败兜底与 loading 过渡。
+- 月界面日期弹窗 toggle 与标题色细节。
+- 日界面详情输入框视觉与滚动条调整。
+- 更多菜单“使用帮助”入口与分隔线一致性修正。
+- 日程显示“卡片模式 / 课表模式”规划与更多菜单入口壳。
+
+实际修改文件摘要：
+
+- `src/ui/components.py`
+- `src/ui/common/action_context_menu.py`
+- `src/ui/add_view.py`
+- `src/ui/add_view_week.py`
+- `src/ui/month_window.py`
+- `src/ui/popups/month_day_hover_preview.py`
+- `src/ui/popups/month_day_panel.py`
+- `src/ui/todo_board.py`
+- `src/ui/dashboard.py`
+- `src/ui/main_window.py`
+- `src/ui/todo.py`
+- `assets/icons/axis.svg`
+- `assets/icons/help.svg`
+- `assets/icons/user_manual.svg`
+- `assets/icons/assistant.svg`
+- `assets/icons/hourglass.svg`
+- `assets/icons/question-mark.svg`
+- `assets/icons/weather-question.svg`
+- `assets/icons/interface-day.svg`
+- `assets/icons/interface-week.svg`
+- `assets/icons/interface-month.svg`
+- `assets/icons/model_switch.svg`
+- `assets/icons/schedule_card.svg`
+- `assets/icons/timetable.svg`
+- `manage_instruction/Final_Formulation.md`
+- `manage_instruction/Work_Log.md`
+
+完成内容：
+
+- 从视图选择入口移除“四象限 / 象限”显示文案，改为后续“坐标显示”方向。
+- 右上角更多菜单新增“坐标显示”占位入口。
+- 待办看板便签标题修复：
+  - pin 图标保持左上角固定。
+  - 长标题先换行，再按需缩小字号。
+  - 文件夹视图长标题限制在卡片内部，避免撑出界面。
+- 主界面和待办界面的紧凑视图拓展框增加当前视图文字状态：
+  - 当前视图为白色。
+  - 非当前视图为浅灰色。
+- 日 / 周 / 月添加表单语义从“紧急性”调整为“重要性”。
+- 月界面添加表单的重要性选项改为 `高 / 中 / 低`，重复选项改为 `无 / 日 / 周 / 月`。
+- 月界面下方状态文本去除三个小背景框，仅保留外层大框。
+- 右键菜单视图子菜单替换为 `interface-day.svg`、`interface-week.svg`、`interface-month.svg`。
+- 天气服务增加失败兜底：
+  - 空响应、非 JSON、网络异常不再只打印错误。
+  - loading 阶段使用沙漏图标过渡。
+  - 失败后使用问号天气图标和 `--°C`。
+- 月界面日期单击持久 panel 支持同日二次点击关闭。
+- 月界面 hover 预览和持久 panel 标题日期 / 周几调整为主题色方向。
+- 日界面详情输入框关闭后清除详情按钮高亮。
+- 日界面详情输入框隐藏横向 / 纵向滚动条，并略调背景以降低白字混入问题。
+- 更多菜单新增“使用帮助”主项与二级菜单：
+  - `使用手册`
+  - `帮助助手`
+- 更多菜单分隔线改为自绘 `QWidgetAction + QFrame`，并记录当前 Windows / PyQt6 / 高 DPI 下仍可能存在视觉观感差异。
+- 更多菜单新增“模式切换”主项与二级菜单：
+  - `卡片模式`
+  - `课表模式`
+- 模式切换二级菜单当前只做 UI 壳：
+  - 默认卡片模式高亮。
+  - 两项互斥高亮。
+  - 点击仅更新内部占位状态并打印“功能待接入”。
+  - 不驱动日 / 周 / 月真实渲染。
+- “模式切换”和“使用帮助”二级菜单交互修正：
+  - 悬停主项临时展开，离开主项和二级菜单区域后关闭。
+  - 单击主项锁定二级菜单，鼠标移走不关闭。
+  - 再次单击取消锁定。
+  - 两个二级菜单互斥显示。
+
+验收结果：
+
+- 多轮 `py_compile` 覆盖相关文件通过，包括：
+  - `src/ui/components.py`
+  - `src/ui/common/action_context_menu.py`
+  - `src/ui/add_view.py`
+  - `src/ui/add_view_week.py`
+  - `src/ui/month_window.py`
+  - `src/ui/todo_board.py`
+  - `src/ui/dashboard.py`
+  - `src/ui/main_window.py`
+  - `src/ui/todo.py`
+  - `main.py`
+- offscreen 验证通过：
+  - `SharedMoreMenu` help 子菜单构造。
+  - `SharedMoreMenu` mode 子菜单构造、默认卡片模式高亮、互斥切换。
+  - mode/help 二级菜单单击锁定、再次单击解锁、互斥关闭、主菜单关闭重置状态。
+  - 相关新增图标可作为 `QIcon` 加载。
+  - 日界面详情框滚动条隐藏策略。
+  - 日界面详情按钮关闭后清除高亮。
+- `git diff --check` 仅出现 LF/CRLF 提示，无内容格式错误。
+
+风险和后续事项：
+
+- `坐标显示` 仍是占位入口，未实现坐标看板。
+- `课表模式` 仍是占位入口，未接入真实日 / 周 / 月渲染。
+- 更多菜单分隔线肉眼粗细问题仍需纳入后续“弹窗统一检查与美化”阶段，不再重复用局部 QSS 参数试错。
+- 月界面单击日期持久 panel 后续仍需支持修改 / 删除日程。
+- 天气 loading 动画和图标显示已做兜底，但真实网络差场景仍应人工点测。
+- `Final_Formulation.md` 已同步记录：
+  - 坐标显示方向。
+  - 月界面可编辑持久 panel 目标。
+  - 自定义重复规则。
+  - 弹窗统一检查与美化。
+  - 模式切换入口与后续卡片 / 课表真实渲染目标。
