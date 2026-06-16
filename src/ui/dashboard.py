@@ -41,6 +41,8 @@ class ViewSelectorCard(QFrame):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.current_view = "day"
+        self.buttons_by_id = {}
         self.setFixedHeight(60) # 改成 60，和日程卡片的高度完全一致
         
         self.setStyleSheet("""
@@ -56,6 +58,7 @@ class ViewSelectorCard(QFrame):
                 font-size: 13px;
                 font-weight: bold;
                 border-radius: 6px;
+                min-height: 32px;
             }
             QPushButton:hover {
                 background-color: rgba(255, 255, 255, 0.15);
@@ -74,7 +77,6 @@ class ViewSelectorCard(QFrame):
             "day": "日视图",
             "week": "周视图",
             "month": "月视图",
-            "priority": "四象限",
             "todo": "待办"
         }
 
@@ -82,7 +84,50 @@ class ViewSelectorCard(QFrame):
             btn = QPushButton(view_name)
             btn.setCursor(Qt.CursorShape.PointingHandCursor) # 加个手型光标
             btn.clicked.connect(lambda checked, v=view_id: self.view_selected.emit(v))
+            self.buttons_by_id[view_id] = btn
             layout.addWidget(btn)
+
+        self.set_current_view(self.current_view)
+
+    def _button_style(self, selected=False):
+        if selected:
+            return """
+                QPushButton {
+                    background: transparent;
+                    color: white;
+                    font-family: 'Microsoft YaHei';
+                    font-size: 13px;
+                    font-weight: bold;
+                    border: none;
+                    border-radius: 6px;
+                    min-height: 34px;
+                    padding: 0 8px;
+                }
+                QPushButton:hover {
+                    background-color: rgba(255, 255, 255, 0.12);
+                }
+            """
+        return """
+            QPushButton {
+                background: transparent;
+                color: rgba(255, 255, 255, 0.58);
+                font-family: 'Microsoft YaHei';
+                font-size: 13px;
+                font-weight: bold;
+                border: none;
+                border-radius: 6px;
+                min-height: 34px;
+                padding: 0 8px;
+            }
+            QPushButton:hover {
+                background-color: rgba(255, 255, 255, 0.15);
+            }
+        """
+
+    def set_current_view(self, view_id):
+        self.current_view = view_id
+        for btn_view_id, btn in self.buttons_by_id.items():
+            btn.setStyleSheet(self._button_style(btn_view_id == view_id))
         
 class AdaptiveLabel(QLabel):
     def __init__(self, text="", parent=None, max_size=16, min_size=11):

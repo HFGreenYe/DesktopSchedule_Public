@@ -3,7 +3,8 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QFrame, QToolButton, QLineEdit, 
                              QCalendarWidget, QApplication, QTableView, 
                              QStyledItemDelegate, QStyle, QStyleOptionViewItem,
-                             QGridLayout, QTextEdit, QComboBox)
+                             QGridLayout, QTextEdit, QComboBox, QListView,
+                             QStyleOptionComboBox, QStylePainter)
 from PyQt6.QtCore import Qt, pyqtSignal, QDate, QTime, QTimer, QRectF, QSize, QEvent
 from PyQt6.QtGui import QPainter, QPainterPath, QColor, QBrush, QLinearGradient, QIcon, QPen, QPalette, QPixmap, QGuiApplication
 from PyQt6.QtSvg import QSvgRenderer
@@ -17,11 +18,30 @@ from ..utils.styles import StyleManager
 from .header import ToolTipFilter
 from .components import get_colored_icon, SharedMoreMenu
 from .common.action_context_menu import ActionContextMenu
+from .common.weather_icon_label import WeatherIconLabel
 from .time_picker import TimePickerView
 from .alarm_picker import AlarmPickerView
 from .list_picker import ListPickerView
 from .popups.month_day_hover_preview import MonthDayHoverPreview
 from .popups.month_day_panel import MonthDayPanel
+
+
+class CenteredComboBox(QComboBox):
+    def paintEvent(self, event):
+        painter = QStylePainter(self)
+        option = QStyleOptionComboBox()
+        self.initStyleOption(option)
+        current_text = self.currentText().strip()
+        option.currentText = ""
+        painter.drawComplexControl(QStyle.ComplexControl.CC_ComboBox, option)
+        text_rect = self.style().subControlRect(
+            QStyle.ComplexControl.CC_ComboBox,
+            option,
+            QStyle.SubControl.SC_ComboBoxEditField,
+            self,
+        )
+        painter.setPen(QColor("#ffffff"))
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, current_text)
 
 
 class CalendarCellDelegate(QStyledItemDelegate):
@@ -268,30 +288,46 @@ class InlineAddViewMonth(QWidget):
         icons_layout.addStretch()
         layout.addLayout(icons_layout)
 
-        # 4. 轻量状态壳：紧急性 / 重复
+        # 4. 轻量状态壳：重要性 / 重复
         shell_row = QHBoxLayout()
         shell_row.setContentsMargins(0, 0, 0, 0)
-        shell_row.setSpacing(6)
+        shell_row.setSpacing(3)
 
-        self.lbl_priority = QLabel("紧急性")
+        self.repeat_value_map = {
+            "无": "无",
+            "日": "每天",
+            "周": "每周",
+            "月": "每月",
+        }
+
+        self.lbl_priority = QLabel("重要性")
         self.lbl_priority.setStyleSheet("color: rgba(255,255,255,0.85); font-size: 11px; font-family: 'Microsoft YaHei';")
-        self.combo_priority = QComboBox()
-        self.combo_priority.addItems(["低", "中", "高"])
+        self.lbl_priority.setFixedWidth(36)
+        self.combo_priority = CenteredComboBox()
+        self.combo_priority.setView(QListView())
+        self.combo_priority.addItems(["高", "中", "低"])
+        self.combo_priority.setCurrentIndex(2)
         self.combo_priority.setFixedHeight(22)
+        self.combo_priority.setFixedWidth(30)
+        self._center_combo_text(self.combo_priority)
         self.combo_priority.setStyleSheet(self._combo_style())
 
         self.lbl_repeat = QLabel("重复")
         self.lbl_repeat.setStyleSheet("color: rgba(255,255,255,0.85); font-size: 11px; font-family: 'Microsoft YaHei';")
-        self.combo_repeat = QComboBox()
-        self.combo_repeat.addItems(["无", "每天", "每周", "每月"])
+        self.lbl_repeat.setFixedWidth(24)
+        self.combo_repeat = CenteredComboBox()
+        self.combo_repeat.setView(QListView())
+        self.combo_repeat.addItems(["无", "日", "周", "月"])
         self.combo_repeat.setFixedHeight(22)
+        self.combo_repeat.setFixedWidth(30)
+        self._center_combo_text(self.combo_repeat)
         self.combo_repeat.setStyleSheet(self._combo_style())
 
         shell_row.addWidget(self.lbl_priority)
-        shell_row.addWidget(self.combo_priority, 1)
-        shell_row.addSpacing(8)
+        shell_row.addWidget(self.combo_priority)
         shell_row.addWidget(self.lbl_repeat)
-        shell_row.addWidget(self.combo_repeat, 1)
+        shell_row.addWidget(self.combo_repeat)
+        shell_row.addStretch()
         layout.addLayout(shell_row)
 
         # 5. 当前状态摘要
@@ -311,7 +347,11 @@ class InlineAddViewMonth(QWidget):
         self.lbl_info_alarm = QLabel("无提醒")
         self.lbl_info_list = QLabel("清单未选择")
         for label in (self.lbl_info_time, self.lbl_info_alarm, self.lbl_info_list):
-            label.setStyleSheet("color: rgba(255,255,255,0.88); font-size: 11px; font-family: 'Microsoft YaHei';")
+            label.setStyleSheet(
+                "color: rgba(255,255,255,0.88); font-size: 11px; "
+                "font-family: 'Microsoft YaHei'; background: transparent; "
+                "border: none; padding: 0px;"
+            )
             info_layout.addWidget(label)
 
         layout.addWidget(self.info_card)
@@ -351,6 +391,14 @@ class InlineAddViewMonth(QWidget):
         btn.installEventFilter(btn._tooltip)
         return btn
 
+    def _center_combo_text(self, combo):
+        for index in range(combo.count()):
+            combo.setItemData(
+                index,
+                Qt.AlignmentFlag.AlignCenter,
+                Qt.ItemDataRole.TextAlignmentRole,
+            )
+
     def _combo_style(self):
         return """
             QComboBox {
@@ -359,15 +407,25 @@ class InlineAddViewMonth(QWidget):
                 border-radius: 4px;
                 color: white;
                 font-size: 11px;
-                padding-left: 6px;
+                padding-left: 0px;
                 font-family: 'Microsoft YaHei';
             }
-            QComboBox::drop-down { border: none; width: 14px; }
+            QComboBox::drop-down { border: none; width: 0px; }
+            QComboBox::down-arrow { image: none; width: 0px; height: 0px; }
             QComboBox QAbstractItemView {
                 background: white;
                 color: #333333;
                 border: 1px solid #dddddd;
                 outline: none;
+            }
+            QComboBox QAbstractItemView::item {
+                background: white;
+                color: #333333;
+                padding: 4px 6px;
+            }
+            QComboBox QAbstractItemView::item:selected {
+                background: #0cc0df;
+                color: white;
             }
         """
 
@@ -447,7 +505,7 @@ class InlineAddViewMonth(QWidget):
         self.selected_list_id = None
         self.selected_list_name = None
         self.selected_is_alarm_mode = False
-        self.combo_priority.setCurrentIndex(0)
+        self.combo_priority.setCurrentIndex(2)
         self.combo_repeat.setCurrentIndex(0)
         self._update_summary_labels()
 
@@ -469,8 +527,8 @@ class InlineAddViewMonth(QWidget):
         schedule_data = {
             'title': title,
             'item_type': 'schedule',
-            'priority': self.combo_priority.currentIndex(),
-            'repeat_rule': self.combo_repeat.currentText().strip(),
+            'priority': 2 - self.combo_priority.currentIndex(),
+            'repeat_rule': self.repeat_value_map.get(self.combo_repeat.currentText().strip(), "无"),
             'description': self.input_desc.toPlainText().strip(), 
             'start_time': self.selected_start_time,
             'end_time': self.selected_end_time,
@@ -616,10 +674,11 @@ class MonthWindow(FramelessMainWindow):
         top_grid.addWidget(self.lbl_time, 0, 0, alignment=Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignLeft)
 
         # --- 第0行，第1列：天气图标 ---
-        self.lbl_weather_icon = QLabel("⌛")
+        self.lbl_weather_icon = WeatherIconLabel(30, self)
         self.lbl_weather_icon.setFixedSize(30, 30) # 固定大小，确保居中不会乱跑
         self.lbl_weather_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_weather_icon.setStyleSheet('color: white; font-size: 16px; background: transparent;')
+        self.lbl_weather_icon.start_loading()
         top_grid.addWidget(self.lbl_weather_icon, 0, 1, alignment=Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignHCenter)
 
         # --- 第1行，第0列：月份切换器 ---
@@ -715,7 +774,7 @@ class MonthWindow(FramelessMainWindow):
         vs_layout.setContentsMargins(2, 2, 2, 2)
         vs_layout.setSpacing(2)
 
-        views = {"day": "日", "week": "周", "month": "月", "priority": "象限", "todo": "待办"}
+        views = {"day": "日", "week": "周", "month": "月", "todo": "待办"}
         for vid, vname in views.items():
             v_btn = QPushButton(vname)
             v_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -1003,6 +1062,11 @@ class MonthWindow(FramelessMainWindow):
         self.user_selected_date = qdate
         self._refresh_schedule_marker_cache()
         self._hide_hover_preview()
+        existing_panel = self._find_open_day_panel(qdate)
+        if existing_panel is not None:
+            existing_panel.close()
+            return
+
         self._open_day_panel(qdate)
 
     def _on_calendar_date_activated(self, qdate):
@@ -1238,12 +1302,7 @@ class MonthWindow(FramelessMainWindow):
         if not data: return
         icon_code = data['icon']
         svg_path = f"assets/weather/{icon_code}-fill.svg"
-        colored_pixmap = self._load_colored_svg(svg_path, "#FFFFFF", 30, 30) 
-        if not colored_pixmap.isNull():
-            self.lbl_weather_icon.setPixmap(colored_pixmap)
-            self.lbl_weather_icon.setText("") 
-        else:
-            self.lbl_weather_icon.setText("❓")
+        self.lbl_weather_icon.set_weather_icon(svg_path)
             
         self.lbl_temp.setText(f"{data['temp']}°C")
         tooltip = f"{data['city']}: {data['text']} {data['temp']}°C"

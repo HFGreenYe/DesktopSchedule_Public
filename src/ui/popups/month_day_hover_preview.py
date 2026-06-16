@@ -29,7 +29,7 @@ class MonthDayHoverPreview(QFrame):
         self._layout.setSpacing(4)
 
         self.date_label = QLabel()
-        self.date_label.setStyleSheet("font-size: 12px; font-weight: bold;")
+        self.date_label.setStyleSheet("color: #0cc0df; font-size: 12px; font-weight: bold;")
         self._layout.addWidget(self.date_label)
 
         self.body_label = QLabel()

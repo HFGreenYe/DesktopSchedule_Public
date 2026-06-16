@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1254" height="1254" viewBox="0 0 1254 1254" fill="none">
+  <!-- Axes -->
+  <rect x="75" y="80" width="70" height="1080" fill="#333333"/>
+  <rect x="75" y="1090" width="1085" height="70" fill="#333333"/>
+
+  <!-- Dots -->
+  <circle cx="404" cy="888" r="88" fill="#333333"/>
+  <circle cx="694" cy="644" r="58" fill="#333333"/>
+  <circle cx="584" cy="329" r="44" fill="#333333"/>
+  <circle cx="1058" cy="166" r="50" fill="#333333"/>
+  <circle cx="928" cy="742" r="34" fill="#333333"/>
+</svg>

@@ -589,6 +589,7 @@ class MainWindow(FramelessMainWindow):
     # 处理视图切换
     def switch_view(self, view_name):
         route_action = ViewRouter.classify_main_view(view_name)
+        self._sync_view_selector_state(route_action)
 
         # 切换前，先把可能处于打开状态的视图选择菜单隐藏掉
         if hasattr(self, 'page_dashboard'):
@@ -650,9 +651,17 @@ class MainWindow(FramelessMainWindow):
             
         elif route_action == "priority":
 
-            self.show_toast("准备切换至：四象限视图")
+            self.show_toast("该视图入口已调整")
         else:
             self.show_toast(f"准备切换至：{view_name}")
+
+    def _sync_view_selector_state(self, view_name):
+        if view_name not in {"day", "week", "month", "todo"}:
+            return
+        if hasattr(self, 'page_dashboard') and hasattr(self.page_dashboard, 'view_selector'):
+            self.page_dashboard.view_selector.set_current_view(view_name)
+        if hasattr(self, 'page_todo') and hasattr(self.page_todo, 'view_selector'):
+            self.page_todo.view_selector.set_current_view(view_name)
 
     def restore_from_month_view(self):
         """从大屏月视图恢复到主视图窄屏"""
@@ -664,6 +673,7 @@ class MainWindow(FramelessMainWindow):
 
         self.month_window.hide()
         self.body_stack.setCurrentWidget(self.page_dashboard) # 确保路由回到看板
+        self._sync_view_selector_state("day")
         self.page_dashboard.refresh_data()
         self.show()
 
@@ -677,6 +687,7 @@ class MainWindow(FramelessMainWindow):
 
         self.week_window.hide()
         self.body_stack.setCurrentWidget(self.page_dashboard) # 确保路由回到看板
+        self._sync_view_selector_state("day")
         self.page_dashboard.refresh_data()
         self.show()
 

@@ -13,6 +13,8 @@ class _MenuRow(QFrame):
     TEXT_COLOR = "#333333"
     DISABLED_TEXT_COLOR = "#777777"
     HOVER_BG = "rgba(12, 192, 223, 0.1)"
+    ICON_SIZE = 18
+    ICON_DPR = 2.0
 
     def __init__(
         self,
@@ -46,10 +48,12 @@ class _MenuRow(QFrame):
         layout.setSpacing(12)
 
         icon_label = QLabel()
-        icon_label.setFixedSize(18, 18)
+        icon_label.setFixedSize(self.ICON_SIZE, self.ICON_SIZE)
+        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_label.setScaledContents(True)
         icon_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         if icon_path:
-            icon_label.setPixmap(load_colored_svg_pixmap(icon_path, self.ICON_COLOR, 18, 18))
+            icon_label.setPixmap(self._load_menu_icon_pixmap(icon_path))
         layout.addWidget(icon_label)
 
         text_label = QLabel(text)
@@ -105,6 +109,16 @@ class _MenuRow(QFrame):
         bg = self.HOVER_BG if (self._hovered or self._forced_hovered) else "transparent"
         self.setStyleSheet(f"background-color: {bg}; border-radius: 8px;")
 
+    @classmethod
+    def _load_menu_icon_pixmap(cls, icon_path):
+        return load_colored_svg_pixmap(
+            icon_path,
+            cls.ICON_COLOR,
+            cls.ICON_SIZE,
+            cls.ICON_SIZE,
+            cls.ICON_DPR,
+        )
+
 
 class ActionContextMenu(QMenu):
     action_requested = pyqtSignal(str)
@@ -121,9 +135,13 @@ class ActionContextMenu(QMenu):
         self.view_actions_by_id = {}
         self.view_action = None
         self.view_menu = QMenu("视图", self)
+        self._view_hover_timer = QTimer(self)
+        self._view_hover_timer.setInterval(30)
+        self._view_hover_timer.timeout.connect(self._close_view_menu_if_cursor_outside)
         self._apply_menu_style(self, self.MAIN_MENU_WIDTH)
         self._apply_menu_style(self.view_menu, self.VIEW_MENU_WIDTH)
         self.aboutToHide.connect(self.view_menu.close)
+        self.view_menu.aboutToHide.connect(self._clear_view_row_hover)
         self._build_menu()
 
     def _build_menu(self):
@@ -134,10 +152,9 @@ class ActionContextMenu(QMenu):
             enabled=False,
         )
 
-        self._create_view_action("day", "日视图", ("Calendar.svg",))
-        self._create_view_action("week", "周视图", ("week_top_color.svg", "view.svg"))
-        self._create_view_action("month", "月视图", ("Calendar.svg",))
-        self._create_view_action("priority", "四象限视图", ("importance.svg",), enabled=False)
+        self._create_view_action("day", "日视图", ("interface-day.svg", "Calendar.svg"))
+        self._create_view_action("week", "周视图", ("interface-week.svg", "week_top_color.svg", "view.svg"))
+        self._create_view_action("month", "月视图", ("interface-month.svg", "Calendar.svg"))
         self._create_view_action("todo", "待办", ("todo.svg",))
 
         self.view_action = self._create_main_action(
@@ -245,28 +262,42 @@ class ActionContextMenu(QMenu):
         action_rect = self.actionGeometry(view_widget_action)
         popup_pos = self.mapToGlobal(QPoint(self.width(), action_rect.top()))
         self.view_menu.popup(popup_pos)
+        if not self._view_hover_timer.isActive():
+            self._view_hover_timer.start()
 
     def _hide_view_menu(self):
+        self._view_hover_timer.stop()
+        self._clear_view_row_hover()
+        self.view_menu.close()
+
+    def _clear_view_row_hover(self):
         view_row = self.rows_by_id.get("view")
         if view_row:
+            view_row.set_hovered(False)
             view_row.set_forced_hovered(False)
-        self.view_menu.close()
 
     def _hide_view_menu_if_cursor_left(self):
         QTimer.singleShot(0, self._close_view_menu_if_cursor_outside)
 
     def _close_view_menu_if_cursor_outside(self):
+        if not self.view_menu.isVisible():
+            self._view_hover_timer.stop()
+            self._clear_view_row_hover()
+            return
         cursor_pos = QCursor.pos()
-        main_rect = QRect(self.mapToGlobal(QPoint(0, 0)), self.size())
+        view_row = self.rows_by_id.get("view")
+        view_row_rect = QRect()
+        if view_row:
+            view_row_rect = QRect(view_row.mapToGlobal(QPoint(0, 0)), view_row.size())
         view_rect = QRect(self.view_menu.mapToGlobal(QPoint(0, 0)), self.view_menu.size())
-        if not main_rect.contains(cursor_pos) and not view_rect.contains(cursor_pos):
+        if not view_row_rect.contains(cursor_pos) and not view_rect.contains(cursor_pos):
             self._hide_view_menu()
 
     @staticmethod
     def _load_icon(icon_names):
         path = ActionContextMenu._first_existing_icon_path(icon_names)
         if path:
-            return QIcon(load_colored_svg_pixmap(path, _MenuRow.ICON_COLOR, 18, 18))
+            return QIcon(_MenuRow._load_menu_icon_pixmap(path))
         return QIcon()
 
     @staticmethod

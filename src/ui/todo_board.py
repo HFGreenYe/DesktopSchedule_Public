@@ -1,9 +1,9 @@
 # src/ui/todo_board.py
 import os
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, 
-                             QLabel, QFrame, QPushButton, QScrollArea, QGridLayout, QStackedWidget,QLineEdit, QTextEdit, QMenu)
-from PyQt6.QtCore import Qt, QRectF, QTimer, pyqtSignal, QPoint, QMimeData
-from PyQt6.QtGui import QAction, QIcon, QPainter, QPainterPath, QBrush, QLinearGradient, QColor, QPixmap, QImage, QDrag
+                             QLabel, QFrame, QPushButton, QScrollArea, QGridLayout, QStackedWidget,QLineEdit, QTextEdit, QMenu, QSizePolicy)
+from PyQt6.QtCore import Qt, QRect, QRectF, QTimer, pyqtSignal, QPoint, QMimeData
+from PyQt6.QtGui import QAction, QIcon, QPainter, QPainterPath, QBrush, QLinearGradient, QColor, QPixmap, QImage, QDrag, QFontMetrics
 from PyQt6.QtSvg import QSvgRenderer
 
 from ..config import AppConfig
@@ -102,14 +102,18 @@ class StickyNoteCard(QFrame):
         else:
             icon_label.setText("📌")
 
-        header_layout.addWidget(icon_label)
+        header_layout.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignTop)
 
-        self.title_label = QLabel(self.data.title)
+        self._title_text = str(getattr(self.data, "title", ""))
+        self._title_color = "white"
+        self.title_label = QLabel(self._title_text)
         self.title_label.setStyleSheet("color: white; font-weight: bold; font-size: 13px; font-family: 'Microsoft YaHei'; border: none; background: transparent;")
         self.title_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self.title_label.setWordWrap(True)
+        self.title_label.setFixedHeight(38)
+        self.title_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         
-        header_layout.addWidget(self.title_label, 1)
+        header_layout.addWidget(self.title_label, 1, Qt.AlignmentFlag.AlignTop)
         main_layout.addLayout(header_layout)
 
         # --- 底部：清单标签 (右下角) ---
@@ -157,15 +161,42 @@ class StickyNoteCard(QFrame):
         """)
         if hasattr(self, 'title_label'):
             # 置顶使用金色(#FFD700)，未置顶保持纯白
-            title_color = "#FFD700" if is_pinned else "white" 
+            self._title_color = "#FFD700" if is_pinned else "white" 
+            self._fit_title_label()
+
+    def _set_title_style(self, font_size):
             self.title_label.setStyleSheet(f"""
-                color: {title_color}; 
+                color: {self._title_color}; 
                 font-weight: bold; 
-                font-size: 13px; 
+                font-size: {font_size}px; 
                 font-family: 'Microsoft YaHei'; 
                 border: none; 
                 background: transparent;
             """)
+
+    def _fit_title_label(self):
+        if not hasattr(self, 'title_label'):
+            return
+
+        width = max(40, self.title_label.width())
+        height = self.title_label.height()
+        flags = Qt.TextFlag.TextWordWrap.value | Qt.AlignmentFlag.AlignLeft.value
+
+        for font_size in (13, 12, 11, 10):
+            font = self.title_label.font()
+            font.setPixelSize(font_size)
+            metrics = QFontMetrics(font)
+            rect = metrics.boundingRect(QRect(0, 0, width, 1000), flags, self._title_text)
+            if rect.height() <= height:
+                self._set_title_style(font_size)
+                return
+
+        self._set_title_style(10)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, 'title_label'):
+            self._fit_title_label()
 
     # 右键菜单呼出逻辑
     def _show_context_menu(self, pos):
@@ -454,6 +485,7 @@ class FolderCard(QFrame):
         """)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.setSpacing(8) # 稍微收紧一点图标和文字的间距
 
@@ -469,18 +501,54 @@ class FolderCard(QFrame):
             self.icon_label.setText("📁")
             self.icon_label.setStyleSheet("font-size: 40px; background: transparent; border: none;")
 
-        self.name_label = QLabel(self.category_name)
+        self._name_text = str(self.category_name)
+        self._name_color = "rgba(255, 255, 255, 0.6)" if self.is_empty else "white"
+        self.name_label = QLabel(self._name_text)
         self.name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.name_label.setMaximumWidth(82)
+        self.name_label.setFixedHeight(18)
+        self.name_label.setMinimumWidth(1)
+        self.name_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.name_label.setToolTip(self._name_text)
         
         # 字体变小两号 (14px -> 12px)
-        text_color = "rgba(255, 255, 255, 0.6)" if self.is_empty else "white"
-        self.name_label.setStyleSheet(f"color: {text_color}; font-weight: bold; font-size: 12px; font-family: 'Microsoft YaHei'; border: none; background: transparent;")
+        self._fit_name_label()
 
         layout.addWidget(self.icon_label, 0, Qt.AlignmentFlag.AlignHCenter)
         layout.addWidget(self.name_label, 0, Qt.AlignmentFlag.AlignHCenter)
 
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
+
+    def _set_name_style(self, font_size):
+        self.name_label.setStyleSheet(f"color: {self._name_color}; font-weight: bold; font-size: {font_size}px; font-family: 'Microsoft YaHei'; border: none; background: transparent;")
+
+    def _fit_name_label(self):
+        if not hasattr(self, 'name_label'):
+            return
+
+        width = max(45, min(82, self.name_label.width() or 82))
+        for font_size in (12, 11, 10, 9):
+            font = self.name_label.font()
+            font.setPixelSize(font_size)
+            metrics = QFontMetrics(font)
+            if metrics.horizontalAdvance(self._name_text) <= width:
+                self.name_label.setText(self._name_text)
+                self._set_name_style(font_size)
+                return
+
+        font = self.name_label.font()
+        font.setPixelSize(9)
+        metrics = QFontMetrics(font)
+        self._set_name_style(9)
+        self.name_label.setText(metrics.elidedText(self._name_text, Qt.TextElideMode.ElideRight, width))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, 'name_label'):
+            label_width = max(45, min(82, self.width() - 18))
+            self.name_label.setMaximumWidth(label_width)
+            self._fit_name_label()
 
     def _show_context_menu(self, pos):
         # 拦截：系统默认的“未分类待办”不允许删除
@@ -595,7 +663,7 @@ class FolderViewContainer(QScrollArea):
         self.setViewportMargins(0, 0, 0, 0)
         
         self.grid_layout = QGridLayout(self.scroll_content)
-        self.grid_layout.setContentsMargins(0, 0, 5, 0)
+        self.grid_layout.setContentsMargins(0, 0, 14, 0)
         #self.grid_layout.setSpacing(12) 
 
         self.grid_layout.setHorizontalSpacing(12) 
@@ -626,7 +694,7 @@ class FolderViewContainer(QScrollArea):
         if uncategorized_count > 0:
             card = FolderCard(category_id=None, category_name="未分类待办", is_empty=False)
             card.doubleClicked.connect(self.folder_opened.emit) # 连接双击信号
-            self.grid_layout.addWidget(card, current_index // cols, current_index % cols)
+            self.grid_layout.addWidget(card, current_index // cols, current_index % cols, Qt.AlignmentFlag.AlignCenter)
             self.cards.append(card)
             current_index += 1
 
@@ -635,13 +703,13 @@ class FolderViewContainer(QScrollArea):
             card = FolderCard(category_id=data['id'], category_name=data['name'], is_empty=data['is_empty'])
             card.doubleClicked.connect(self.folder_opened.emit) # 连接双击信号
             card.delete_requested.connect(self.delete_folder_requested.emit)
-            self.grid_layout.addWidget(card, current_index // cols, current_index % cols)
+            self.grid_layout.addWidget(card, current_index // cols, current_index % cols, Qt.AlignmentFlag.AlignCenter)
             self.cards.append(card)
             current_index += 1
         
         add_card = AddFolderCard()
         add_card.clicked.connect(self.add_folder_requested.emit)
-        self.grid_layout.addWidget(add_card, current_index // cols, current_index % cols)
+        self.grid_layout.addWidget(add_card, current_index // cols, current_index % cols, Qt.AlignmentFlag.AlignCenter)
         self.cards.append(add_card)
 
         self.update_card_heights()
@@ -652,8 +720,12 @@ class FolderViewContainer(QScrollArea):
         # 计算高度，确保一屏刚好显示 3 行
         target_h = int((vh - 24) / 3) 
         target_h = max(target_h, 80)
+        available_w = max(240, self.viewport().width() - 14)
+        target_w = int((available_w - self.grid_layout.horizontalSpacing() * 2) / 3)
+        target_w = max(76, min(112, target_w))
         for card in self.cards:
             card.setFixedHeight(target_h)
+            card.setFixedWidth(target_w)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
