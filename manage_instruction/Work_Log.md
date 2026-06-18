@@ -28,6 +28,42 @@
 
 ---
 
+## 2026-06-19 更多菜单模式图标裁切修复与层级后移只读排查
+
+任务来源：
+
+- 用户反馈更多菜单中的“模式切换”和二级菜单“课表模式”图标底部被裁掉少量像素。
+- 用户反馈打开更多菜单后偶发菜单掉到主窗口后方，仅窗口外侧部分可见，要求先检查原因，不修改该行为。
+
+图标修复：
+
+- 修改 `src/ui/components.py`。
+- `model_switch.svg` 的路径最低点接近 viewBox 底边，`timetable.svg` 的路径直接到达 `1024` 底边；原实现将图标强制铺满 `18×18` QLabel，高 DPI 平滑采样时末端像素容易被裁切。
+- 为公共菜单图标构造函数增加可选 `icon_inset`，仅对“模式切换”和“课表模式”设置 `1px` 内缩。
+- 两个目标图标现在按 `16×16` 平滑缩放并在 `18×18` QLabel 中居中；卡片模式及其他菜单图标尺寸保持不变。
+- 未修改 SVG 源文件。
+
+菜单层级后移只读排查：
+
+- 用户澄清图中异常不是父窗口位移，而是更多菜单被主窗口覆盖；仅菜单位于主窗口外侧的部分仍可见。
+- `MainWindow` 默认带 `WindowStaysOnTopHint`，属于置顶顶级窗口。
+- `SharedMoreMenu`、`mode_menu` 和 `help_menu` 均被设置为独立 native `Qt.Popup`，但窗口 flags 中没有同步 `WindowStaysOnTopHint`。
+- `show_menu()` 只计算锚点、应用 DWM 边框修复并调用 `exec()`；没有显式同步父窗口 topmost 状态，也没有调用 `raise_()` 或设置原生 z-order。
+- `apply_24h2_border_fix()` 只调整 DWM frame、圆角和边框颜色，不操作窗口位置或 z-order，不是直接原因。
+- 在 Windows 的焦点或 native z-order 重新排序发生时，非 topmost popup 可能落到 topmost 主窗口之后；截图中菜单与主窗口重叠区域被遮挡、窗口外区域仍可见，与该风险一致。
+- 当前最高概率原因是父窗口与 popup 的 topmost / owner 层级没有显式保持一致；具体触发时机可能与焦点切换、子菜单显示或 Windows 原生窗口重排有关，仍需复现并记录 HWND/z-order 才能完全确认。
+- 本轮遵照要求不修改菜单层级和窗口 flags，仅修正调查结论。
+
+验证记录：
+
+- offscreen 图标检查：“模式切换”和“课表模式”pixmap 均为 `16×16`，居中放入 `18×18` QLabel，且关闭 `scaledContents`，保留四周 1px 空间。
+- “卡片模式”图标继续沿用原缩放方式，确认本轮未扩大到其他菜单图标。
+- `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src/ui/components.py main.py`：通过。
+- `git diff --check`：通过，仅有 Git 的 LF/CRLF 工作区提示。
+- diff 范围：仅 `src/ui/components.py` 与 `manage_instruction/Work_Log.md`。
+
+---
+
 ## 2026-06-17 日界面详情框与月日期弹窗拖动小修
 
 任务来源：

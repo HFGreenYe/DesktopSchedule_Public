@@ -337,7 +337,7 @@ class SharedMoreMenu(QMenu):
         self._help_hover_timer.setInterval(30)
         self._help_hover_timer.timeout.connect(self._close_help_menu_if_cursor_outside)
 
-        def add_centered_btn(text, icon_name, callback, menu=None, arrow=False, close_on_click=True, on_enter=None, on_leave=None, icon_color=None):
+        def add_centered_btn(text, icon_name, callback, menu=None, arrow=False, close_on_click=True, on_enter=None, on_leave=None, icon_color=None, icon_inset=0):
             target_menu = menu or self
             action = QWidgetAction(target_menu)
             btn_frame = QFrame()
@@ -351,11 +351,24 @@ class SharedMoreMenu(QMenu):
             
             icon_label = QLabel()
             icon_label.setFixedSize(18, 18)
-            icon_label.setScaledContents(True)
             if icon_color:
-                icon_pixmap = get_colored_icon(f"{icon_name}.svg", icon_color, 18)
+                icon_pixmap = get_colored_icon(
+                    f"{icon_name}.svg",
+                    icon_color,
+                    18 - icon_inset * 2,
+                )
             else:
                 icon_pixmap = QPixmap(f"assets/icons/{icon_name}.svg")
+                if icon_inset:
+                    icon_pixmap = icon_pixmap.scaled(
+                        18 - icon_inset * 2,
+                        18 - icon_inset * 2,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+            icon_label.setScaledContents(not icon_inset)
+            if icon_inset:
+                icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             icon_label.setPixmap(icon_pixmap)
             icon_label.setStyleSheet("background: transparent; border: none;")
             icon_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -409,7 +422,7 @@ class SharedMoreMenu(QMenu):
             target_menu.addAction(action)
             return action, btn_frame
 
-        def add_mode_option(text, icon_name, mode_id):
+        def add_mode_option(text, icon_name, mode_id, icon_inset=0):
             action = QWidgetAction(self.mode_menu)
             btn_frame = QFrame()
             btn_frame.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -422,8 +435,18 @@ class SharedMoreMenu(QMenu):
 
             icon_label = QLabel()
             icon_label.setFixedSize(18, 18)
-            icon_label.setScaledContents(True)
-            icon_label.setPixmap(QPixmap(f"assets/icons/{icon_name}.svg"))
+            icon_pixmap = QPixmap(f"assets/icons/{icon_name}.svg")
+            if icon_inset:
+                icon_pixmap = icon_pixmap.scaled(
+                    18 - icon_inset * 2,
+                    18 - icon_inset * 2,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            icon_label.setScaledContents(not icon_inset)
+            if icon_inset:
+                icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            icon_label.setPixmap(icon_pixmap)
             icon_label.setStyleSheet("background: transparent; border: none;")
             icon_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             layout.addWidget(icon_label)
@@ -525,9 +548,10 @@ class SharedMoreMenu(QMenu):
             close_on_click=False,
             on_enter=self._show_mode_menu,
             on_leave=self._schedule_mode_menu_hide,
+            icon_inset=1,
         )
         add_mode_option("卡片模式", "schedule_card", "card")
-        add_mode_option("课表模式", "timetable", "timetable")
+        add_mode_option("课表模式", "timetable", "timetable", icon_inset=1)
         self._refresh_mode_option_styles()
         self._help_widget_action, self._help_row = add_centered_btn(
             "使用帮助",
