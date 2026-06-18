@@ -236,7 +236,7 @@ class InlineAddViewMonth(QWidget):
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(0, 12, 0, 0)
         layout.setSpacing(8)
 
         # 1. 标题输入
@@ -255,7 +255,7 @@ class InlineAddViewMonth(QWidget):
         # 2. 详情输入
         self.input_desc = QTextEdit()
         self.input_desc.setPlaceholderText("详情描述...")
-        self.input_desc.setFixedHeight(50)
+        self.input_desc.setFixedHeight(75)
         self.input_desc.setStyleSheet("""
             QTextEdit { 
                 background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255,255,255,0.3); 
@@ -358,7 +358,7 @@ class InlineAddViewMonth(QWidget):
 
         # 6. 底部按钮
         btn_layout = QHBoxLayout()
-        btn_layout.setContentsMargins(0, 0, 0, 0)
+        btn_layout.setContentsMargins(0, 12, 0, 0)
         
         self.btn_cancel = QPushButton("取消")
         self.btn_save = QPushButton("保存")
@@ -1212,7 +1212,7 @@ class MonthWindow(FramelessMainWindow):
             self.show_toast("🚫 该日期已过期，无法添加日程")
             return
 
-        self.search_box.hide()
+        self.search_box.show()
         self.view_selector_container.hide()
         self.page_time.hide()
         self.page_alarm.hide()
@@ -1384,7 +1384,7 @@ class MonthWindow(FramelessMainWindow):
         if self.inline_add_view.isVisible():
             self._close_add_view()
         else:
-            self.search_box.hide()
+            self.search_box.show()
             self.view_selector_container.hide()
             self.inline_add_view.reset(target_date)
             self.page_time.hide()
