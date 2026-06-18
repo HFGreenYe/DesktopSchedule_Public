@@ -236,7 +236,7 @@ class InlineAddViewMonth(QWidget):
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 12, 0, 0)
+        layout.setContentsMargins(0, 3, 0, 0)
         layout.setSpacing(8)
 
         # 1. 标题输入
@@ -273,6 +273,7 @@ class InlineAddViewMonth(QWidget):
         self.btn_time = self._create_icon_btn("time.svg", "时间设置待接入")
         self.btn_alarm = self._create_icon_btn("alarm.svg", "提醒设置待接入")
         self.btn_list = self._create_icon_btn("list.svg", "清单选择待接入")
+        self.btn_font = self._create_icon_btn("theme.svg", "字体设置待接入")
 
         self.btn_time.clicked.connect(
             lambda: self.req_open_time_picker.emit(self.selected_start_time, self.selected_end_time)
@@ -282,10 +283,8 @@ class InlineAddViewMonth(QWidget):
             lambda: self.req_open_list_picker.emit(self.selected_list_id, "schedule")
         )
 
-        icons_layout.addWidget(self.btn_time)
-        icons_layout.addWidget(self.btn_alarm)
-        icons_layout.addWidget(self.btn_list)
-        icons_layout.addStretch()
+        for button in (self.btn_time, self.btn_alarm, self.btn_list, self.btn_font):
+            icons_layout.addWidget(button, 1, Qt.AlignmentFlag.AlignCenter)
         layout.addLayout(icons_layout)
 
         # 4. 轻量状态壳：重要性 / 重复
@@ -358,7 +357,7 @@ class InlineAddViewMonth(QWidget):
 
         # 6. 底部按钮
         btn_layout = QHBoxLayout()
-        btn_layout.setContentsMargins(0, 12, 0, 0)
+        btn_layout.setContentsMargins(0, 21, 0, 0)
         
         self.btn_cancel = QPushButton("取消")
         self.btn_save = QPushButton("保存")
@@ -622,7 +621,7 @@ class MonthWindow(FramelessMainWindow):
         self.btn_more.setIconSize(QSize(12, 12))
         self.btn_more.setFixedSize(24, 24)
         self.btn_more.setStyleSheet(StyleManager.get_window_control_style(is_close=False))
-        self.shared_more_menu = SharedMoreMenu(self, self.btn_more)
+        self.shared_more_menu = SharedMoreMenu(self, self.btn_more, show_festival_option=True)
         self.btn_more.clicked.connect(self.shared_more_menu.show_menu)
         top_layout.addWidget(self.btn_more)
 

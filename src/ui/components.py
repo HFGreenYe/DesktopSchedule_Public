@@ -276,11 +276,12 @@ class SharedMoreMenu(QMenu):
     """
     _schedule_display_mode = "card"
 
-    def __init__(self, parent_window, anchor_button):
+    def __init__(self, parent_window, anchor_button, show_festival_option=False):
         # parent_window 必须是顶级窗口 
         super().__init__(parent_window)
         self.parent_window = parent_window
         self.anchor_button = anchor_button
+        self.show_festival_option = show_festival_option
         self._ignore_next_click = False
         
         self._setup_ui()
@@ -336,7 +337,7 @@ class SharedMoreMenu(QMenu):
         self._help_hover_timer.setInterval(30)
         self._help_hover_timer.timeout.connect(self._close_help_menu_if_cursor_outside)
 
-        def add_centered_btn(text, icon_name, callback, menu=None, arrow=False, close_on_click=True, on_enter=None, on_leave=None):
+        def add_centered_btn(text, icon_name, callback, menu=None, arrow=False, close_on_click=True, on_enter=None, on_leave=None, icon_color=None):
             target_menu = menu or self
             action = QWidgetAction(target_menu)
             btn_frame = QFrame()
@@ -351,8 +352,11 @@ class SharedMoreMenu(QMenu):
             icon_label = QLabel()
             icon_label.setFixedSize(18, 18)
             icon_label.setScaledContents(True)
-            icon_path = f"assets/icons/{icon_name}.svg"
-            icon_label.setPixmap(QPixmap(icon_path))
+            if icon_color:
+                icon_pixmap = get_colored_icon(f"{icon_name}.svg", icon_color, 18)
+            else:
+                icon_pixmap = QPixmap(f"assets/icons/{icon_name}.svg")
+            icon_label.setPixmap(icon_pixmap)
             icon_label.setStyleSheet("background: transparent; border: none;")
             icon_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             layout.addWidget(icon_label)
@@ -498,12 +502,18 @@ class SharedMoreMenu(QMenu):
         )
 
         add_menu_separator()
-        self.chk_lunar = add_checkable_option(" 🌙 显示农历", True, lambda checked: None)
-        self.chk_week = add_checkable_option(" 📅 显示周数", False, lambda checked: None)
-
-        add_menu_separator()
+        self.chk_festival = None
+        if self.show_festival_option:
+            self.chk_festival = add_checkable_option(
+                " 显示节日",
+                True,
+                lambda checked: None,
+                icon_path="assets/icons/festival.svg",
+            )
+            add_menu_separator()
         add_centered_btn("坐标显示", "axis", self._on_show_axis)
         add_centered_btn("待办显示", "todo", self._on_show_todo)
+        add_centered_btn("修改字体", "theme", self._on_modify_font, icon_color="#333333")
         add_centered_btn("导出日程", "export", self._on_export_schedule)
         add_centered_btn("全部日程", "history", self._on_show_history)
         add_menu_separator()
@@ -519,7 +529,6 @@ class SharedMoreMenu(QMenu):
         add_mode_option("卡片模式", "schedule_card", "card")
         add_mode_option("课表模式", "timetable", "timetable")
         self._refresh_mode_option_styles()
-        add_menu_separator()
         self._help_widget_action, self._help_row = add_centered_btn(
             "使用帮助",
             "help",
@@ -762,6 +771,9 @@ class SharedMoreMenu(QMenu):
 
     def _on_show_axis(self):
         print(f"[{self.parent_window.__class__.__name__}] 点击了坐标显示")
+
+    def _on_modify_font(self):
+        print(f"[{self.parent_window.__class__.__name__}] 点击了修改字体")
 
     def _on_show_help_manual(self):
         print(f"[{self.parent_window.__class__.__name__}] 点击了使用手册")

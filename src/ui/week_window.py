@@ -405,7 +405,7 @@ class WeekWindow(FramelessMainWindow):
         self.btn_more.setStyleSheet(StyleManager.get_window_control_style(is_close=False))
         
         from .components import SharedMoreMenu
-        self.shared_more_menu = SharedMoreMenu(self, self.btn_more)
+        self.shared_more_menu = SharedMoreMenu(self, self.btn_more, show_festival_option=True)
         self.btn_more.clicked.connect(self.shared_more_menu.show_menu)
         
         win_ctrl_layout.addWidget(self.btn_more)

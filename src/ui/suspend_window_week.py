@@ -54,7 +54,7 @@ class SuspendWindowWeek(FramelessWindow):
         self.btn_more.setToolTip("更多")
         self.btn_more.setStyleSheet(StyleManager.get_button_style())
         from .components import SharedMoreMenu
-        self.shared_more_menu = SharedMoreMenu(self, self.btn_more)
+        self.shared_more_menu = SharedMoreMenu(self, self.btn_more, show_festival_option=True)
         self.btn_more.clicked.connect(self.shared_more_menu.show_menu)
         self.top_layout.addWidget(self.btn_more)
         
@@ -108,4 +108,3 @@ class SuspendWindowWeek(FramelessWindow):
     def mouseReleaseEvent(self, event):
         self.drag_pos = None
 
-    
