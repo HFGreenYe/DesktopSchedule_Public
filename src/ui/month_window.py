@@ -4,7 +4,8 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QCalendarWidget, QApplication, QTableView, 
                              QStyledItemDelegate, QStyle, QStyleOptionViewItem,
                              QGridLayout, QTextEdit, QComboBox, QListView,
-                             QStyleOptionComboBox, QStylePainter)
+                             QStyleOptionComboBox, QStylePainter, QMessageBox,
+                             QSizePolicy)
 from PyQt6.QtCore import Qt, pyqtSignal, QDate, QTime, QTimer, QRectF, QSize, QEvent
 from PyQt6.QtGui import QPainter, QPainterPath, QColor, QBrush, QLinearGradient, QIcon, QPen, QPalette, QPixmap, QGuiApplication
 from PyQt6.QtSvg import QSvgRenderer
@@ -16,7 +17,7 @@ from ..data.database import db_manager
 from ..utils.win_api import apply_24h2_border_fix
 from ..utils.styles import StyleManager
 from .header import ToolTipFilter
-from .components import get_colored_icon, SharedMoreMenu
+from .components import IOSSwitch, get_colored_icon, SharedMoreMenu
 from .common.action_context_menu import ActionContextMenu
 from .common.weather_icon_label import WeatherIconLabel
 from .time_picker import TimePickerView
@@ -136,6 +137,255 @@ class MonthListPickerView(ListPickerView):
             card.lbl_check.setStyleSheet(
                 "color: #0cc0df; font-size: 12px; font-weight: bold;"
             )
+
+
+class MonthCompactSwitch(IOSSwitch):
+    """月界面窄栏专用开关，不改变共享 IOSSwitch 的尺寸。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(38, 24)
+        self._thumb_diameter = 18
+        self._thumb_inset = 3
+        self.setChecked(self.isChecked())
+
+    def _checked_thumb_x(self):
+        return float(self.width() - self._thumb_inset - self._thumb_diameter)
+
+    def setChecked(self, checked):
+        self.anim.stop()
+        self._checked = bool(checked)
+        self._thumb_x = (
+            self._checked_thumb_x() if self._checked else float(self._thumb_inset)
+        )
+        self.update()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() != Qt.MouseButton.LeftButton:
+            super().mouseReleaseEvent(event)
+            return
+        self._checked = not self._checked
+        self.anim.setStartValue(self._thumb_x)
+        self.anim.setEndValue(
+            self._checked_thumb_x() if self._checked else float(self._thumb_inset)
+        )
+        self.anim.start()
+        self.toggled.emit(self._checked)
+        event.accept()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(self.rect()), 12, 12)
+        painter.fillPath(path, QColor("#0cc0df" if self._checked else "#e0e0e0"))
+        painter.setBrush(Qt.GlobalColor.white)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(
+            int(self._thumb_x),
+            self._thumb_inset,
+            self._thumb_diameter,
+            self._thumb_diameter,
+        )
+
+
+class MonthTimePickerView(TimePickerView):
+    """月界面左栏专用的紧凑时间选择器。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._apply_compact_layout()
+
+    def _apply_compact_layout(self):
+        header_container = self.lbl_title.parentWidget()
+        header_container.setFixedHeight(28)
+        header_container.layout().setContentsMargins(4, 0, 30, 0)
+        self.set_title(self.lbl_title.text())
+        self.btn_suspend.hide()
+
+        self.content_layout.setContentsMargins(0, 4, 0, 4)
+        self.content_layout.setSpacing(6)
+
+        self.btn_date.setFixedSize(136, 28)
+        self.btn_date.setIconSize(QSize(14, 14))
+        self.btn_date.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(255, 255, 255, 0.18);
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                border-radius: 6px;
+                color: white;
+                font-size: 11px;
+                font-weight: bold;
+                font-family: 'Microsoft YaHei';
+                text-align: left;
+                padding-left: 8px;
+            }
+            QPushButton:hover { background-color: rgba(255, 255, 255, 0.28); }
+        """)
+
+        self.calendar.setFixedSize(136, 122)
+        self.calendar.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.calendar.setStyleSheet(StyleManager.get_calendar_style() + """
+            QCalendarWidget QToolButton {
+                font-size: 8px;
+                icon-size: 10px;
+                min-width: 14px;
+                min-height: 16px;
+            }
+            QCalendarWidget QAbstractItemView:enabled { font-size: 8px; }
+            QCalendarWidget QTableHeaderView::section {
+                font-size: 8px;
+                padding: 0px;
+            }
+        """)
+        for object_name in ("qt_calendar_prevmonth", "qt_calendar_nextmonth"):
+            button = self.calendar.findChild(QToolButton, object_name)
+            if button is not None:
+                button.setIconSize(QSize(10, 10))
+
+        self._replace_enable_switch()
+        for label in self.content_widget.findChildren(QLabel):
+            if label.text() == "启用开始时间":
+                label.setAlignment(
+                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+                )
+                label.setStyleSheet("color: white; font-size: 10px; font-weight: bold;")
+            elif label.text() in {"开始时间", "完成时间"}:
+                label.setStyleSheet(
+                    "color: rgba(255,255,255,0.7); font-size: 9px; margin-bottom: 2px;"
+                )
+
+        self.time_picker_container.setFixedWidth(136)
+        self.time_picker_container.setStyleSheet("""
+            QWidget#TimeContainer {
+                background-color: rgba(255, 255, 255, 0.1);
+                border-radius: 4px;
+            }
+        """)
+        time_layout = self.time_picker_container.layout()
+        time_layout.setContentsMargins(2, 4, 2, 4)
+        time_layout.setSpacing(2)
+        self.start_group.setFixedWidth(65)
+        self.end_group.setFixedWidth(65)
+        for scroller in (
+            self.scroll_start_hour,
+            self.scroll_start_min,
+            self.scroll_end_hour,
+            self.scroll_end_min,
+        ):
+            self._compact_scroller(scroller)
+        for group in (self.start_scroller_widget, self.end_scroller_widget):
+            for colon in group.findChildren(QLabel):
+                colon.setFixedWidth(6)
+                colon.setStyleSheet(
+                    "color: white; font-size: 12px; font-weight: bold; padding-bottom: 2px;"
+                )
+
+        self.duration_grid.setFixedWidth(136)
+        duration_layout = self.duration_grid.layout()
+        duration_layout.setSpacing(2)
+        for button in self.duration_grid.findChildren(QPushButton):
+            button.setFixedHeight(20)
+            button.setMinimumWidth(0)
+            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            button.setStyleSheet("""
+                QPushButton {
+                    background-color: rgba(255, 255, 255, 0.15);
+                    border-radius: 4px;
+                    color: white;
+                    border: 1px solid rgba(255,255,255,0.2);
+                    font-size: 8px;
+                }
+                QPushButton:hover { background-color: rgba(255, 255, 255, 0.3); }
+            """)
+
+        footer_container = self.btn_cancel.parentWidget()
+        footer_layout = footer_container.layout()
+        footer_layout.setContentsMargins(0, 8, 0, 0)
+        footer_layout.setSpacing(8)
+        footer_container.setFixedHeight(32)
+        for button in (self.btn_cancel, self.btn_ok):
+            button.setFixedHeight(24)
+            button.setMinimumWidth(0)
+            button.setMaximumWidth(16777215)
+            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.btn_cancel.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                border: 1px solid rgba(255,255,255,0.5);
+                border-radius: 12px;
+                color: white;
+                font-size: 11px;
+            }
+            QPushButton:hover { background: rgba(255,255,255,0.1); }
+        """)
+        self.btn_ok.setStyleSheet("""
+            QPushButton {
+                background: white;
+                border: none;
+                border-radius: 12px;
+                color: #0cc0df;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QPushButton:hover { background: #f0f0f0; }
+        """)
+
+    def _replace_enable_switch(self):
+        old_switch = self.chk_enable_start
+        switch_layout = None
+        for index in range(self.content_layout.count()):
+            candidate = self.content_layout.itemAt(index).layout()
+            if candidate is not None and candidate.indexOf(old_switch) >= 0:
+                switch_layout = candidate
+                break
+        if switch_layout is None:
+            return
+
+        switch_index = switch_layout.indexOf(old_switch)
+        checked = old_switch.isChecked()
+        switch_layout.removeWidget(old_switch)
+        old_switch.hide()
+        old_switch.deleteLater()
+
+        compact_switch = MonthCompactSwitch(self.content_widget)
+        compact_switch.setChecked(checked)
+        compact_switch.toggled.connect(self._on_switch_toggled)
+        switch_layout.insertWidget(
+            switch_index,
+            compact_switch,
+            0,
+            Qt.AlignmentFlag.AlignVCenter,
+        )
+        self.chk_enable_start = compact_switch
+
+    def _compact_scroller(self, scroller):
+        scroller.item_height = 20
+        scroller.setFixedSize(26, 60)
+        scroller.setStyleSheet("""
+            QListWidget { background: transparent; outline: none; }
+            QListWidget::item {
+                height: 20px;
+                color: rgba(255, 255, 255, 0.4);
+                font-size: 9px;
+                font-family: 'Microsoft YaHei';
+                border: none;
+            }
+            QListWidget::item:selected {
+                background: transparent;
+                color: #FFFFFF;
+                font-size: 11px;
+                font-weight: bold;
+            }
+        """)
+
+    def set_title(self, text="设置时间"):
+        compact_text = "修改时间" if text.startswith("修改") else "设置时间"
+        self.lbl_title.setText(compact_text)
+        self.lbl_title.setStyleSheet(
+            "color: white; font-size: 12px; font-weight: bold; "
+            "font-family: 'Microsoft YaHei';"
+        )
 
 
 class CalendarCellDelegate(QStyledItemDelegate):
@@ -644,6 +894,7 @@ class MonthWindow(FramelessMainWindow):
     suspend_requested = pyqtSignal()
     view_selected = pyqtSignal(str)
     date_selected = pyqtSignal(QDate)
+    schedule_updated = pyqtSignal(object)
 
     def __init__(self):
         super().__init__()
@@ -663,6 +914,10 @@ class MonthWindow(FramelessMainWindow):
         self.hover_preview_popup = None
         self.drag_pos = None
         self.context_menu_date = None
+        self.time_picker_mode = "add"
+        self.alarm_picker_mode = "add"
+        self.list_picker_mode = "add"
+        self.editing_schedule = None
 
         self._setup_ui()
         self._refresh_schedule_marker_cache()
@@ -904,9 +1159,10 @@ class MonthWindow(FramelessMainWindow):
         self.inline_add_view.req_open_list_picker.connect(self.go_to_list_picker)
         bottom_tools_vbox.addWidget(self.inline_add_view)
 
-        self.page_time = TimePickerView(self)
+        self.page_time = MonthTimePickerView(self)
         self.page_time.hide()
         self.page_time.set_title("设置时间")
+        self.page_time.setFixedHeight(self.inline_add_view.sizeHint().height())
         if hasattr(self.page_time, "btn_suspend"):
             self.page_time.btn_suspend.hide()
         if hasattr(self.page_time, "btn_close"):
@@ -1489,6 +1745,7 @@ class MonthWindow(FramelessMainWindow):
         self.search_box.show()
 
     def go_to_time_picker(self, start, end):
+        self.time_picker_mode = "add"
         self._hide_hover_preview()
         self.close_day_panels()
 
@@ -1515,15 +1772,46 @@ class MonthWindow(FramelessMainWindow):
         self.inline_add_view.hide()
         self.page_time.show()
 
+    def go_to_time_picker_for_edit(self, schedule_data):
+        self.time_picker_mode = "edit"
+        self.editing_schedule = schedule_data
+        self.page_time.set_title("修改时间")
+        self.page_time.set_initial_data(schedule_data.start_time, schedule_data.end_time)
+        self._show_edit_picker(self.page_time)
+
     def back_from_time_picker(self):
         self.page_time.hide()
-        self.inline_add_view.show()
+        if self.time_picker_mode == "edit":
+            self._finish_edit_picker("time_picker_mode")
+        else:
+            self.inline_add_view.show()
 
     def on_time_confirmed(self, start, end):
+        if self.time_picker_mode == "edit" and self.editing_schedule:
+            schedule = self.editing_schedule
+
+            def _do_update(update_future):
+                now = datetime.datetime.now()
+                db_manager.update_schedule_with_repeat(
+                    schedule.id,
+                    {"start_time": start, "end_time": end, "created_at": now},
+                    update_future,
+                )
+                schedule.start_time = start
+                schedule.end_time = end
+                schedule.created_at = now
+                if not update_future:
+                    schedule.group_id = None
+                self._complete_schedule_edit(schedule)
+                self.back_from_time_picker()
+
+            self._check_repeat_and_execute(schedule, _do_update)
+            return
         self.inline_add_view.set_time_data(start, end)
         self.back_from_time_picker()
 
     def go_to_alarm_picker(self, target_time, is_alarm, duration):
+        self.alarm_picker_mode = "add"
         self._hide_hover_preview()
         self.close_day_panels()
         self.page_alarm.set_title("设置提醒")
@@ -1535,15 +1823,57 @@ class MonthWindow(FramelessMainWindow):
         self.inline_add_view.hide()
         self.page_alarm.show()
 
+    def go_to_alarm_picker_for_edit(self, schedule_data):
+        self.alarm_picker_mode = "edit"
+        self.editing_schedule = schedule_data
+        target = schedule_data.start_time or schedule_data.end_time or datetime.datetime.now()
+        self.page_alarm.set_title("修改提醒")
+        self.page_alarm.set_initial_data(
+            target,
+            schedule_data.is_alarm,
+            schedule_data.alarm_duration,
+        )
+        self._show_edit_picker(self.page_alarm)
+
     def back_from_alarm_picker(self):
         self.page_alarm.hide()
-        self.inline_add_view.show()
+        if self.alarm_picker_mode == "edit":
+            self._finish_edit_picker("alarm_picker_mode")
+        else:
+            self.inline_add_view.show()
 
     def on_alarm_confirmed(self, remind_dt, is_alarm, duration):
+        if self.alarm_picker_mode == "edit" and self.editing_schedule:
+            schedule = self.editing_schedule
+
+            def _do_update(update_future):
+                now = datetime.datetime.now()
+                db_manager.update_schedule_with_repeat(
+                    schedule.id,
+                    {
+                        "reminder_time": remind_dt,
+                        "is_alarm": is_alarm,
+                        "alarm_duration": duration,
+                        "created_at": now,
+                    },
+                    update_future,
+                )
+                schedule.reminder_time = remind_dt
+                schedule.is_alarm = is_alarm
+                schedule.alarm_duration = duration
+                schedule.created_at = now
+                if not update_future:
+                    schedule.group_id = None
+                self._complete_schedule_edit(schedule)
+                self.back_from_alarm_picker()
+
+            self._check_repeat_and_execute(schedule, _do_update)
+            return
         self.inline_add_view.set_alarm_data(remind_dt, is_alarm, duration)
         self.back_from_alarm_picker()
 
     def go_to_list_picker(self, current_category_id, list_type="schedule"):
+        self.list_picker_mode = "add"
         self._hide_hover_preview()
         self.close_day_panels()
         self.page_list.set_title("选择清单")
@@ -1555,17 +1885,90 @@ class MonthWindow(FramelessMainWindow):
         self.inline_add_view.hide()
         self.page_list.show()
 
+    def go_to_list_picker_for_edit(self, schedule_data):
+        self.list_picker_mode = "edit"
+        self.editing_schedule = schedule_data
+        self.page_list.set_title("修改清单")
+        self.page_list.load_data(
+            schedule_data.category_id,
+            list_type=getattr(schedule_data, "item_type", "schedule"),
+        )
+        self._show_edit_picker(self.page_list)
+
     def back_from_list_picker(self):
         self.page_list.hide()
-        self.inline_add_view.show()
+        if self.list_picker_mode == "edit":
+            self._finish_edit_picker("list_picker_mode")
+        else:
+            self.inline_add_view.show()
 
     def on_list_confirmed(self, category_id):
+        if self.list_picker_mode == "edit" and self.editing_schedule:
+            schedule = self.editing_schedule
+
+            def _do_update(update_future):
+                now = datetime.datetime.now()
+                db_manager.update_schedule_with_repeat(
+                    schedule.id,
+                    {"category_id": category_id, "created_at": now},
+                    update_future,
+                )
+                schedule.category_id = category_id
+                schedule.created_at = now
+                if not update_future:
+                    schedule.group_id = None
+                self._complete_schedule_edit(schedule)
+                self.back_from_list_picker()
+
+            self._check_repeat_and_execute(schedule, _do_update)
+            return
         category_name = None
         if category_id is not None:
             category = db_manager.get_category(category_id)
             category_name = category.name if category else None
         self.inline_add_view.set_list_data(category_id, category_name)
         self.back_from_list_picker()
+
+    def _show_edit_picker(self, active_picker):
+        self._hide_hover_preview()
+        self.close_day_panels()
+        if not self.isVisible():
+            self.show()
+        self.search_box.show()
+        self.view_selector_container.hide()
+        self.inline_add_view.hide()
+        for picker in (self.page_time, self.page_alarm, self.page_list):
+            picker.setVisible(picker is active_picker)
+
+    def _finish_edit_picker(self, mode_attribute):
+        setattr(self, mode_attribute, "add")
+        self.editing_schedule = None
+        self.inline_add_view.hide()
+        self.search_box.show()
+
+    def _complete_schedule_edit(self, schedule):
+        self._refresh_schedule_marker_cache()
+        self.schedule_updated.emit(schedule)
+
+    def _check_repeat_and_execute(self, schedule_data, update_callback):
+        rule = getattr(schedule_data, "repeat_rule", "")
+        if rule and str(rule).strip() not in {"", "无", "none", "不重复"}:
+            message = QMessageBox(self)
+            message.setWindowTitle("修改重复日程")
+            message.setText(
+                f"当前日程包含【{rule}】的重复规则。\n"
+                "请选择修改当前日程，或修改该系列的所有日程。"
+            )
+            all_button = message.addButton("修改所有", QMessageBox.ButtonRole.AcceptRole)
+            single_button = message.addButton("仅修改本次", QMessageBox.ButtonRole.ActionRole)
+            message.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+            message.exec()
+            if message.clickedButton() == all_button:
+                update_callback(True)
+            elif message.clickedButton() == single_button:
+                update_callback(False)
+            return
+        update_callback(False)
 
     def _on_schedule_saved(self):
         self.show_toast("✅ 添加日程成功")
