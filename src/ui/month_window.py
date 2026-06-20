@@ -21,7 +21,7 @@ from .common.action_context_menu import ActionContextMenu
 from .common.weather_icon_label import WeatherIconLabel
 from .time_picker import TimePickerView
 from .alarm_picker import AlarmPickerView
-from .list_picker import ListPickerView
+from .list_picker import CategoryCard, ListPickerView
 from .popups.month_day_hover_preview import MonthDayHoverPreview
 from .popups.month_day_panel import MonthDayPanel
 
@@ -42,6 +42,100 @@ class CenteredComboBox(QComboBox):
         )
         painter.setPen(QColor("#ffffff"))
         painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, current_text)
+
+
+class MonthListPickerView(ListPickerView):
+    """月界面左栏专用的紧凑清单选择器。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._apply_compact_layout()
+
+    def _apply_compact_layout(self):
+        self.header_container.setFixedHeight(28)
+        self.header_container.layout().setContentsMargins(4, 0, 0, 0)
+        self.set_title(self.lbl_title.text())
+
+        self.btn_suspend.hide()
+        self.btn_close.hide()
+
+        self.content_layout.setContentsMargins(0, 4, 0, 4)
+        self.content_layout.setSpacing(6)
+        self.cards_layout.setSpacing(6)
+
+        self.input_container.setFixedHeight(30)
+        self.input_container.layout().setSpacing(4)
+        self.input_new.setFixedHeight(28)
+        self.btn_confirm_add.setFixedSize(28, 28)
+        self.btn_confirm_add.setStyleSheet("""
+            QPushButton {
+                background-color: #0cc0df;
+                border: 1px solid white;
+                border-radius: 14px;
+                color: white;
+                font-size: 13px;
+            }
+            QPushButton:hover { background-color: #0bb0cf; }
+        """)
+
+        footer_layout = self.footer_container.layout()
+        footer_layout.setContentsMargins(0, 8, 0, 0)
+        footer_layout.setSpacing(4)
+        self.footer_container.setFixedHeight(32)
+        for button in (self.btn_add_new, self.btn_cancel, self.btn_ok):
+            button.setFixedSize(38, 24)
+        self.btn_cancel.setText("取消")
+        self.btn_add_new.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                border: 1px solid rgba(255,255,255,0.6);
+                border-radius: 12px;
+                color: white;
+                font-size: 10px;
+                font-family: 'Microsoft YaHei';
+            }
+            QPushButton:hover { background: rgba(255,255,255,0.15); }
+        """)
+        self.btn_cancel.setStyleSheet(self.btn_add_new.styleSheet())
+        self.btn_ok.setStyleSheet("""
+            QPushButton {
+                background: white;
+                border: none;
+                border-radius: 12px;
+                color: #0cc0df;
+                font-size: 10px;
+                font-weight: bold;
+                font-family: 'Microsoft YaHei';
+            }
+            QPushButton:hover { background: #f0f0f0; }
+        """)
+
+    def set_title(self, text="选择清单"):
+        compact_text = "修改清单" if text.startswith("修改") else text
+        self.lbl_title.setText(compact_text)
+        self.lbl_title.setStyleSheet(
+            "color: white; font-size: 12px; font-weight: bold; "
+            "font-family: 'Microsoft YaHei';"
+        )
+
+    def load_data(self, current_selected_id=None, list_type=None):
+        super().load_data(current_selected_id, list_type)
+        for card in self.cards_container.findChildren(CategoryCard):
+            card.setFixedHeight(28)
+            card.layout.setContentsMargins(8, 0, 6, 0)
+            card.layout.setSpacing(4)
+            spacer = card.layout.itemAt(1).spacerItem()
+            if spacer is not None:
+                spacer.changeSize(4, 0)
+            card.dot.setFixedSize(6, 6)
+            card.dot.setStyleSheet("background-color: #0cc0df; border-radius: 3px;")
+            card.lbl_name.setStyleSheet(
+                "color: white; font-size: 11px; font-weight: bold; "
+                "font-family: 'Microsoft YaHei';"
+            )
+            card.lbl_check.setStyleSheet(
+                "color: #0cc0df; font-size: 12px; font-weight: bold;"
+            )
 
 
 class CalendarCellDelegate(QStyledItemDelegate):
@@ -840,17 +934,10 @@ class MonthWindow(FramelessMainWindow):
         self.page_alarm.confirm_requested.connect(self.on_alarm_confirmed)
         bottom_tools_vbox.addWidget(self.page_alarm)
 
-        self.page_list = ListPickerView(self)
+        self.page_list = MonthListPickerView(self)
         self.page_list.hide()
         self.page_list.set_title("选择清单")
-        if hasattr(self.page_list, "btn_suspend"):
-            self.page_list.btn_suspend.hide()
-        if hasattr(self.page_list, "btn_close"):
-            try:
-                self.page_list.btn_close.clicked.disconnect()
-            except TypeError:
-                pass
-            self.page_list.btn_close.clicked.connect(self.back_from_list_picker)
+        self.page_list.setFixedHeight(self.inline_add_view.sizeHint().height())
         self.page_list.back_requested.connect(self.back_from_list_picker)
         self.page_list.confirm_requested.connect(self.on_list_confirmed)
         bottom_tools_vbox.addWidget(self.page_list)
@@ -1256,6 +1343,9 @@ class MonthWindow(FramelessMainWindow):
         gradient.setColorAt(0.0, QColor(AppConfig.COLOR_GRADIENT_START)) 
         gradient.setColorAt(1.0, QColor(AppConfig.COLOR_GRADIENT_END))   
         painter.fillPath(path, QBrush(gradient))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor(0, 0, 0, 26), 1))
+        painter.drawPath(path)
         
         painter.save()
         line_color = QColor("#ffffff")

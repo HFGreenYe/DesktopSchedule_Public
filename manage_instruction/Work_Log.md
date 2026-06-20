@@ -28,6 +28,274 @@
 
 ---
 
+## 2026-06-19 月界面清单选择器紧凑 UI 调整
+
+任务来源：
+
+- 用户要求只调整月界面添加流程中的清单选择器，不影响日界面和周界面复用的 `ListPickerView`。
+- 月界面左栏宽度仅 `136px`，原共享选择器使用 `24px` 标题、`50px` 清单卡片和三枚 `85×40px` 按钮，导致标题截断、按钮重叠和内容溢出。
+
+实际修改：
+
+- `src/ui/month_window.py`
+  - 新增月界面局部子类 `MonthListPickerView`，共享 `ListPickerView` 源码和其他界面实例均未修改。
+  - 标题栏高度调整为 `28px`，标题使用左上角 `12px` 字体；未来传入“修改【名称】清单”等修改标题时，月界面紧凑显示为“修改清单”。
+  - 月界面实例隐藏挂起键和右上角关闭键；返回统一使用底部“取消”按钮。
+  - “+ 新建 / 取消 / 确定”三键统一为 `38×24px`，高度与月界面添加表单的取消/保存按钮一致；横向位置为 `x=0 / 56 / 98`，均位于 `136px` 左栏内且互不重叠。
+  - 复测发现清单页仍按自身较小的 `135px` 高度布局，导致按钮距窗口下沿 `199px`，未满足与添加页 footer 对齐的要求；已改为复用月界面添加页 `294px` 的页面高度，使两组按钮使用相同纵向基线。
+  - 清单卡片调整为 `136×28px`，与月界面标题输入框同宽；圆点、文字、选中标记和内部边距同步缩小，但保留原清单编号、名称、选中和删除行为。
+  - 新建清单输入区同步压缩为 `28px` 高，未修改新建、删除、选择、确认和数据库逻辑。
+
+隔离范围：
+
+- 日界面和周界面继续直接使用共享 `ListPickerView`，其 `60px` 标题栏、`50px` 清单卡片和 `85×40px` 底部按钮保持不变。
+- 未修改 `src/ui/list_picker.py`、数据库、Repository、Service 或清单回填字段。
+
+验证记录：
+
+- 项目 `.venv` 执行 `python -m py_compile src/ui/month_window.py main.py`：通过。
+- PyQt6 offscreen 几何验证：月界面标题栏 `28px`；关闭/挂起按钮隐藏；三枚底部按钮均为 `38×24px` 且无重叠；清单卡片为 `136×28px`。
+- PyQt6 offscreen 纵向基线复测：调整前添加页/清单页按钮距窗口下沿分别为 `40px / 199px`；修正页面高度后两者均为 `40px`。
+- 对照验证共享 `ListPickerView` 仍为 `60px` 标题栏和 `85px` 按钮宽度，确认本轮未影响日/周界面。
+
+跨视图详情弹窗编辑路由评估（本轮未修改）：
+
+- 当前详情弹窗创建时会固定记录 `source_view`；`MainWindow.go_to_time_picker_for_edit()`、`go_to_alarm_picker_for_edit()`、`go_to_list_picker_for_edit()` 根据这个来源把编辑请求送回原窗口。
+- 因此周界面创建的详情弹窗即使保留到日界面，双击清单仍会让隐藏的 `WeekWindow` 进入编辑状态；这与用户观察一致。
+- 改为“跟随当前可见视图”属于中等复杂度、边界清晰的独立工单：需要记录当前路由，并让时间/提醒/清单三条编辑链在信号触发时选择当前窗口，而不是弹窗创建来源。
+- 日/周/待办已有各自编辑承接链，可统一路由；月界面当前只有添加态 picker，尚无完整的详情编辑模式、保存和返回链，因此若要求弹窗在月界面也可编辑，需要补齐月界面编辑承接，不能只改一个条件分支。
+- 建议保留“切换视图后弹窗继续显示”的目标，后续单独实现当前视图编辑路由；仅在该工单验证失败时再退回“切换视图关闭弹窗”的低成本方案。
+
+---
+
+## 2026-06-19 跨视图详情弹窗持久显示修复
+
+任务来源：
+
+- 用户要求日 / 周 / 月 / 待办视图切换时，已打开的日程详情弹窗继续存在，只有用户主动点击弹窗关闭按钮时才关闭。
+- 当前表现不稳定：首次日转周、周转日时弹窗可能随原窗口隐藏，后续切换又可能继续显示；非今天日程更容易暴露该问题。
+
+原因定位：
+
+- `ScheduleDetailPop` 是无显式父窗口的 `Qt.Tool` 顶级窗口，Windows / Qt 可能根据创建时的活跃窗口建立临时 owner 关系。
+- `MainWindow.switch_view()` 会依次隐藏和显示不同顶级窗口，但此前没有显式管理详情弹窗的可见状态。
+- 前几次自动消失属于 owner 窗口隐藏时的附带行为，并非业务代码主动关闭；随着活跃窗口和原生 owner 状态变化，后续行为不再一致。
+- `DashboardView.open_popups` 此前依赖 `isVisible()` 清理列表，但 native owner 隐藏不等于用户主动关闭，容易误删应保留的弹窗。
+
+实际修改：
+
+- `src/ui/schedule_detail_pop.py`
+  - 新增 `popup_closed` 信号。
+  - 用户或程序真正执行 `close()` 时由 `closeEvent()`发出自身对象，供管理列表移除。
+- `src/ui/dashboard.py`
+  - 创建详情弹窗时连接 `popup_closed`，用户主动关闭后从 `open_popups` 移除。
+  - 不再使用 `isVisible()` 清理弹窗列表。
+  - 再次点击同一日程时复用已有弹窗，并执行 `show()` / `raise_()` / `activateWindow()`。
+  - 新增 `restore_detail_popups()`：保留对象、位置和编辑状态，通过 `hide()` / `show()` 强制恢复可能被原生 owner 隐藏的工具窗口。
+- `src/ui/todo.py`
+  - 待办列表独立维护的详情弹窗同步采用相同生命周期：不再按 `isVisible()` 丢弃，主动关闭时从列表移除，并提供切换视图后的恢复入口。
+- `src/ui/main_window.py`
+  - 日 / 周 / 月 / 待办视图切换完成后，通过 `QTimer.singleShot(0, ...)` 统一恢复日程与待办两组仍在管理列表中的详情弹窗。
+  - 不关闭、不清空详情弹窗，也不改变弹窗位置。
+
+范围说明：
+
+- 未修改日程数据、弹窗内容编辑或保存逻辑。
+- 未修改视图路由顺序和窗口位置计算。
+- 未强制将弹窗置顶；只恢复视图切换期间被系统隐藏的弹窗。
+
+验证记录：
+
+- 使用 Codex bundled Python 执行 `python -m py_compile src/ui/schedule_detail_pop.py src/ui/dashboard.py src/ui/todo.py src/ui/main_window.py main.py`：通过。
+- AST 生命周期接线检查：`ScheduleDetailPop.closeEvent()`、日程/待办两组移除与恢复方法、`MainWindow` 统一恢复入口均存在并通过断言。
+- 沙箱外使用项目 `.venv\Scripts\python.exe` 复跑相同 `py_compile`：通过；解释器为项目虚拟环境，PyQt6 来自 `.venv\Lib\site-packages`。
+- PyQt6 offscreen 生命周期验证：日程与待办两组恢复方法均按 `hide → show → move → raise` 执行，保留原位置；主动关闭后的移除路径可清空对应管理项。
+- `git diff --check`：通过，仅有 Git 的 LF/CRLF 工作区提示。
+- 静态检查确认 `isVisible()` 清理路径已删除，手动关闭信号、列表移除方法和视图切换后恢复调用均已接入。
+- Codex 沙箱内直接启动项目 `.venv` 会被托管环境限制并报告无法创建基础 Python 进程；沙箱外验证确认基础 Python 实际存在，项目 `.venv` 本身可正常使用。此前“基础 Python 已不存在”的判断已纠正。
+- 真实 Windows 复测需覆盖用户给出的完整序列，并优先使用非今天日程：日开弹窗→周→周开弹窗→日→再次日开弹窗→周→周开弹窗→日；所有未手动关闭的弹窗均应持续显示。
+- 还需单独确认用户点击关闭按钮后，该弹窗不会在后续视图切换时重新出现。
+
+---
+
+## 2026-06-19 周界面翻周按钮命中区扩展
+
+任务来源：
+
+- 用户反馈周界面左右翻周按钮命中范围偏窄，点击边缘时容易误选当前周最左或最右日期。
+
+实际修改：
+
+- 修改 `src/ui/week_window.py`。
+- 左右翻周按钮宽度由 `20px` 增加到 `32px`，高度继续保持 `36px`。
+- 左按钮外侧位置保持 `x=4`，新增宽度只向右侧扩展；使用左对齐和 `6px` 左内边距，保持箭头靠近原视觉位置。
+- 右按钮外侧继续保留 `4px` 边距，位置由 `width - 24` 调整为 `width - 36`，新增宽度只向左侧扩展；使用右对齐和 `6px` 右内边距。
+- 未修改翻周函数、日期选择信号、双击跳转、日程卡片或顶部日期布局。
+
+验证记录：
+
+- 使用 Codex bundled Python 执行 `python -m py_compile src/ui/week_window.py main.py`：通过。
+- 静态检查确认左右按钮均为 `32×36px`，右按钮位置与新宽度匹配。
+- `git diff --check` 初次发现新增行尾空格，已清理后复跑通过。
+- 实际命中范围和箭头视觉位置仍需用户在周窗口中点击两侧边缘验证。
+
+---
+
+## 2026-06-19 周界面清单页控件精简与详情框样式统一
+
+任务来源：
+
+- 用户反馈周界面进入“选择清单”页面时，嵌入页面额外显示一个居中的挂起按钮和一个偏右的关闭按钮，与周窗口自身顶部控件重复。
+- 用户反馈从周界面打开的日程详情弹窗使用白底灰字，而主界面及其他日程详情使用青底白字，要求统一。
+
+原因定位：
+
+- 两个多余按钮来自 `ListPickerView._setup_window_controls()` 创建的 `btn_suspend` 和 `btn_close`；该页面嵌入 `WeekWindow.body_stack` 后仍保留了按独立窗口设计的控制按钮。
+- `ScheduleDetailPop` 根据 `source_view in ["week", "month"]` 明确设置白色详情框和灰色文字，因此该差异不是数据内容、空详情或编辑状态造成，而是来源视图样式分支。
+
+实际修改：
+
+- `src/ui/week_window.py`
+  - `WeekWindow` 创建 `page_list` 后隐藏其 `btn_suspend` 和 `btn_close`。
+  - 保留周窗口自己的顶部挂起、同步和关闭按钮。
+  - 保留清单页底部“新建 / 退出 / 确定”操作和清单选择逻辑。
+- `src/ui/schedule_detail_pop.py`
+  - 删除周/月来源专用的白底详情框分支。
+  - 所有来源统一使用 `#11c1df` 青色背景、`rgba(255, 255, 255, 0.6)` 边框。
+  - 有详情时统一使用 90% 白色文字，无详情占位文本使用 60% 白色文字。
+  - 编辑完成后仍通过同一 `_get_desc_color()` 刷新，避免保存后重新出现灰字。
+
+范围说明：
+
+- 未修改清单数据、清单选择和回填逻辑。
+- 未修改日程详情字段、保存逻辑或数据库。
+- 未修改详情弹窗标题、底部信息、置顶和关闭行为。
+
+验证记录：
+
+- 使用 Codex bundled Python 执行 `python -m py_compile src/ui/week_window.py src/ui/schedule_detail_pop.py main.py`：通过。
+- `git diff --check`：通过，仅有 Git 的 LF/CRLF 工作区提示。
+- 静态检查确认周界面仅隐藏嵌入清单页的两个窗口控制按钮；详情框不再包含周/月来源专用配色分支。
+- 真实界面仍需用户复测周界面“新增日程选清单”和“详情弹窗修改清单”两条入口，以及周/月来源详情弹窗的显示和编辑后样式。
+
+后续视觉语义修正：
+
+- 用户确认周界面下半部分为白色，周界面来源的详情弹窗使用白底灰字是有意保持视觉协调，并非需要统一删除的异常样式。
+- 原实现确实按 `source_view in ["week", "month"]` 分叉；其中将月界面一并归入白底分支不再符合当前月窗口的全青色渐变结构。
+- 调整为仅 `source_view == "week"` 使用白底灰字：有详情使用 `#666666`，无详情占位使用 `#999999`。
+- 日界面、月界面、待办看板及其他来源继续使用青底白字。
+- 编辑框和编辑完成后的显示继续调用 `_get_desc_color()`，因此周界面保存详情后仍保持白底灰字，不会切回青底白字。
+- 修正后使用 Codex bundled Python 执行 `python -m py_compile src/ui/schedule_detail_pop.py main.py`：通过。
+- 修正后 `git diff --check`：通过，仅有 Git 的 LF/CRLF 工作区提示。
+
+---
+
+## 2026-06-19 窗口边界试点与 WeekWindow 内侧轮廓
+
+任务来源：
+
+- 用户确认更多菜单层级 Bug 暂缓处理，先试验窗口与同色桌面 / 下层软件背景之间的边界区分效果。
+- 目标是参考常规 Windows 应用，通过细边框和既有 DWM 阴影提高窗口轮廓辨识度。
+
+开工前状态：
+
+- `manage_instruction/Final_Formulation.md` 与 `manage_instruction/Work_Log.md` 已有本轮管理文档 diff。
+- 开工前源码工作区干净；上述管理文档 diff 不属于本次边框源码试点。
+
+第一版试点：
+
+- 曾为 `apply_24h2_border_fix()` 增加可选系统默认 DWM 边框，并只在 `MainWindow` 启用。
+- 用户本地复测未观察到可见效果；该方案依赖 Windows 对 frameless/translucent 窗口是否实际绘制默认边框，不能满足稳定区分需求。
+- 第一版源码修改已完整回退：`src/utils/win_api.py` 和 `src/ui/main_window.py` 恢复原调用与原无边框行为。
+
+第二版试点：
+
+- 修改 `src/ui/week_window.py`，将重点转到白色内容区容易与白色背景混合的周界面。
+- 初步新增覆盖全窗口的 `window_outline` 透明 `QFrame`，绘制 `1px solid rgba(0, 0, 0, 0.24)` 内侧轮廓。
+- 用户本地复测发现该覆盖层造成阻断性回归：打开周界面更多菜单并点击别处关闭后，周界面无法再点击任何功能。
+- 同时确认 DWM 外部阴影仍不可见，且 `rgba(0, 0, 0, 0.24)` 明显深于更多菜单边框。
+- 已完整移除 `window_outline`、对应 `resizeEvent()` 处理及全窗口覆盖方案，不再依赖 `WA_TransparentForMouseEvents` 穿透。
+
+第三版试点：
+
+- 读取 `StyleManager.get_menu_style()`，确认更多菜单边框颜色为 `rgba(0, 0, 0, 0.1)`。
+- 不新增覆盖控件，改为在周窗口已有 `top_container` 与 `content_area` 上分别绘制边框。
+- 顶部区域绘制上、左、右三边；白色内容区绘制左、右、下三边，并保留原 `8px` 上下圆角组合。
+- 编辑模式切换时同步保留 `content_area` 边框，避免进入添加 / picker 页面后边界消失。
+- 本方案没有位于所有控件上方的额外 QWidget，不应再阻断菜单关闭后的点击事件。
+- 继续保留 `qframelesswindow` / DWM 现有阴影链路，但本轮不再声称已实现可见外部阴影；若必须增加明显阴影，需要另行评估透明外边距容器，不能再使用覆盖层模拟。
+
+边框推广：
+
+- 用户确认周界面轮廓方向可继续推广，要求其他主要界面使用相同边框。
+- `MainWindow`、`MonthWindow`、`TodoBoardWindow` 均已有自身 `paintEvent()` 和圆角背景路径，本轮直接在原填充路径后追加 `1px` 描边，不新增覆盖控件。
+- 描边统一使用 `QColor(0, 0, 0, 26)`，等价于更多菜单的 `rgba(0, 0, 0, 0.1)`。
+- `MainWindow` 覆盖日界面和主窗口内待办界面；`MonthWindow` 覆盖独立月窗口；`TodoBoardWindow` 覆盖带 10px 透明外边距的待办看板面板。
+- 周界面继续使用顶部容器与白色内容容器的同色边框，不恢复全窗口覆盖层。
+
+窗口置顶闪烁原因：
+
+- `SharedMoreMenu.toggle_pin_mode()` 当前先关闭菜单，再调用 `parent_window.setWindowFlags(new_flags)`，随后调用 `show()` 并重新应用 DWM 修复。
+- Qt 在 Windows 上变更顶级窗口 flags 时会销毁并重新创建 native HWND；窗口短暂从桌面合成树移除后重新加入，因此日程窗口本身会闪烁。
+- 日程窗口短暂消失时，其背后的软件区域先暴露并触发 Windows DWM 重绘，随后又被重新显示的日程窗口覆盖，所以视觉上会感觉背后软件也闪了一次。
+- 当前实现还使用 `QTimer` 延迟重建和重新打开菜单，使该过程更容易被肉眼观察到。
+- 本轮只记录原因，不修改置顶逻辑。后续若处理，应优先使用 Windows `SetWindowPos(HWND_TOPMOST/HWND_NOTOPMOST, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)` 原地调整 z-order，避免通过 `setWindowFlags()` 重建 HWND；该方案属于 Windows 专用逻辑，需单独验收。
+
+范围与风险：
+
+- 本轮仍是单窗口视觉试点，不修改业务逻辑、数据库或更多菜单。
+- 当前轮廓颜色与更多菜单保持一致；后续换肤阶段仍应抽取为主题 token，不能长期写死在 `WeekWindow`。
+- 需要用户重点观察周窗口白色内容区右侧和底部，以及青色顶部区域的边框是否过深。
+- 视觉确认前不推广到 `MonthWindow`、`MainWindow` 或 `TodoBoardWindow`。
+
+验证记录：
+
+- 第一版曾使用 Codex bundled Python 通过 `src/utils/win_api.py`、`src/ui/main_window.py`、`main.py` 的 `py_compile`；本地视觉验收未通过，因此已回退。
+- 使用 Codex bundled Python 执行 `python -m py_compile src/ui/week_window.py main.py`：通过。
+- `git diff --check`：通过，仅有 Git 的 LF/CRLF 工作区提示。
+- 尝试复用项目 `.venv` 的 PyQt6 进行 offscreen 构造，但 bundled Python 为 3.12，而项目 PyQt6/SIP 二进制属于原 Python 3.11 环境，导入时报 `ModuleNotFoundError: No module named 'PyQt6.sip'`；本次无法完成构造级验证。
+- 当前功能性源码 diff 仅为 `src/ui/week_window.py`；`src/utils/win_api.py` 仅残留文件末尾换行差异，不包含第一版 DWM 逻辑。
+- 应用内轮廓的实际线条深浅仍以用户本地桌面背景目测为准。
+- 第三版调整后再次执行 `python -m py_compile src/ui/week_window.py main.py`：通过。
+- 第三版调整后 `git diff --check`：通过，仅有 Git 的 LF/CRLF 工作区提示。
+- 静态检查确认 `window_outline`、`rgba(0, 0, 0, 0.24)` 和覆盖层 resize 逻辑均已移除；当前周窗口边框仅依附于既有顶部与内容容器。
+- 菜单关闭后的点击恢复必须由用户在真实 Windows 窗口中复测；当前环境无法用 offscreen 验证 native popup 关闭后的鼠标抓取状态。
+- 边框推广后使用 Codex bundled Python 执行 `python -m py_compile src/ui/main_window.py src/ui/week_window.py src/ui/month_window.py src/ui/todo_board.py main.py`：通过。
+- 边框推广后 `git diff --check`：通过，仅有 Git 的 LF/CRLF 工作区提示。
+- 静态检查确认四类主要窗口均使用与更多菜单一致的 10% 黑色轮廓；周界面仍无覆盖层残留。
+
+---
+
+## 2026-06-19 更多菜单层级 Bug 暂缓与窗口边界显示评估
+
+任务来源：
+
+- 用户确认更多菜单层级后移问题暂不继续修改，要求写入最终规划末尾的待修复 Bug。
+- 用户反馈应用窗口与桌面或下层软件背景颜色接近时边界不明显，希望参考 Codex 使用轮廓线和阴影区分窗口。
+
+规划记录：
+
+- 已在 `manage_instruction/Final_Formulation.md` 新增“待修复 Bug”章节。
+- 记录更多菜单层级后移只在日界面和待办界面确认复现，周界面和月界面当前未受影响。
+- 记录两条真实复现路径、第一版 `WindowStaysOnTopHint + raise_()` 方案无效及已回退的事实。
+- 记录后续优先使用应用失焦关闭 popup 链、复位 lock/timer/hover 状态的修复方向；本轮不实施。
+
+窗口边界显示代码评估：
+
+- `MainWindow`、`WeekWindow`、`MonthWindow` 均继承 `qframelesswindow.FramelessMainWindow`，使用 `FramelessWindowHint` 和 `WA_TranslucentBackground`。
+- `qframelesswindow` 在 Windows 下已经调用 DWM shadow 接口；项目自己的 `apply_24h2_border_fix()` 同时将 DWM frame 扩展到全窗口，并通过 `DWMWA_BORDER_COLOR = DWMWA_COLOR_NONE` 明确关闭系统边框颜色。
+- 当前可见内容贴满透明顶级窗口，Qt 内部没有为 `QGraphicsDropShadowEffect` 预留外侧 margin；直接给 central widget 加 Qt 阴影会被顶级窗口边界裁切。
+- 最小可行方案是先恢复一个主题可控的 Windows DWM 1px 中性边框，并保留现有 DWM shadow；这最接近 Codex 的原生轮廓和阴影效果。
+- `TodoBoardWindow` 是独立的 frameless `QWidget`，未调用当前 DWM helper；后续若做全局窗口边界统一，需要单独接入同一 helper，不能假定它会继承 `FramelessMainWindow` 的处理。
+- 若 Windows DWM 阴影在目标系统仍不稳定，第二阶段才考虑“透明外层窗口 + 带 margin 的内层内容面板 + QGraphicsDropShadowEffect”；该方案更可控，但会改变窗口外框尺寸、命中区域和现有布局，风险高于 DWM 方案。
+
+范围说明：
+
+- 本轮仅修改 `manage_instruction/Final_Formulation.md` 与 `manage_instruction/Work_Log.md`。
+- 未修改窗口源码、DWM helper、QSS、业务逻辑或数据库。
+
+---
+
 ## 2026-06-19 更多菜单模式图标裁切修复与层级后移只读排查
 
 任务来源：
@@ -52,7 +320,9 @@
 - `apply_24h2_border_fix()` 只调整 DWM frame、圆角和边框颜色，不操作窗口位置或 z-order，不是直接原因。
 - 在 Windows 的焦点或 native z-order 重新排序发生时，非 topmost popup 可能落到 topmost 主窗口之后；截图中菜单与主窗口重叠区域被遮挡、窗口外区域仍可见，与该风险一致。
 - 当前最高概率原因是父窗口与 popup 的 topmost / owner 层级没有显式保持一致；具体触发时机可能与焦点切换、子菜单显示或 Windows 原生窗口重排有关，仍需复现并记录 HWND/z-order 才能完全确认。
-- 本轮遵照要求不修改菜单层级和窗口 flags，仅修正调查结论。
+- 用户建立提交回档点 `33a0bfe` 后尝试第一版层级修复：同步父窗口的 `WindowStaysOnTopHint`，并在 popup/exec 后调用 `raise_()`。
+- 本地复测确认第一版方案无效；已完整回退该源码改动，`components.py` 恢复到提交 `33a0bfe` 的状态。
+- 第一版失败说明问题并非“菜单首次显示时层级不足”，而是应用失去焦点后 popup 生命周期和层级状态发生变化。
 
 验证记录：
 
@@ -61,6 +331,22 @@
 - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src/ui/components.py main.py`：通过。
 - `git diff --check`：通过，仅有 Git 的 LF/CRLF 工作区提示。
 - diff 范围：仅 `src/ui/components.py` 与 `manage_instruction/Work_Log.md`。
+- 第一版 flags 同步的 offscreen 验证曾通过，但 Windows 本地复测仍能触发层级后移，因此该验证不足以覆盖真实失焦场景。
+- 用户确认的触发路径一：打开更多菜单后按 `Shift+Win+S`，应用失去激活状态，菜单随后落到主窗口后面。
+- 用户确认的触发路径二：单击“模式切换”锁定并打开子菜单，随后点击其他应用输入框使本应用失焦；返回后再次点击“模式切换”可触发，且存在相近变体。
+- 以上路径共同特征是：主菜单或锁定子菜单存活期间，应用发生 `ApplicationDeactivate/WindowDeactivate`，随后 popup 状态没有被完整清理。
+- 源码回退确认：`src/ui/components.py` 的工作区 blob 与 `HEAD` blob 均为 `fd36382c733222b7ad279bc51ef88522c2a9df9b`；第一版 z-order 修复未残留任何源码差异。
+- 回退后尝试复跑 `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src/ui/components.py main.py`，但该虚拟环境启动器仍指向已不存在的 `C:\Users\hfgre\AppData\Local\Programs\Python\Python311\python.exe`，本次未能重新执行；源码与已提交且此前通过语法检查的 `HEAD` blob 完全一致。
+- 回退后 `git diff --check`：通过，仅有管理日志的 LF/CRLF 工作区提示。
+- 回退后 diff 范围：仅 `manage_instruction/Work_Log.md`；源码无 diff。
+
+后续拟议方案（本轮未实施，等待用户确认）：
+
+- 不再尝试通过 `WindowStaysOnTopHint` 或单次 `raise_()` 强行维持层级；第一版实测已证明这种处理只覆盖弹出瞬间，不能处理后续应用失焦导致的原生窗口重排。
+- 在 `SharedMoreMenu` 生命周期内监听 `QApplication.applicationStateChanged` 或等价的 `ApplicationDeactivate` 事件。
+- 应用失去激活时立即关闭主菜单、模式子菜单和帮助子菜单，停止两个 hover timer，清除 hover 状态，并将 `_mode_menu_locked` / `_help_menu_locked` 复位。
+- 为 `mode_menu` / `help_menu` 的 `aboutToHide` 增加完整清理处理，避免子菜单独立关闭后仍残留锁定标记；当前连接只清除主菜单行的 hover 样式，没有复位 lock 和 timer。
+- 首轮仍保留主菜单现有阻塞式 `exec()`，只修复失焦关闭和状态清理；若真实 Windows 复测仍失败，再单独评估将主菜单改为非阻塞 `popup()`，避免一次修改同时改变菜单调用模型。
 
 ---
 
