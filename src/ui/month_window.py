@@ -212,11 +212,16 @@ class MonthTimePickerView(TimePickerView):
         header_container.layout().setContentsMargins(4, 0, 30, 0)
         self.set_title(self.lbl_title.text())
         self.btn_suspend.hide()
+        self.btn_close.show()
+        self.btn_close.setIconSize(QSize(12, 12))
+        self.btn_close.setFixedSize(24, 24)
+        self.btn_close.raise_()
 
         self.content_layout.setContentsMargins(0, 4, 0, 4)
         self.content_layout.setSpacing(6)
 
         self.btn_date.setFixedSize(136, 28)
+        self.btn_date.setIcon(self._get_colored_icon("assets/icons/calendar.svg", "#FFFFFF"))
         self.btn_date.setIconSize(QSize(14, 14))
         self.btn_date.setStyleSheet("""
             QPushButton {
@@ -411,6 +416,243 @@ class MonthTimePickerView(TimePickerView):
 
     def set_title(self, text="设置时间"):
         compact_text = "修改时间" if text.startswith("修改") else "设置时间"
+        self.lbl_title.setText(compact_text)
+        self.lbl_title.setStyleSheet(
+            "color: white; font-size: 12px; font-weight: bold; "
+            "font-family: 'Microsoft YaHei';"
+        )
+
+
+class MonthAlarmPickerView(AlarmPickerView):
+    """月界面左栏专用的紧凑提醒选择器。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._apply_compact_layout()
+
+    def _apply_compact_layout(self):
+        header_container = self.lbl_title.parentWidget()
+        header_container.setFixedHeight(28)
+        header_container.layout().setContentsMargins(4, 0, 30, 0)
+        self.set_title(self.lbl_title.text())
+        self.btn_suspend.hide()
+        self.btn_close.show()
+        self.btn_close.setIconSize(QSize(12, 12))
+        self.btn_close.setFixedSize(24, 24)
+        self.btn_close.raise_()
+
+        self.content.setContentsMargins(0, 4, 0, 4)
+        self.content.setSpacing(6)
+
+        for label in self.content_widget.findChildren(QLabel):
+            text = label.text()
+            if text == "提醒时间":
+                label.setAlignment(
+                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+                )
+                label.setFixedWidth(136)
+                label.setStyleSheet(
+                    "color: rgba(255,255,255,0.75); font-size: 9px; "
+                    "font-weight: bold;"
+                )
+            elif text == "设置为前一天":
+                label.setAlignment(
+                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+                )
+                label.setStyleSheet("color: white; font-size: 10px; font-weight: bold;")
+            elif text == "强提醒 (有声模式)":
+                label.setText("强提醒")
+                label.setStyleSheet("color: white; font-size: 10px; font-weight: bold;")
+            elif text == "持续响铃时长":
+                label.setStyleSheet(
+                    "color: rgba(255,255,255,0.75); font-size: 9px; "
+                    "font-weight: bold;"
+                )
+
+        self._replace_switch_row(
+            self.switch_prev_day,
+            self._validate_time,
+            row_width=136,
+        )
+        self._replace_switch_row(
+            self.switch_alarm,
+            self._toggle_alarm_options,
+            row_width=136,
+        )
+
+        self.day_select_container.setFixedWidth(136)
+        day_layout = self.day_select_container.layout()
+        day_layout.setContentsMargins(0, 0, 0, 0)
+        day_layout.setSpacing(4)
+
+        self.time_container.setFixedSize(136, 80)
+        self.time_container.setStyleSheet("""
+            QWidget {
+                background-color: rgba(255, 255, 255, 0.1);
+                border-radius: 4px;
+            }
+        """)
+        time_layout = self.time_container.layout()
+        time_layout.setContentsMargins(20, 4, 20, 4)
+        time_layout.setSpacing(6)
+        for scroller in (self.scroll_h, self.scroll_m):
+            self._compact_scroller(scroller)
+        for colon in self.time_container.findChildren(QLabel):
+            if colon.text() == ":":
+                colon.setFixedWidth(8)
+                colon.setStyleSheet(
+                    "color: white; font-size: 12px; font-weight: bold; "
+                    "background: transparent;"
+                )
+
+        self.quick_grid.setFixedWidth(136)
+        quick_layout = self.quick_grid.layout()
+        quick_layout.setSpacing(2)
+        for button in self.quick_btns:
+            button.setFixedHeight(20)
+            button.setMinimumWidth(0)
+            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            button.setStyleSheet(self._get_btn_style())
+
+        self.alarm_opts_container.setFixedWidth(136)
+        alarm_opts_layout = self.alarm_opts_container.layout()
+        alarm_opts_layout.setSpacing(4)
+        alarm_btn_layout = alarm_opts_layout.itemAt(1).layout()
+        if alarm_btn_layout is not None:
+            alarm_btn_layout.setSpacing(2)
+        for button in self.alarm_group.buttons():
+            button.setFixedHeight(20)
+            button.setMinimumWidth(0)
+            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            button.setStyleSheet("""
+                QPushButton {
+                    background-color: rgba(255, 255, 255, 0.15);
+                    border-radius: 4px;
+                    color: white;
+                    border: 1px solid rgba(255,255,255,0.2);
+                    font-size: 8px;
+                }
+                QPushButton:checked {
+                    background-color: #0cc0df;
+                    border-color: white;
+                    color: white;
+                    font-weight: bold;
+                }
+            """)
+
+        footer_container = self.btn_cancel.parentWidget()
+        footer_layout = footer_container.layout()
+        footer_layout.setContentsMargins(0, 8, 0, 0)
+        footer_layout.setSpacing(8)
+        footer_container.setFixedHeight(32)
+        for button in (self.btn_cancel, self.btn_ok):
+            button.setFixedHeight(24)
+            button.setMinimumWidth(0)
+            button.setMaximumWidth(16777215)
+            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.btn_cancel.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                border: 1px solid rgba(255,255,255,0.5);
+                border-radius: 12px;
+                color: white;
+                font-size: 11px;
+            }
+            QPushButton:hover { background: rgba(255,255,255,0.1); }
+        """)
+        self.btn_ok.setStyleSheet("""
+            QPushButton {
+                background: white;
+                border: none;
+                border-radius: 12px;
+                color: #0cc0df;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QPushButton:hover { background: #f0f0f0; }
+        """)
+
+    def _replace_switch_row(self, old_switch, callback, row_width):
+        parent_layout = None
+        item_index = -1
+        for index in range(self.content.count()):
+            item = self.content.itemAt(index)
+            candidate = item.layout()
+            if candidate is not None and candidate.indexOf(old_switch) >= 0:
+                parent_layout = candidate
+                item_index = index
+                break
+            widget = item.widget()
+            if widget is not None and widget.layout() is not None:
+                candidate = widget.layout()
+                if candidate.indexOf(old_switch) >= 0:
+                    parent_layout = candidate
+                    item_index = index
+                    break
+        if parent_layout is None:
+            return
+
+        checked = old_switch.isChecked()
+        parent_layout.removeWidget(old_switch)
+        old_switch.setParent(None)
+        old_switch.deleteLater()
+
+        compact_switch = MonthCompactSwitch(self.content_widget)
+        compact_switch.setChecked(checked)
+        compact_switch.toggled.connect(callback)
+
+        switch_index = parent_layout.count()
+        parent_layout.insertWidget(
+            switch_index,
+            compact_switch,
+            0,
+            Qt.AlignmentFlag.AlignVCenter,
+        )
+        if old_switch is self.switch_prev_day:
+            self.switch_prev_day = compact_switch
+        elif old_switch is self.switch_alarm:
+            self.switch_alarm = compact_switch
+
+        if item_index >= 0:
+            item = self.content.itemAt(item_index)
+            widget = item.widget()
+            if widget is not None:
+                widget.setFixedWidth(row_width)
+
+    def _compact_scroller(self, scroller):
+        scroller.item_height = 20
+        scroller.setFixedSize(34, 60)
+        scroller.setStyleSheet("""
+            QListWidget { background: transparent; outline: none; }
+            QListWidget::item {
+                height: 20px;
+                color: rgba(255, 255, 255, 0.4);
+                font-size: 9px;
+                font-family: 'Microsoft YaHei';
+                border: none;
+            }
+            QListWidget::item:selected {
+                background: transparent;
+                color: #FFFFFF;
+                font-size: 11px;
+                font-weight: bold;
+            }
+        """)
+
+    def _get_btn_style(self):
+        return """
+            QPushButton {
+                background-color: rgba(255, 255, 255, 0.15);
+                border-radius: 4px;
+                color: white;
+                border: 1px solid rgba(255,255,255,0.2);
+                font-size: 8px;
+            }
+            QPushButton:hover { background-color: rgba(255, 255, 255, 0.3); }
+        """
+
+    def set_title(self, text="设置提醒"):
+        compact_text = "修改提醒" if text.startswith("修改") else "设置提醒"
         self.lbl_title.setText(compact_text)
         self.lbl_title.setStyleSheet(
             "color: white; font-size: 12px; font-weight: bold; "
@@ -1205,9 +1447,10 @@ class MonthWindow(FramelessMainWindow):
         self.page_time.confirm_requested.connect(self.on_time_confirmed)
         bottom_tools_vbox.addWidget(self.page_time)
 
-        self.page_alarm = AlarmPickerView(self)
+        self.page_alarm = MonthAlarmPickerView(self)
         self.page_alarm.hide()
         self.page_alarm.set_title("设置提醒")
+        self.page_alarm.setFixedHeight(self.inline_add_view.sizeHint().height())
         if hasattr(self.page_alarm, "btn_suspend"):
             self.page_alarm.btn_suspend.hide()
         if hasattr(self.page_alarm, "btn_close"):

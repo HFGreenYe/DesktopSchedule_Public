@@ -83,21 +83,21 @@ class TimePickerView(QWidget):
         self.btn_date.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_date.setFixedHeight(45)
         # 在这里设置日历 SVG 图标
-        self.btn_date.setIcon(QIcon("assets/icons/calendar.svg"))
+        self.btn_date.setIcon(self._get_colored_icon("assets/icons/calendar.svg", "#FFFFFF"))
         self.btn_date.setIconSize(QSize(20, 20))
         self.btn_date.setStyleSheet("""
             QPushButton {
-                background-color: rgba(255, 255, 255, 0.9);
-                border: none;
+                background-color: rgba(255, 255, 255, 0.18);
+                border: 1px solid rgba(255, 255, 255, 0.2);
                 border-radius: 8px;
-                color: #333;
+                color: white;
                 font-size: 16px;
                 font-weight: bold;
                 font-family: 'Microsoft YaHei';
                 text-align: left;
                 padding-left: 15px;
             }
-            QPushButton:hover { background-color: #ffffff; }
+            QPushButton:hover { background-color: rgba(255, 255, 255, 0.28); }
         """)
         self.content_layout.addWidget(self.btn_date)
 

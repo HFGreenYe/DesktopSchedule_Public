@@ -636,3 +636,91 @@
 - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src/ui/month_window.py main.py`：通过。
 - offscreen 构造与按钮行为检查：`MonthListPickerView` 可构造；`btn_close.isVisible()` 为 `True`；按钮尺寸为 `24x24`，图标尺寸为 `12x12`；标题栏右侧 margin 为 `30px`；点击 `btn_close` 后收到一次 `back_requested`。
 - diff 范围检查：当前工作区仍包含开工前已有的 `manage_instruction/Final_Formulation.md`、`src/ui/dashboard.py`、`src/ui/main_window.py`、`src/ui/schedule_detail_pop.py`、`src/ui/todo.py`、`src/ui/todo_board.py`、`src/ui/week_window.py`、`src/utils/win_api.py` 未提交改动；本轮实际修改仍集中在 `src/ui/month_window.py` 与 `manage_instruction/Work_Log.md`。
+
+---
+
+## 2026-06-23 月界面提醒选择页紧凑化
+
+任务来源：
+
+- 用户要求月界面添加功能的“设置提醒”页面按前面“设置时间”页面作为样板调整。
+- 重点要求：标题文字大小与位置对齐“设置时间”；底部“取消/确定”按钮大小和位置对齐“设置时间”；提醒时间选择框外型参考设置时间页里的时间选择框。
+- 明确不影响日界面、周界面或共享提醒选择页。
+
+开工前状态：
+
+- `git status --short --branch` 显示当前分支 `main...temp/main [ahead 98]`。
+- 开工前工作区干净；本轮新增 `src/ui/month_window.py` 与 `manage_instruction/Work_Log.md` 改动。
+
+实际修改：
+
+- `src/ui/month_window.py`
+  - 新增月界面专用 `MonthAlarmPickerView(AlarmPickerView)`，保留共享 `AlarmPickerView` 不变。
+  - 月界面 `self.page_alarm` 从共享 `AlarmPickerView` 切换为 `MonthAlarmPickerView`。
+  - 标题栏压缩到 `28px` 高度，标题文本按 `12px` 白色粗体显示“设置提醒/修改提醒”，右上关闭按钮保留 `24x24`、`12x12` 图标尺寸。
+  - 提醒时间滚轮容器调整为 `136x80`，背景、圆角和滚轮字体参考月界面设置时间页的紧凑视觉。
+  - 将“设置为前一天”和“强提醒”开关替换为月界面专用 `MonthCompactSwitch`，尺寸为 `19x12`，不修改共享 `IOSSwitch`。
+  - 快捷提醒按钮与强提醒时长按钮统一压缩为 `20px` 高，使用更小圆角和字体。
+  - 底部“取消/确定”按钮统一为 `24px` 高、横向均分，样式与月界面设置时间页一致。
+  - 不修改日界面、周界面提醒选择器，也不修改提醒保存逻辑。
+
+验证记录：
+
+- `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src/ui/month_window.py main.py`：通过。
+- offscreen 构造检查：`MonthAlarmPickerView` 可构造；标题文本断言为“设置提醒”；提醒时间容器为 `136x80`；取消/确定按钮高度均为 `24px`；两个紧凑开关均为 `19x12`；快捷按钮高度集合为 `[20]`。
+- `MonthWindow` offscreen 构造检查：`page_alarm` 实际实例为 `MonthAlarmPickerView`；提醒时间容器宽度为 `136px`；确定按钮高度为 `24px`。
+
+---
+
+## 2026-06-23 月界面三个添加子页右上关闭键统一
+
+任务来源：
+
+- 用户反馈月界面添加功能中的设置时间、设置提醒、设置清单三个子页右上角 `X` 大小和位置不一致。
+- 用户要求以设置清单页的 `X` 大小和位置为基准统一。
+
+开工前状态：
+
+- `git status --short --branch` 显示当前分支 `main...temp/main [ahead 98]`。
+- 开工前已有上一小步未提交改动：`src/ui/month_window.py` 与 `manage_instruction/Work_Log.md`。
+- 本轮继续在同两个文件上做窄范围补充。
+
+实际修改：
+
+- `src/ui/month_window.py`
+  - 在月界面专用 `MonthTimePickerView` 中补齐关闭键配置：显示 `btn_close`、按钮尺寸 `24x24`、图标尺寸 `12x12`，并 `raise_()` 到上层。
+  - 在月界面专用 `MonthAlarmPickerView` 中补齐 `btn_close.show()` 与 `raise_()`。
+  - 保持 `MonthListPickerView` 作为基准不变。
+  - 三个子页继续共用 `28px` 标题栏高度和右侧 `30px` 留白。
+  - 不修改日界面、周界面或共享 picker 类。
+
+验证记录：
+
+- `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src/ui/month_window.py main.py`：通过。
+- offscreen 构造对比：`MonthListPickerView`、`MonthTimePickerView`、`MonthAlarmPickerView` 的关闭键均为 `24x24`，图标均为 `12x12`，在 `200px` 宽测试窗口中位置均为 `(170, 0)`，且均可见。
+
+---
+
+## 2026-06-23 calendar 图标小写路径与时间选择按钮配色
+
+任务来源：
+
+- 用户确认下载的新日历图标文件名为小写 `calendar.svg`，要求项目引用也统一使用小写路径。
+- 用户要求月界面添加功能的设置时间页日期按钮内的 `calendar.svg` 图标显示为白色。
+- 用户要求主界面/共享时间选择页的日期按钮颜色与月界面设置时间页一致，包括背景框、文字和图标颜色。
+
+实际修改：
+
+- `assets/icons/Calendar.svg` 通过 Git 大小写改名记录为 `assets/icons/calendar.svg`，并保留用户替换后的新图标内容。
+- `src/ui/common/action_context_menu.py`
+  - 将右键菜单日视图/月视图 fallback 图标路径从 `Calendar.svg` 改为 `calendar.svg`。
+- `src/ui/time_picker.py`
+  - 将日期按钮图标改为运行时白色染色的 `calendar.svg`。
+  - 将日期按钮背景改为 `rgba(255, 255, 255, 0.18)`、边框改为 `rgba(255, 255, 255, 0.2)`、文字改为白色，hover 改为 `rgba(255, 255, 255, 0.28)`。
+- `src/ui/month_window.py`
+  - 月界面专用 `MonthTimePickerView` 中显式将日期按钮图标染为白色，避免新 `calendar.svg` 默认黑色直接显示。
+
+说明：
+
+- 物理文件已是小写 `calendar.svg`；Windows 下 Git 对大小写改名会以 `D assets/icons/Calendar.svg` 与 `A assets/icons/calendar.svg` 显示，提交后仓库路径即统一为小写。
+- 图标本体不强行写死白色，按钮使用时运行时染色，便于后续继续替换图标或接入换肤。
