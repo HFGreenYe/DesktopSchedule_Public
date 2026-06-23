@@ -54,11 +54,19 @@ class MonthListPickerView(ListPickerView):
 
     def _apply_compact_layout(self):
         self.header_container.setFixedHeight(28)
-        self.header_container.layout().setContentsMargins(4, 0, 0, 0)
+        self.header_container.layout().setContentsMargins(4, 0, 30, 0)
         self.set_title(self.lbl_title.text())
 
         self.btn_suspend.hide()
-        self.btn_close.hide()
+        self.btn_close.show()
+        self.btn_close.setIconSize(QSize(12, 12))
+        self.btn_close.setFixedSize(24, 24)
+        try:
+            self.btn_close.clicked.disconnect()
+        except TypeError:
+            pass
+        self.btn_close.clicked.connect(self.back_requested.emit)
+        self.btn_close.raise_()
 
         self.content_layout.setContentsMargins(0, 4, 0, 4)
         self.content_layout.setSpacing(6)
@@ -144,9 +152,9 @@ class MonthCompactSwitch(IOSSwitch):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedSize(38, 24)
-        self._thumb_diameter = 18
-        self._thumb_inset = 3
+        self.setFixedSize(19, 12)
+        self._thumb_diameter = 9.0
+        self._thumb_inset = 1.5
         self.setChecked(self.isChecked())
 
     def _checked_thumb_x(self):
@@ -177,15 +185,17 @@ class MonthCompactSwitch(IOSSwitch):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         path = QPainterPath()
-        path.addRoundedRect(QRectF(self.rect()), 12, 12)
+        path.addRoundedRect(QRectF(self.rect()), 6, 6)
         painter.fillPath(path, QColor("#0cc0df" if self._checked else "#e0e0e0"))
         painter.setBrush(Qt.GlobalColor.white)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawEllipse(
-            int(self._thumb_x),
-            self._thumb_inset,
-            self._thumb_diameter,
-            self._thumb_diameter,
+            QRectF(
+                self._thumb_x,
+                self._thumb_inset,
+                self._thumb_diameter,
+                self._thumb_diameter,
+            )
         )
 
 
@@ -334,29 +344,49 @@ class MonthTimePickerView(TimePickerView):
     def _replace_enable_switch(self):
         old_switch = self.chk_enable_start
         switch_layout = None
+        switch_item_index = -1
         for index in range(self.content_layout.count()):
             candidate = self.content_layout.itemAt(index).layout()
             if candidate is not None and candidate.indexOf(old_switch) >= 0:
                 switch_layout = candidate
+                switch_item_index = index
                 break
         if switch_layout is None:
             return
 
-        switch_index = switch_layout.indexOf(old_switch)
+        label = None
+        for index in range(switch_layout.count()):
+            widget = switch_layout.itemAt(index).widget()
+            if isinstance(widget, QLabel) and widget.text() == "启用开始时间":
+                label = widget
+                break
+        if label is None:
+            label = QLabel("启用开始时间", self.content_widget)
+
         checked = old_switch.isChecked()
+        switch_layout.removeWidget(label)
         switch_layout.removeWidget(old_switch)
         old_switch.hide()
         old_switch.deleteLater()
 
-        compact_switch = MonthCompactSwitch(self.content_widget)
+        row_widget = QWidget(self.content_widget)
+        row_widget.setFixedWidth(136)
+        row_layout = QHBoxLayout(row_widget)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(4)
+
+        label.setParent(row_widget)
+        row_layout.addWidget(label, 0, Qt.AlignmentFlag.AlignVCenter)
+        row_layout.addStretch()
+
+        compact_switch = MonthCompactSwitch(row_widget)
         compact_switch.setChecked(checked)
         compact_switch.toggled.connect(self._on_switch_toggled)
-        switch_layout.insertWidget(
-            switch_index,
-            compact_switch,
-            0,
-            Qt.AlignmentFlag.AlignVCenter,
-        )
+        row_layout.addWidget(compact_switch, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        if switch_item_index >= 0:
+            self.content_layout.takeAt(switch_item_index)
+            self.content_layout.insertWidget(switch_item_index, row_widget)
         self.chk_enable_start = compact_switch
 
     def _compact_scroller(self, scroller):

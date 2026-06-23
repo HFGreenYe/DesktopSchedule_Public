@@ -579,3 +579,60 @@
 - `git diff --check` 初次发现 `suspend_window_week.py` 文件末尾旧空格因补齐 EOF 换行进入 diff；已只清理该空格行，未格式化其他代码。
 - 清理后 `git diff --check` 通过，仅有 Git 的 LF/CRLF 工作区提示。
 - 最终源码范围：`components.py`、`month_window.py`、`week_window.py`、`suspend_window_month.py`、`suspend_window_week.py`；资源范围新增 `festival.svg`；文档范围为 `Final_Formulation.md` 与 `Work_Log.md`。
+
+---
+
+## 2026-06-23 月界面时间选择启用开始时间开关缩小
+
+任务来源：
+
+- 用户反馈月界面添加功能的设置时间界面中，“启用开始时间”右侧开关仍偏大。
+- 用户要求开关等比例缩到原本约 `1/4` 的视觉面积，右侧仍与日期显示框、日历右沿处于同一垂直线，并且开关与“启用开始时间”文本的几何中心保持同一水平线。
+
+开工前状态：
+
+- `git status --short --branch` 显示当前分支 `main...temp/main [ahead 96]`。
+- 开工前已有非本轮未提交改动：`manage_instruction/Final_Formulation.md`、`src/ui/dashboard.py`、`src/ui/main_window.py`、`src/ui/schedule_detail_pop.py`、`src/ui/todo.py`、`src/ui/todo_board.py`、`src/ui/week_window.py`、`src/utils/win_api.py`。
+- `src/ui/month_window.py` 开工前未显示为 dirty，本轮新增该文件改动。
+
+实际修改：
+
+- `src/ui/month_window.py`
+  - 仅调整月界面专用 `MonthCompactSwitch`，不修改共享 `IOSSwitch`。
+  - 将月界面时间 picker 的开关尺寸由 `38x24` 调整为 `19x12`，按宽高各缩小一半处理，即视觉面积约为原来的 `1/4`。
+  - 将圆角半径同步由 `12` 调整为 `6`。
+  - 将滑块直径由 `18` 调整为 `9`，内边距由 `3` 调整为 `1.5`。
+  - 绘制滑块时改用 `QRectF`，避免小尺寸下整数取整导致圆点偏移。
+  - 将“启用开始时间”整行包进 `136px` 固定宽度容器，使开关右侧与日期显示框、日历右沿保持同一垂直线。
+  - 保持文本、stretch、开关的横向结构，使文本和开关几何中心位于同一水平线。
+  - 不改变日/周时间选择器，也不改变月界面时间选择业务逻辑。
+
+验证记录：
+
+- `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src/ui/month_window.py main.py`：通过。
+- offscreen 构造与开关几何检查：`MonthTimePickerView` 可构造；`MonthCompactSwitch` 尺寸为 `19x12`；滑块直径/内边距为 `9.0 / 1.5`；“启用开始时间”文本中心 `y=199`，开关中心 `y=199`；日期框右沿与开关右沿差值为 `0`；开关行容器宽度为 `136px`。
+- diff 范围检查：当前工作区仍包含开工前已有的 `manage_instruction/Final_Formulation.md`、`src/ui/dashboard.py`、`src/ui/main_window.py`、`src/ui/schedule_detail_pop.py`、`src/ui/todo.py`、`src/ui/todo_board.py`、`src/ui/week_window.py`、`src/utils/win_api.py` 未提交改动；本轮新增 `src/ui/month_window.py` 和 `manage_instruction/Work_Log.md` 改动。
+
+---
+
+## 2026-06-23 月界面清单选择页右上关闭键补回
+
+任务来源：
+
+- 用户确认月界面设置时间页右上角 `X` 虽然最初属于未去除的小插曲，但实际比底部取消键更方便。
+- 用户要求月界面添加功能的设置清单页，在与设置时间页相同位置补回右上角 `X`，底部取消键保留。
+
+实际修改：
+
+- `src/ui/month_window.py`
+  - 仅修改月界面专用 `MonthListPickerView`。
+  - 将此前隐藏的 `btn_close` 重新显示，并设置为 `24x24`、`12x12` 图标尺寸，位置沿用清单页原本的右上角窗口控制布局。
+  - 将标题栏右侧留白改为 `30px`，避免“选择清单/修改清单”标题与右上角关闭键重叠。
+  - 断开 `ListPickerView` 默认的 `window().close()` 行为，改为发出 `back_requested`，使右上角 `X` 与月界面清单页底部“取消”语义一致，只返回添加表单，不关闭月窗口。
+  - 未修改日界面、周界面或共享 `ListPickerView`。
+
+验证记录：
+
+- `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src/ui/month_window.py main.py`：通过。
+- offscreen 构造与按钮行为检查：`MonthListPickerView` 可构造；`btn_close.isVisible()` 为 `True`；按钮尺寸为 `24x24`，图标尺寸为 `12x12`；标题栏右侧 margin 为 `30px`；点击 `btn_close` 后收到一次 `back_requested`。
+- diff 范围检查：当前工作区仍包含开工前已有的 `manage_instruction/Final_Formulation.md`、`src/ui/dashboard.py`、`src/ui/main_window.py`、`src/ui/schedule_detail_pop.py`、`src/ui/todo.py`、`src/ui/todo_board.py`、`src/ui/week_window.py`、`src/utils/win_api.py` 未提交改动；本轮实际修改仍集中在 `src/ui/month_window.py` 与 `manage_instruction/Work_Log.md`。
