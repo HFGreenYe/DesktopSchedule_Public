@@ -244,6 +244,17 @@ class WeekWindow(FramelessMainWindow):
         # 1. 顶部区域整体
         # ==========================================
         self.top_container = QWidget()
+        self.top_container.setObjectName("week_top_surface")
+        self.top_container.setStyleSheet("""
+            QWidget#week_top_surface {
+                background: transparent;
+                border-top: 1px solid rgba(0, 0, 0, 0.1);
+                border-left: 1px solid rgba(0, 0, 0, 0.1);
+                border-right: 1px solid rgba(0, 0, 0, 0.1);
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+            }
+        """)
         self.top_container.setFixedHeight(125) 
         top_layout = QVBoxLayout(self.top_container)
         top_layout.setContentsMargins(0, 0, 0, 0) 
@@ -464,15 +475,15 @@ class WeekWindow(FramelessMainWindow):
         top_layout.addWidget(self.nav_container)
 
         self.btn_prev = QPushButton("〈", self.top_container)
-        self.btn_prev.setFixedSize(20, 36)
+        self.btn_prev.setFixedSize(32, 36)
         self.btn_prev.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_prev.setStyleSheet("QPushButton { color: white; font-size: 14px; font-weight: bold; border: none; background: transparent; } QPushButton:hover{ background: rgba(255,255,255,0.2); border-radius: 4px; }")
+        self.btn_prev.setStyleSheet("QPushButton { color: white; font-size: 14px; font-weight: bold; border: none; background: transparent; text-align: left; padding-left: 6px; } QPushButton:hover{ background: rgba(255,255,255,0.2); border-radius: 4px; }")
         self.btn_prev.clicked.connect(self._go_prev_week)
 
         self.btn_next = QPushButton("〉", self.top_container)
-        self.btn_next.setFixedSize(20, 36)
+        self.btn_next.setFixedSize(32, 36)
         self.btn_next.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_next.setStyleSheet("QPushButton { color: white; font-size: 14px; font-weight: bold; border: none; background: transparent; } QPushButton:hover{ background: rgba(255,255,255,0.2); border-radius: 4px; }")
+        self.btn_next.setStyleSheet("QPushButton { color: white; font-size: 14px; font-weight: bold; border: none; background: transparent; text-align: right; padding-right: 6px; } QPushButton:hover{ background: rgba(255,255,255,0.2); border-radius: 4px; }")
         self.btn_next.clicked.connect(self._go_next_week)
 
         main_layout.addWidget(self.top_container)
@@ -482,8 +493,18 @@ class WeekWindow(FramelessMainWindow):
         # 2. 底部区域 
         # ==========================================
         self.content_area = QWidget()
+        self.content_area.setObjectName("week_content_surface")
         # 初始为纯白背景
-        self.content_area.setStyleSheet("background-color: #FFFFFF; border-bottom-left-radius: 8px; border-bottom-right-radius: 8px;")
+        self.content_area.setStyleSheet("""
+            QWidget#week_content_surface {
+                background-color: #FFFFFF;
+                border-left: 1px solid rgba(0, 0, 0, 0.1);
+                border-right: 1px solid rgba(0, 0, 0, 0.1);
+                border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+                border-bottom-left-radius: 8px;
+                border-bottom-right-radius: 8px;
+            }
+        """)
         
         content_layout = QVBoxLayout(self.content_area)
         content_layout.setContentsMargins(0, 0, 0, 0)
@@ -550,6 +571,8 @@ class WeekWindow(FramelessMainWindow):
         self.page_time = TimePickerViewWeek()
         self.page_alarm = AlarmPickerViewWeek()
         self.page_list = ListPickerView()
+        self.page_list.btn_suspend.hide()
+        self.page_list.btn_close.hide()
         
         self.body_stack.addWidget(self.page_add)
         self.body_stack.addWidget(self.page_time)
@@ -596,9 +619,27 @@ class WeekWindow(FramelessMainWindow):
         """动态切换下半部分盒子的颜色，并命令窗口重绘自己"""
         self.is_edit_mode = is_edit
         if is_edit:
-            self.content_area.setStyleSheet("background-color: transparent;")
+            self.content_area.setStyleSheet("""
+                QWidget#week_content_surface {
+                    background-color: transparent;
+                    border-left: 1px solid rgba(0, 0, 0, 0.1);
+                    border-right: 1px solid rgba(0, 0, 0, 0.1);
+                    border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+                    border-bottom-left-radius: 8px;
+                    border-bottom-right-radius: 8px;
+                }
+            """)
         else:
-            self.content_area.setStyleSheet("background-color: #FFFFFF; border-bottom-left-radius: 8px; border-bottom-right-radius: 8px;")
+            self.content_area.setStyleSheet("""
+                QWidget#week_content_surface {
+                    background-color: #FFFFFF;
+                    border-left: 1px solid rgba(0, 0, 0, 0.1);
+                    border-right: 1px solid rgba(0, 0, 0, 0.1);
+                    border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+                    border-bottom-left-radius: 8px;
+                    border-bottom-right-radius: 8px;
+                }
+            """)
         
         self.update() # 实现 paintEvent 重绘
 
@@ -852,7 +893,7 @@ class WeekWindow(FramelessMainWindow):
         if hasattr(self, 'btn_prev') and hasattr(self, 'btn_next'):
             btn_y = self.top_container.height() - 40 
             self.btn_prev.move(4, btn_y) 
-            self.btn_next.move(self.width() - 24, btn_y) 
+            self.btn_next.move(self.width() - 36, btn_y)
 
     # --- 后续的逻辑处理代码保持不变 ---
     def _start_clock(self):

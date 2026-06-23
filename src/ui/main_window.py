@@ -1,7 +1,7 @@
 # src/ui/main_window.py
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QStackedWidget
 from PyQt6.QtCore import Qt, QRectF, QTimer, QEvent
-from PyQt6.QtGui import QPainter, QPainterPath, QBrush, QLinearGradient, QColor
+from PyQt6.QtGui import QPainter, QPainterPath, QBrush, QLinearGradient, QColor, QPen
 from qframelesswindow import FramelessMainWindow
 from datetime import datetime, timedelta
 import winsound
@@ -91,6 +91,7 @@ class MainWindow(FramelessMainWindow):
         self.week_window = WeekWindow()
         self.month_window = MonthWindow()
         self.week_window.schedule_updated.connect(self._on_week_schedule_updated)
+        self.month_window.schedule_updated.connect(self._on_week_schedule_updated)
         if hasattr(self.header, 'weather_updated'):
             self.header.weather_updated.connect(self.week_window.update_weather_ui)
             self.header.weather_updated.connect(self.month_window.update_weather_ui)
@@ -296,11 +297,15 @@ class MainWindow(FramelessMainWindow):
 
     def go_to_time_picker_for_edit(self, schedule_data, source_view="dashboard"):
         """模式2：从【详情弹窗】打开时间修改"""
-        # 拦截并移交权限给周视图
-        if source_view == "week":
+        edit_target = self._resolve_detail_edit_target(source_view)
+        if edit_target == "week":
             self.week_window.go_to_time_picker_for_edit(schedule_data)
             return
+        if edit_target == "month":
+            self.month_window.go_to_time_picker_for_edit(schedule_data)
+            return
         self.time_picker_mode = 'edit'
+        self.edit_picker_return_view = edit_target
         self.editing_schedule = schedule_data
         
         # 智能截断标题防止 UI 撑爆
@@ -319,7 +324,7 @@ class MainWindow(FramelessMainWindow):
         if self.time_picker_mode == 'add':
             self.body_stack.setCurrentWidget(self.page_add)
         else:
-            self.body_stack.setCurrentWidget(self.page_dashboard)
+            self._return_from_main_edit_picker()
         self.header.show()
 
     def on_time_confirmed(self, start, end):
@@ -385,10 +390,15 @@ class MainWindow(FramelessMainWindow):
         self.header.hide()
 
     def go_to_alarm_picker_for_edit(self, schedule_data, source_view="dashboard"):
-        if source_view == "week":
+        edit_target = self._resolve_detail_edit_target(source_view)
+        if edit_target == "week":
             self.week_window.go_to_alarm_picker_for_edit(schedule_data)
             return
+        if edit_target == "month":
+            self.month_window.go_to_alarm_picker_for_edit(schedule_data)
+            return
         self.alarm_picker_mode = 'edit'
+        self.edit_picker_return_view = edit_target
         self.editing_schedule = schedule_data
         display_title = schedule_data.title if len(schedule_data.title) <= 8 else schedule_data.title[:7] + "..."
         self.page_alarm.set_title(f"修改【{display_title}】提醒")
@@ -405,7 +415,7 @@ class MainWindow(FramelessMainWindow):
         if self.alarm_picker_mode == 'add':
             self.body_stack.setCurrentWidget(self.page_add)
         else:
-            self.body_stack.setCurrentWidget(self.page_dashboard)
+            self._return_from_main_edit_picker()
         self.header.show()
 
     def on_alarm_confirmed(self, remind_dt, is_alarm, duration):
@@ -442,16 +452,20 @@ class MainWindow(FramelessMainWindow):
         self.header.hide()
 
     def go_to_list_picker_for_edit(self, schedule_data, source_view="dashboard"):
-        if source_view == "week":
+        edit_target = self._resolve_detail_edit_target(source_view)
+        if edit_target == "week":
             self.week_window.go_to_list_picker_for_edit(schedule_data)
             return
-        if source_view == "todo_board":
+        if edit_target == "month":
+            self.month_window.go_to_list_picker_for_edit(schedule_data)
+            return
+        if edit_target == "todo_board":
             if hasattr(self, 'todo_board') and self.todo_board:
                 self.todo_board.go_to_list_picker_for_edit(schedule_data)
             return
         self.list_picker_mode = 'edit'
-        # 记住从哪个界面（日程/待办）点进来的
-        self.list_picker_source = source_view 
+        self.list_picker_source = "todo" if edit_target == "todo" else "dashboard"
+        self.edit_picker_return_view = edit_target
         
         self.editing_schedule = schedule_data
         display_title = schedule_data.title if len(schedule_data.title) <= 8 else schedule_data.title[:7] + "..."
@@ -465,12 +479,30 @@ class MainWindow(FramelessMainWindow):
         if self.list_picker_mode == 'add':
             self.body_stack.setCurrentWidget(self.page_add)
         else:
-            # 根据记录的来源动态返回
-            if getattr(self, 'list_picker_source', 'dashboard') == 'todo':
-                self.body_stack.setCurrentWidget(self.page_todo)
-            else:
-                self.body_stack.setCurrentWidget(self.page_dashboard)
+            self._return_from_main_edit_picker()
         self.header.show()
+
+    def _resolve_detail_edit_target(self, source_view="dashboard"):
+        """按当前可见视图决定详情弹窗的编辑承接窗口。"""
+        if self.week_window.isVisible():
+            return "week"
+        if self.month_window.isVisible():
+            return "month"
+        if source_view == "todo_board":
+            board = getattr(self, "todo_board", None)
+            if board is not None and board.isVisible():
+                return "todo_board"
+        if self.body_stack.currentWidget() == self.page_todo:
+            return "todo"
+        if self.isVisible():
+            return "day"
+        return source_view if source_view in {"week", "month", "todo", "todo_board"} else "day"
+
+    def _return_from_main_edit_picker(self):
+        if getattr(self, "edit_picker_return_view", "day") == "todo":
+            self.body_stack.setCurrentWidget(self.page_todo)
+        else:
+            self.body_stack.setCurrentWidget(self.page_dashboard)
 
     def on_list_confirmed(self, category_id):
         if self.list_picker_mode == 'add':
@@ -655,6 +687,13 @@ class MainWindow(FramelessMainWindow):
         else:
             self.show_toast(f"准备切换至：{view_name}")
 
+        if route_action in {"day", "week", "month", "todo"}:
+            QTimer.singleShot(0, self._restore_detail_popups)
+
+    def _restore_detail_popups(self):
+        self.page_dashboard.restore_detail_popups()
+        self.page_todo.restore_detail_popups()
+
     def _sync_view_selector_state(self, view_name):
         if view_name not in {"day", "week", "month", "todo"}:
             return
@@ -718,6 +757,9 @@ class MainWindow(FramelessMainWindow):
         gradient.setColorAt(0.0, QColor(AppConfig.COLOR_GRADIENT_START))
         gradient.setColorAt(1.0, QColor(AppConfig.COLOR_GRADIENT_END))
         painter.fillPath(path, QBrush(gradient))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor(0, 0, 0, 26), 1))
+        painter.drawPath(path)
 
     def switch_week_to_suspend(self):
         """周视图 -> 宽版挂起条"""

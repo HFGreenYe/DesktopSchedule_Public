@@ -469,21 +469,33 @@ class TodoView(QWidget):
 
     def _show_detail_popup(self, schedule_data, source_view="todo"):
         for p in self.open_popups:
-            if p.data.id == schedule_data.id and p.isVisible():
+            if p.data.id == schedule_data.id:
+                p.show()
+                p.raise_()
                 p.activateWindow()
                 return
-                
-        self.open_popups = [p for p in self.open_popups if p.isVisible()]
         
         pop = ScheduleDetailPop(schedule_data, source_view=source_view)
         pop.schedule_updated.connect(self.refresh_data)
         pop.schedule_updated.connect(self.req_refresh_all.emit) 
         pop.req_edit_list.connect(lambda data, sv=source_view: self.req_edit_list.emit(data, sv))
+        pop.popup_closed.connect(self._remove_detail_popup)
         self.open_popups.append(pop)
         
         pos = self.mapToGlobal(QPoint(self.width() + 10, 0))
         pop.move(pos)
         pop.show()
+
+    def _remove_detail_popup(self, popup):
+        self.open_popups = [p for p in self.open_popups if p is not popup]
+
+    def restore_detail_popups(self):
+        for popup in tuple(self.open_popups):
+            popup_pos = popup.pos()
+            popup.hide()
+            popup.show()
+            popup.move(popup_pos)
+            popup.raise_()
 
     def _remove_card_from_view(self, schedule_id):
         sender_card = self.sender()

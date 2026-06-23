@@ -96,6 +96,7 @@ class ScheduleDetailPop(QWidget):
     req_edit_time = pyqtSignal(object)
     req_edit_alarm = pyqtSignal(object) 
     req_edit_list = pyqtSignal(object)  
+    popup_closed = pyqtSignal(object)
 
     def __init__(self, schedule_data, source_view="dashboard", parent=None):
         super().__init__(parent)
@@ -113,11 +114,11 @@ class ScheduleDetailPop(QWidget):
         self.c_icon_pin = QColor(255, 255, 255, 255)
         self.c_icon_pin_off = QColor(255, 255, 255, 150)
 
-        if self.source_view in ["week", "month"]:
-            self.c_desc_bg = "#FFFFFF"         # 周视图：详情框纯白
-            self.c_desc_border = "#FFFFFF"     # 周视图：无感边框
+        if self.source_view == "week":
+            self.c_desc_bg = "#FFFFFF"
+            self.c_desc_border = "#FFFFFF"
         else:
-            self.c_desc_bg = "#11c1df"         # 主界面：原本的蓝绿框
+            self.c_desc_bg = "#11c1df"
             self.c_desc_border = "rgba(255, 255, 255, 0.6)"
 
         self.setFixedWidth(320)
@@ -130,12 +131,9 @@ class ScheduleDetailPop(QWidget):
 
     def _get_desc_color(self, has_text):
         """动态获取详情框里文字的颜色"""
-        if self.source_view in ["week", "month"]:
-            # 周视图：白底详情框里，有字显示青色！没字(占位符)显示灰字
-            return "#666666" if has_text else "#999999" 
-        else:
-            # 主界面：深底详情框里，保持白色文字
-            return "rgba(255, 255, 255, 0.9)" if has_text else "rgba(255, 255, 255, 0.6)"
+        if self.source_view == "week":
+            return "#666666" if has_text else "#999999"
+        return "rgba(255, 255, 255, 0.9)" if has_text else "rgba(255, 255, 255, 0.6)"
 
     def _get_icon(self, icon_name, color, target_size=16):
         path = f"assets/icons/{icon_name}"
@@ -733,6 +731,10 @@ class ScheduleDetailPop(QWidget):
             
         self.show()
         apply_24h2_border_fix(int(self.winId()))
+
+    def closeEvent(self, event):
+        self.popup_closed.emit(self)
+        super().closeEvent(event)
 
     def paintEvent(self, event):
         painter = QPainter(self)

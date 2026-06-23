@@ -3,7 +3,7 @@ import os
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, 
                              QLabel, QFrame, QPushButton, QScrollArea, QGridLayout, QStackedWidget,QLineEdit, QTextEdit, QMenu, QSizePolicy)
 from PyQt6.QtCore import Qt, QRect, QRectF, QTimer, pyqtSignal, QPoint, QMimeData
-from PyQt6.QtGui import QAction, QIcon, QPainter, QPainterPath, QBrush, QLinearGradient, QColor, QPixmap, QImage, QDrag, QFontMetrics
+from PyQt6.QtGui import QAction, QIcon, QPainter, QPainterPath, QBrush, QLinearGradient, QColor, QPixmap, QImage, QDrag, QFontMetrics, QPen
 from PyQt6.QtSvg import QSvgRenderer
 
 from ..config import AppConfig
@@ -1870,6 +1870,9 @@ class TodoBoardWindow(QWidget):
         gradient.setColorAt(1.0, QColor(AppConfig.COLOR_GRADIENT_END))
         
         painter.fillPath(path, QBrush(gradient))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor(0, 0, 0, 26), 1))
+        painter.drawPath(path)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
