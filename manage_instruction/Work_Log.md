@@ -1418,3 +1418,152 @@ diff 范围检查结果：
 - `register_child_detail_popup(...)` 对真实 `ScheduleDetailPop` 依赖 `popup_closed` 做关闭后移除；对普通 `QWidget` 只能依赖 `close()` 后的显式列表清空或销毁信号兜底，因此 offscreen 假对象只验证到“关闭不报错 + 列表清理”。
 - 复用验证若使用合成 schedule 对象，`created_at` 必须使用可 `strftime(...)` 的 `datetime` 值；`created_at=None` 是测试数据不严谨，不代表 MP-2 主链路失败。
 - `month_window.py` 本身已有大量 `db_manager` 依赖；本轮新增逻辑未扩大这部分耦合，但静态依赖命令会命中既有代码，需要在复核时按“既有依赖”理解，而不是本轮新增问题。
+
+---
+
+## 2026-06-25 MP-3：月日程弹窗生命周期与跨视图保留规则
+
+任务来源：
+
+- 按 `manage_instruction/Work_Task_Prompts.md` 当前待执行提示词执行 `MP-3`。
+- 本轮只处理月日程持久 panel 及其子详情弹窗的生命周期规则，不改编辑路由，不改详情内容，不改保存刷新策略。
+
+开工前 git 状态：
+
+- `git status --short --branch`：`## main...temp/main [ahead 104]`
+- `git diff --name-only`：`manage_instruction/Work_Task_Prompts.md`
+- 开工前已有 diff：`manage_instruction/Work_Task_Prompts.md`
+- 结论：当前看不到 MP-2 未提交源码 diff；本轮按“MP-2 已提交，仅 `Work_Task_Prompts.md` 存在开工前既有管理文档 diff”处理。
+
+实际修改文件：
+
+- `src/ui/month_window.py`
+- `manage_instruction/Work_Log.md`
+
+基线确认：
+
+- 本轮只执行 `MP-3`，不执行 `MP-4 / MP-5`。
+- `MonthWindow.hideEvent(...)` 基线中仍调用 `close_day_panels()`。
+- `MonthWindow.closeEvent(...)` 基线中仍调用 `close_day_panels()`。
+- `MonthWindow.close_day_panels()` 仍负责显式关闭全部 panel。
+- `MonthDayPanel.closeEvent(...)` 基线中仍调用 `_close_child_detail_popups()`，可在 panel 手动关闭时关闭子详情。
+- `MonthDayPanel.register_child_detail_popup(...)` 仍存在。
+- 显式调用 `close_day_panels()` 的路径包括：
+  - `_on_calendar_date_activated(...)`
+  - `_handle_context_view('day')`
+  - `go_to_time_picker(...)`
+  - `go_to_alarm_picker(...)`
+  - `go_to_list_picker(...)`
+  - `_show_edit_picker(...)`
+
+MonthWindow.hideEvent(...) 调整说明：
+
+- 本轮唯一源码行为改动：
+  - `MonthWindow.hideEvent(...)` 不再调用 `self.close_day_panels()`。
+  - 保留 `self._hide_hover_preview()`。
+  - 保留 `super().hideEvent(event)`。
+- 目标：仅修正“普通 `hide()` 被 `MainWindow.switch_view(...)` 触发时误清理 panel”的问题。
+
+MonthWindow.closeEvent(...) / close_day_panels(...) 保持说明：
+
+- `MonthWindow.closeEvent(...)` 仍调用 `close_day_panels()`。
+- `close_day_panels()` 方法仍存在，仍负责显式关闭全部 panel。
+- 本轮未改变以下显式清理路径：
+  - 双击月格跳日 `_on_calendar_date_activated(...)`
+  - 右键菜单跳日 `_handle_context_view('day')`
+  - 进入月界面 picker：`go_to_time_picker(...)` / `go_to_alarm_picker(...)` / `go_to_list_picker(...)`
+  - 进入月界面 edit picker：`_show_edit_picker(...)`
+- 结论：本轮只修正普通 `hide()` 误清理，不扩大到显式清理路径。
+
+panel / 子详情弹窗生命周期结论：
+
+- panel 手动关闭：仍关闭它登记的子详情弹窗。
+- 子详情弹窗手动关闭：不关闭父 panel。
+- 子详情弹窗手动关闭后：仍会从父 panel 的 `child_detail_popups` 中移除。
+- `MonthDayPanel` 本轮无需修改；既有生命周期实现已满足 MP-3 的 panel-child 关系要求。
+
+验证命令与结果：
+
+- 静态定位：
+  - `rg -n "def hideEvent|def closeEvent|close_day_panels|_on_calendar_date_activated|_handle_context_view|go_to_time_picker|go_to_alarm_picker|go_to_list_picker|_show_edit_picker" src/ui/month_window.py`
+  - `rg -n "register_child_detail_popup|child_detail_popups|_close_child_detail_popups|closeEvent|popup_closed|schedule_double_clicked" src/ui/popups/month_day_panel.py`
+  - `rg -n "popup_closed|closeEvent" src/ui/schedule_detail_pop.py`
+  - 结果：
+    - `hideEvent(...)` 已不再调用 `close_day_panels()`。
+    - `closeEvent(...)` 仍调用 `close_day_panels()`。
+    - 显式调用 `close_day_panels()` 的路径仍可定位。
+    - `MonthDayPanel.closeEvent(...)` 仍关闭子详情弹窗。
+    - `MonthDayPanel.register_child_detail_popup(...)` 仍存在。
+- import 验证：
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.ui.month_window import MonthWindow; from src.ui.popups.month_day_panel import MonthDayPanel; from src.ui.schedule_detail_pop import ScheduleDetailPop; print('mp3 imports ok', MonthWindow, MonthDayPanel, ScheduleDetailPop)"`
+  - 结果：通过。
+- 普通 hide 不清理 panel 验证：
+  - `MonthWindow.show()` 后 `_open_day_panel(q)`，随后 `w.hide()`。
+  - 结果：通过，`panel count after hide 1`。
+- closeEvent 仍清理 panel 验证：
+  - `_open_day_panel(q)` 后 `w.close()`。
+  - 结果：通过，`panel count after close 0`。
+- 显式 `close_day_panels()` 仍清理验证：
+  - `_open_day_panel(q)` 后调用 `w.close_day_panels()`。
+  - 结果：通过，`panel count after explicit close 0`。
+- panel 手动关闭仍关闭子详情验证：
+  - 使用假 `QWidget` child popup。
+  - `p.register_child_detail_popup(child)` 后 `p.close()`。
+  - 结果：通过，`child count after panel close 0`。
+- 子详情手动关闭不关闭父 panel 验证：
+  - 原提示词给出的单行 `python -c` 内联 `class` 写法在 Windows shell 下出现 `SyntaxError`，属于命令转义问题，不是代码问题。
+  - 之后改用 `exec(...)` 方式在同一 `python -c` 中定义 `FakeDetailPopup` 复跑。
+  - 结果：通过，输出：
+    - `panel visible True`
+    - `child count 0`
+  - 另有 `DeprecationWarning: sipPyTypeDict()`，不影响本轮逻辑验收。
+- 双击跳日显式清理保持验证：
+  - `_open_day_panel(q)` 后调用 `_on_calendar_date_activated(q)`。
+  - 结果：通过，`panel count after activated 0`，`date hits 1`。
+- 进入月界面 picker 显式清理保持验证：
+  - `_open_day_panel(q)` 后调用 `go_to_time_picker(start, end)`。
+  - 结果：通过，`panel count after picker 0`。
+- `py_compile`：
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src/ui/month_window.py src/ui/popups/month_day_panel.py src/ui/schedule_detail_pop.py main.py`
+  - 结果：通过。
+
+diff 范围检查结果：
+
+- `git diff --name-only -- src/ui/main_window.py`：无输出。
+- `git diff --name-only -- src/ui/dashboard.py`：无输出。
+- `git diff --name-only -- src/ui/week_window.py`：无输出。
+- `git diff --name-only -- src/ui/todo.py`：无输出。
+- `git diff --name-only -- src/ui/todo_board.py`：无输出。
+- `git diff --name-only -- src/controllers`：无输出。
+- `git diff --name-only -- src/data`：无输出。
+- `git diff --name-only -- src/repositories`：无输出。
+- `git diff --name-only -- src/services`：无输出。
+- `git diff --name-only -- src/theme`：无输出。
+- `git diff --name-only -- src/utils/signals.py`：无输出。
+- `git diff --name-only -- src/utils/styles.py`：无输出。
+- `git diff --name-only -- assets`：无输出。
+- `git diff --name-only -- main.py`：无输出。
+- `git diff --name-only -- requirements.txt`：无输出。
+- `git diff --name-only -- schedule.db`：无输出。
+- `git diff --check`：通过，仅有 Git 的 LF/CRLF 工作区提示，无 whitespace error。
+- `git diff --name-only`：
+  - `manage_instruction/Work_Task_Prompts.md`（开工前既有）
+  - `src/ui/month_window.py`
+  - `manage_instruction/Work_Log.md`
+- `git status --short --branch`：
+  - `## main...temp/main [ahead 104]`
+  - `M manage_instruction/Work_Task_Prompts.md`
+  - `M src/ui/month_window.py`
+  - `M manage_instruction/Work_Log.md`
+
+未完成事项：
+
+- 本轮未处理详情编辑路由；继续留给 `MP-4`。
+- 本轮未处理保存后多视图刷新策略；继续留给 `MP-5`。
+- 本轮未改变双击跳日/右键跳日/进入 picker 时的显式清理产品规则。
+
+风险或疑点：
+
+- 目前“普通视图切换保留 panel”与“显式跳日 / picker 清理 panel”已经在代码路径上区分开：前者依赖 `hideEvent(...)`，后者依赖显式 `close_day_panels()`；本轮未发现需要暂停的规则冲突。
+- 子详情手动关闭验证在 Windows 单行 `python -c` 下需要绕开 shell 对内联 `class` 的限制；复核时应按“验证方式调整”理解，而不是代码缺陷。
+- `manage_instruction/Work_Task_Prompts.md` 仍为开工前既有 diff，不属于 MP-3 本轮新增修改。

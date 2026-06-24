@@ -1895,7 +1895,6 @@ class MonthWindow(FramelessMainWindow):
         self._refresh_schedule_marker_cache()
 
     def hideEvent(self, event):
-        self.close_day_panels()
         self._hide_hover_preview()
         super().hideEvent(event)
 
