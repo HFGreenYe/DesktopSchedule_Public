@@ -11,14 +11,31 @@ from PyQt6.QtCore import Qt, QRectF, pyqtSignal
 from PyQt6.QtGui import QBrush, QColor, QLinearGradient, QPainter, QPen
 
 
+class _MonthScheduleItemFrame(QFrame):
+    double_clicked = pyqtSignal(object)
+
+    def __init__(self, schedule, parent=None):
+        super().__init__(parent)
+        self.schedule = schedule
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.double_clicked.emit(self.schedule)
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+
 class MonthDayPanel(QWidget):
     closed = pyqtSignal(object)
+    schedule_double_clicked = pyqtSignal(object, object)
 
     def __init__(self, qdate, schedules, parent=None):
         super().__init__(parent, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint)
         self.panel_date = qdate
         self._closed_emitted = False
         self._drag_offset = None
+        self.child_detail_popups = []
 
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
@@ -176,7 +193,7 @@ class MonthDayPanel(QWidget):
                 widget.deleteLater()
 
     def _build_schedule_item(self, schedule):
-        item_frame = QFrame()
+        item_frame = _MonthScheduleItemFrame(schedule)
         item_frame.setObjectName("monthDayPanelItem")
         item_frame.setFixedHeight(30)
         item_frame.setStyleSheet(
@@ -222,7 +239,11 @@ class MonthDayPanel(QWidget):
         )
         layout.addWidget(meta_label)
 
+        item_frame.double_clicked.connect(self._emit_schedule_double_clicked)
         return item_frame
+
+    def _emit_schedule_double_clicked(self, schedule):
+        self.schedule_double_clicked.emit(schedule, self)
 
     def _format_time_text(self, schedule):
         start_time = getattr(schedule, "start_time", None)
@@ -243,11 +264,51 @@ class MonthDayPanel(QWidget):
     def _format_status_text(self, schedule):
         return "已完成" if getattr(schedule, "status", 0) == 1 else "未完成"
 
+    def register_child_detail_popup(self, popup):
+        if popup is None:
+            return
+
+        self._prune_child_detail_popups()
+        if popup in self.child_detail_popups:
+            return
+
+        self.child_detail_popups.append(popup)
+
+        if hasattr(popup, "popup_closed"):
+            popup.popup_closed.connect(self._handle_child_popup_closed)
+        popup.destroyed.connect(lambda *_: self._unregister_child_detail_popup(popup))
+
+    def _handle_child_popup_closed(self, popup):
+        self._unregister_child_detail_popup(popup)
+
+    def _unregister_child_detail_popup(self, popup):
+        self.child_detail_popups = [child for child in self.child_detail_popups if child is not popup]
+
+    def _prune_child_detail_popups(self):
+        valid_popups = []
+        for popup in self.child_detail_popups:
+            try:
+                if popup is not None:
+                    valid_popups.append(popup)
+            except RuntimeError:
+                continue
+        self.child_detail_popups = valid_popups
+
     def closeEvent(self, event):
+        self._close_child_detail_popups()
         if not self._closed_emitted:
             self._closed_emitted = True
             self.closed.emit(self)
         super().closeEvent(event)
+
+    def _close_child_detail_popups(self):
+        for popup in list(self.child_detail_popups):
+            try:
+                if popup is not None and hasattr(popup, "close"):
+                    popup.close()
+            except RuntimeError:
+                pass
+        self.child_detail_popups.clear()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:

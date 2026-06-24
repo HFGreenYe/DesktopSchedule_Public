@@ -1198,3 +1198,223 @@ diff 范围检查结果：
 
 - 单行标题在极长文本下会被裁切；这是为紧凑化弹窗刻意保留的取舍。
 - 后续 MP-2 接入双击详情时，需要继续保持 `MonthDayPanel` 只负责展示和轻量信号，不直接承接主窗口路由。
+
+---
+
+## 2026-06-25 MP-2：月日程弹窗日程项双击打开共享详情弹窗
+
+任务来源：
+
+- 按 `manage_instruction/Work_Task_Prompts.md` 当前待执行提示词执行 `MP-2`。
+- 本轮只增加“月日程弹窗内日程项双击请求详情”与“主窗口统一打开共享 `ScheduleDetailPop`”的最小链路。
+- 本轮不改跨视图编辑路由，不改普通视图切换时 panel 保留/关闭规则。
+
+开工前 git 状态：
+
+- `git status --short --branch`：`## main...temp/main [ahead 103]`
+- `git diff --name-only`：`manage_instruction/Work_Task_Prompts.md`
+- 存在开工前 diff：`manage_instruction/Work_Task_Prompts.md`
+- 该 diff 属于开工前既有管理文档改动，不计为本轮源码问题。
+
+实际修改文件：
+
+- `src/ui/popups/month_day_panel.py`
+- `src/ui/month_window.py`
+- `src/ui/main_window.py`
+- `manage_instruction/Work_Log.md`
+
+基线确认：
+
+- 本轮只执行 `MP-2`，不执行 `MP-3 / MP-4 / MP-5`。
+- `MonthDayPanel` 基线为：只负责展示、关闭信号和拖动。
+- `MainWindow` 已存在 `_resolve_detail_edit_target(...)`，本轮未重写。
+- 当前共享详情弹窗仍为 `ScheduleDetailPop`。
+- `DashboardView._show_detail_popup(...)` 仍不返回 popup，本轮未复用它作为月 panel 详情入口。
+
+MonthDayPanel 新增信号/双击入口说明：
+
+- 新增信号：`schedule_double_clicked = pyqtSignal(object, object)`
+  - 第一个参数：schedule 对象。
+  - 第二个参数：当前 `MonthDayPanel` 实例。
+- 新增内部轻量 item 类：`_MonthScheduleItemFrame(QFrame)`。
+  - 每个 item 保存 `self.schedule`。
+  - 左键双击时发出 `double_clicked(schedule)`。
+- `MonthDayPanel` 内新增 `_emit_schedule_double_clicked(schedule)`：
+  - 统一发出 `self.schedule_double_clicked.emit(schedule, self)`。
+- 保持：
+  - `set_panel_data(qdate, schedules)` 对外入口不变。
+  - 列表展示顺序不变。
+  - panel 内不查数据库。
+  - 不导入 `MainWindow` / `db_manager` / Repository / Service。
+
+MonthDayPanel 子详情弹窗生命周期管理说明：
+
+- 新增：`self.child_detail_popups = []`。
+- 新增：`register_child_detail_popup(popup)`。
+  - 只登记由当前 panel 打开的详情弹窗。
+  - 重复登记会被跳过。
+  - 登记前先 `_prune_child_detail_popups()` 清理失效引用。
+- 新增：
+  - `_handle_child_popup_closed(popup)`
+  - `_unregister_child_detail_popup(popup)`
+  - `_prune_child_detail_popups()`
+  - `_close_child_detail_popups()`
+- 生命周期规则：
+  - 若 popup 带 `popup_closed` 信号，则关闭时自动从 `child_detail_popups` 移除。
+  - 同时连接 `destroyed` 做兜底移除。
+  - panel `closeEvent(...)` 中先关闭自己登记的子详情弹窗，再按旧语义只 emit 一次 `closed`。
+- 本轮只保证“panel 手动关闭时关闭其子详情弹窗”。
+- 本轮不处理普通视图切换导致的 panel / 子详情保留问题；仍留给 `MP-3`。
+
+同 `owner_panel + schedule.id` 的重复详情弹窗复用策略：
+
+- 复用范围限定为同一个 `owner_panel`。
+- `MainWindow.open_schedule_detail_from_month_panel(...)` 会先遍历：
+  - `owner_panel.child_detail_popups`
+- 若找到 `popup.data.id == schedule.id` 的现有 popup：
+  - `show()`
+  - `raise_()`
+  - `activateWindow()`
+  - 直接复用，不再创建新 popup。
+- 不会把 Dashboard / Week / Todo 已打开的 popup 注册到 `owner_panel`。
+- 新建成功后会：
+  - `owner_panel.register_child_detail_popup(popup)`
+  - `popup.owner_panel = owner_panel`
+
+MonthWindow 转发信号说明：
+
+- 在 `MonthWindow` 类上新增：
+  - `schedule_detail_requested = pyqtSignal(object, object)`
+- 在 `_open_day_panel(qdate)` 中创建 panel 后新增连接：
+  - `panel.schedule_double_clicked.connect(self.schedule_detail_requested.emit)`
+- `MonthWindow` 仍不直接创建 `ScheduleDetailPop`。
+- `MonthWindow` 仍不直接调用 `MainWindow` 方法。
+- 未改变 `_open_day_panel(...)` 的定位和同日复用逻辑。
+
+MainWindow 详情打开桥接说明：
+
+- `MainWindow.__init__` 中新增连接：
+  - `self.month_window.schedule_detail_requested.connect(self.open_schedule_detail_from_month_panel)`
+- 新增方法：
+  - `open_schedule_detail_from_month_panel(self, schedule_data, owner_panel=None)`
+- 该桥接方法职责：
+  - 在 `MainWindow` 内创建 / 复用共享 `ScheduleDetailPop`。
+  - `source_view='month'`。
+  - 连接现有编辑入口：
+    - `go_to_time_picker_for_edit(data, 'month')`
+    - `go_to_alarm_picker_for_edit(data, 'month')`
+    - `go_to_list_picker_for_edit(data, 'month')`
+  - 若存在 `owner_panel`，则把 popup 注册回该 panel，并将 popup 定位到 panel 右侧。
+- 本轮未重写 `_resolve_detail_edit_target(...)`。
+- 本轮未扩展“保存后多视图刷新”策略。
+
+范围与边界确认：
+
+- 未复用 `DashboardView._show_detail_popup(...)`。
+- 未修改 `src/ui/dashboard.py`。
+- 未修改 `_resolve_detail_edit_target(...)`。
+- 未修改 `MonthWindow.hideEvent(...) / closeEvent(...) / close_day_panels(...)`。
+- 未修改 Dashboard / Week / Todo 既有详情打开链路。
+- 未修改 `src/ui/schedule_detail_pop.py`。
+
+静态依赖检查结果：
+
+- `rg -n "MainWindow|db_manager|Repository|Service|ScheduleRepository|CategoryRepository|switch_view|_resolve_detail_edit_target" src/ui/popups/month_day_panel.py`
+  - 结果：无输出。
+  - 结论：`month_day_panel.py` 未引入主窗口、数据库或路由耦合。
+- `rg -n "db_manager|Repository|ScheduleRepository|CategoryRepository" src/ui/popups/month_day_panel.py src/ui/month_window.py`
+  - 结果：命中仅来自 `month_window.py` 的既有 `db_manager` 读写逻辑，不是本轮新增依赖。
+  - `month_day_panel.py` 无数据库依赖。
+- `rg -n "_show_detail_popup" src/ui/month_window.py src/ui/popups/month_day_panel.py`
+  - 结果：无输出。
+  - 结论：本轮未让 `MonthWindow` / `MonthDayPanel` 直接调用 `_show_detail_popup(...)`。
+
+验证命令与结果：
+
+- 静态定位：
+  - `rg -n "schedule_double_clicked|register_child_detail_popup|child_detail_popups|_emit_schedule_double_clicked|mouseDoubleClickEvent|closed|set_panel_data" src/ui/popups/month_day_panel.py`
+  - `rg -n "schedule_detail_requested|schedule_double_clicked|_open_day_panel|close_day_panels|hideEvent|closeEvent" src/ui/month_window.py`
+  - `rg -n "open_schedule_detail_from_month_panel|schedule_detail_requested|ScheduleDetailPop|_resolve_detail_edit_target|go_to_time_picker_for_edit|go_to_alarm_picker_for_edit|go_to_list_picker_for_edit|_show_detail_popup" src/ui/main_window.py`
+  - 结果：新增信号、桥接入口和 month 转发链路均可定位。
+- import 验证：
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.ui.popups.month_day_panel import MonthDayPanel; from src.ui.month_window import MonthWindow; from src.ui.main_window import MainWindow; from src.ui.schedule_detail_pop import ScheduleDetailPop; print('mp2 imports ok', MonthDayPanel, MonthWindow, MainWindow, ScheduleDetailPop)"`
+  - 结果：通过。
+- MonthDayPanel 双击信号 offscreen 验证：
+  - 使用 `SimpleNamespace(id=123, title='mp2 sample', priority=1, status=0)`。
+  - 通过 `p._emit_schedule_double_clicked(schedule)` 触发。
+  - 结果：通过，`hits == [(schedule, p)]`。
+- 子详情弹窗生命周期 offscreen 验证：
+  - 使用假 `QWidget` 作为 child popup。
+  - `register_child_detail_popup(child)` 后 `child in p.child_detail_popups` 成立。
+  - `p.close()` 后 `child_detail_popups` 被清空。
+  - `destroyed` 信号在该 offscreen 场景下未稳定触发，`destroy hits == 0`。
+  - 本轮以“列表清理 + `close()` 调用不报错”为主判定通过。
+- MonthWindow 转发信号 offscreen 验证：
+  - `MonthWindow._open_day_panel(q)` 后拿到 `panel`。
+  - `panel._emit_schedule_double_clicked(schedule)` 后，`w.schedule_detail_requested` 收到 `(schedule, panel)`。
+  - 结果：通过。
+- MainWindow 桥接静态验证：
+  - `assert hasattr(MainWindow, 'open_schedule_detail_from_month_panel')`
+  - `assert hasattr(MainWindow, '_resolve_detail_edit_target')`
+  - 结果：通过，输出 `main bridge exists`。
+- MainWindow offscreen bridge smoke：
+  - `MainWindow()` 可构造。
+  - `w.month_window` 上存在 `schedule_detail_requested`。
+  - 结果：通过，输出 `main window bridge smoke ok`。
+- 同 owner panel 重复打开复用验证：
+  - 使用补足字段的 `SimpleNamespace`：
+    - `id/title/description/start_time/end_time/priority/status/item_type/category_id/is_alarm/alarm_duration/reminder_time/repeat_rule/created_at`
+  - 连续两次调用 `w.open_schedule_detail_from_month_panel(schedule, panel)`。
+  - 结果：通过，`same owner popup count == 1`。
+  - 顾问窗口复核补充：原提示词示例命令中 `created_at=None` 不符合当前 `ScheduleDetailPop.refresh_created_display()` 对 `created_at.strftime(...)` 的要求，因此该合成假对象命令会失败。
+  - 复核改用 `created_at=datetime.now()` 的等价真实字段假对象与数据库真实日程各跑一次，均通过 `same owner popup count == 1` / `real schedule popup count == 1`。
+- `py_compile`：
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src/ui/popups/month_day_panel.py src/ui/month_window.py src/ui/main_window.py src/ui/schedule_detail_pop.py main.py`
+  - 结果：通过。
+
+diff 范围检查结果：
+
+- 禁止范围检查：
+  - `src/ui/dashboard.py` 无 diff
+  - `src/ui/week_window.py` 无 diff
+  - `src/ui/todo.py` 无 diff
+  - `src/ui/todo_board.py` 无 diff
+  - `src/controllers` 无 diff
+  - `src/data` 无 diff
+  - `src/repositories` 无 diff
+  - `src/services` 无 diff
+  - `src/theme` 无 diff
+  - `src/utils/signals.py` 无 diff
+  - `src/utils/styles.py` 无 diff
+  - `assets` 无 diff
+  - `main.py` 无 diff
+  - `requirements.txt` 无 diff
+  - `schedule.db` 无 diff
+- `git diff --check`：通过，仅有 Git 的 LF/CRLF 工作区提示，无 whitespace error。
+- `git diff --name-only`：
+  - `manage_instruction/Work_Task_Prompts.md`（开工前既有）
+  - `src/ui/main_window.py`
+  - `src/ui/month_window.py`
+  - `src/ui/popups/month_day_panel.py`
+  - `manage_instruction/Work_Log.md`
+- `git status --short --branch`：
+  - `## main...temp/main [ahead 103]`
+  - `M manage_instruction/Work_Task_Prompts.md`
+  - `M src/ui/main_window.py`
+  - `M src/ui/month_window.py`
+  - `M src/ui/popups/month_day_panel.py`
+  - `M manage_instruction/Work_Log.md`
+
+未完成事项：
+
+- 本轮未处理普通视图切换时 panel / 子详情保留规则。
+- 本轮未重构详情编辑路由。
+- 本轮未统一保存后的多视图刷新策略。
+- 本轮未让 month 详情链路接入 `DashboardView` 既有 popup 管理体系。
+
+风险或疑点：
+
+- 当前 month 详情 popup 由 `MainWindow` 直接创建，但未纳入 `page_dashboard.open_popups`；这符合本轮“不要复用 dashboard 详情入口”的收窄要求，但意味着 MP-5 如需统一刷新，仍需单独处理。
+- `register_child_detail_popup(...)` 对真实 `ScheduleDetailPop` 依赖 `popup_closed` 做关闭后移除；对普通 `QWidget` 只能依赖 `close()` 后的显式列表清空或销毁信号兜底，因此 offscreen 假对象只验证到“关闭不报错 + 列表清理”。
+- 复用验证若使用合成 schedule 对象，`created_at` 必须使用可 `strftime(...)` 的 `datetime` 值；`created_at=None` 是测试数据不严谨，不代表 MP-2 主链路失败。
+- `month_window.py` 本身已有大量 `db_manager` 依赖；本轮新增逻辑未扩大这部分耦合，但静态依赖命令会命中既有代码，需要在复核时按“既有依赖”理解，而不是本轮新增问题。

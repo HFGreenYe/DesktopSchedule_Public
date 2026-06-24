@@ -1167,6 +1167,7 @@ class MonthWindow(FramelessMainWindow):
     view_selected = pyqtSignal(str)
     date_selected = pyqtSignal(QDate)
     schedule_updated = pyqtSignal(object)
+    schedule_detail_requested = pyqtSignal(object, object)
 
     def __init__(self):
         super().__init__()
@@ -1736,6 +1737,7 @@ class MonthWindow(FramelessMainWindow):
         schedules = self.hover_schedule_cache.get(qdate.toPyDate(), [])
         panel = MonthDayPanel(qdate, schedules)
         panel.closed.connect(self._remove_day_panel)
+        panel.schedule_double_clicked.connect(self.schedule_detail_requested.emit)
         panel.move(*self._get_day_panel_position(len(self.open_day_panels), panel))
         panel.show()
         self.open_day_panels.append(panel)

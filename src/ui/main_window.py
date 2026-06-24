@@ -1,6 +1,6 @@
 # src/ui/main_window.py
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QStackedWidget
-from PyQt6.QtCore import Qt, QRectF, QTimer, QEvent
+from PyQt6.QtCore import Qt, QRectF, QTimer, QEvent, QPoint
 from PyQt6.QtGui import QPainter, QPainterPath, QBrush, QLinearGradient, QColor, QPen
 from qframelesswindow import FramelessMainWindow
 from datetime import datetime, timedelta
@@ -24,6 +24,7 @@ from .week_window import WeekWindow
 from .suspend_window_week import SuspendWindowWeek
 from .suspend_window_month import SuspendWindowMonth
 from .todo import TodoView
+from .schedule_detail_pop import ScheduleDetailPop
 from .common.toast import show_center_toast
 from ..services.reminder_service import ReminderService
 from ..controllers.main_controller import MainController
@@ -108,6 +109,7 @@ class MainWindow(FramelessMainWindow):
         self.month_window.suspend_requested.connect(self.switch_month_to_suspend)
         self.month_window.view_selected.connect(self.switch_view)
         self.month_window.date_selected.connect(self.jump_to_date_from_month)
+        self.month_window.schedule_detail_requested.connect(self.open_schedule_detail_from_month_panel)
         self.suspend_window_week.restore_requested.connect(self.switch_suspend_to_week)
         self.suspend_window_month.restore_requested.connect(self.switch_suspend_to_month)
         hwnd = int(self.winId())
@@ -278,6 +280,45 @@ class MainWindow(FramelessMainWindow):
     def jump_to_date_from_month(self, qdate):
         """从月视图点击具体日期，直接跳转到主面板的该日视图"""
         self.jump_to_date(qdate)
+
+    def open_schedule_detail_from_month_panel(self, schedule_data, owner_panel=None):
+        popup = None
+        schedule_id = getattr(schedule_data, "id", None)
+
+        if owner_panel is not None:
+            child_popups = getattr(owner_panel, "child_detail_popups", [])
+            for child_popup in list(child_popups):
+                try:
+                    child_schedule_id = getattr(getattr(child_popup, "data", None), "id", None)
+                    if child_schedule_id == schedule_id:
+                        popup = child_popup
+                        break
+                except RuntimeError:
+                    continue
+
+        if popup is not None:
+            popup.show()
+            popup.raise_()
+            popup.activateWindow()
+            return popup
+
+        popup = ScheduleDetailPop(schedule_data, source_view="month")
+        popup.req_edit_time.connect(lambda data: self.go_to_time_picker_for_edit(data, "month"))
+        popup.req_edit_alarm.connect(lambda data: self.go_to_alarm_picker_for_edit(data, "month"))
+        popup.req_edit_list.connect(lambda data: self.go_to_list_picker_for_edit(data, "month"))
+
+        if owner_panel is not None and hasattr(owner_panel, "register_child_detail_popup"):
+            owner_panel.register_child_detail_popup(popup)
+            popup.owner_panel = owner_panel
+
+        if owner_panel is not None:
+            popup_pos = owner_panel.mapToGlobal(QPoint(owner_panel.width() + 10, 0))
+            popup.move(popup_pos)
+        elif hasattr(self, "month_window"):
+            popup.move(self.month_window.mapToGlobal(QPoint(self.month_window.width() + 10, 0)))
+
+        popup.show()
+        return popup
 
     def go_to_time_picker(self, start, end):
         """模式1：从【添加界面】打开时间选择"""
