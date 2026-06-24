@@ -754,3 +754,226 @@
 验证记录：
 
 - 本轮只修改管理文档，不修改源码。
+
+---
+
+## 2026-06-24 MP-0：现状审查与路由边界定位
+
+任务来源：
+
+- 按 `manage_instruction/Work_Task_Prompts.md` 当前待执行提示词执行 `MP-0`。
+- 本轮只做静态审查、代码阅读、搜索、import 验证和日志记录，不修改 `src/`。
+
+开工前 git 状态：
+
+- `git status --short --branch`：`## main...temp/main [ahead 101]`
+- 开工前已有 diff：`manage_instruction/Work_Task_Prompts.md`
+- 本轮将该脏状态视为开工前既有管理文档改动，不计为本轮源码问题。
+
+实际修改文件：
+
+- `manage_instruction/Work_Log.md`
+
+读取的规划/历史文件：
+
+- `manage_instruction/Final_Formulation.md`
+- `manage_instruction/Work_Instruction.md`
+- `manage_instruction/Work_Log.md`
+- `manage_instruction/Work_Task_Prompts.md`
+- `manage_instruction/ReconstructionDolder/Work_Formulation.md`
+- `manage_instruction/ReconstructionDolder/History_Instruction.md`
+
+确认的架构原则：
+
+- 新功能优先兼容式旁路，不一次性替换旧 UI 流程。
+- 新公共 UI 组件优先进入 `src/ui/common/` 或 `src/ui/utils/`。
+- 路由、添加来源、详情弹窗回流优先复用既有入口，不应把大段新流程硬塞进 `MainWindow` / `WeekWindow` / `MonthWindow`。
+- 复杂 popup 生命周期、picker 回流、跨视图刷新必须先做边界审查，再拆分小工单。
+- 未确认低风险闭环前，不应直接改 `ScheduleDetailPop`、详情回流链路或多窗口同步逻辑。
+
+本轮读取/搜索的代码文件：
+
+- `src/ui/popups/month_day_panel.py`
+- `src/ui/schedule_detail_pop.py`
+- `src/ui/main_window.py`
+- `src/ui/month_window.py`
+- `src/ui/dashboard.py`
+- `src/ui/week_window.py`
+- `src/ui/todo.py`
+- `src/ui/todo_board.py`
+
+静态搜索命令与结果摘要：
+
+- `rg -n "MonthDayPanel|open_day_panels|_open_day_panel|_find_open_day_panel|_remove_day_panel|close_day_panels|hideEvent|closeEvent|_on_calendar_date_clicked|_on_calendar_date_activated|date_selected.emit|view_selected.emit|context_menu_date|_handle_context_view" src/ui/month_window.py src/ui/popups/month_day_panel.py`
+  - 命中 `MonthWindow` 的日期点击/双击、面板查找、打开、移除、统一关闭、右键目标日期保存和 `hideEvent/closeEvent` 清理路径。
+- `rg -n "class ScheduleDetailPop|source_view|pyqtSignal|req_|emit|closeEvent|delete|status|time|alarm|list|refresh|ScheduleDetailPop\(" src/ui/schedule_detail_pop.py src/ui/dashboard.py src/ui/week_window.py src/ui/todo.py src/ui/todo_board.py src/ui/main_window.py`
+  - 命中 `ScheduleDetailPop` 的 4 个对外信号、`source_view` 分支、双击编辑发射点，以及 Dashboard / Todo / Week / TodoBoard 的详情弹窗入口。
+- `rg -n "_resolve_detail_edit_target|current_view|switch_view|go_to_time_picker_for_edit|go_to_alarm_picker_for_edit|go_to_list_picker_for_edit|req_edit_time|req_edit_alarm|req_edit_list|source_view|page_dashboard|week_window|month_window|todo_board" src/ui/main_window.py src/ui/schedule_detail_pop.py src/ui/dashboard.py src/ui/week_window.py src/ui/month_window.py src/ui/todo.py src/ui/todo_board.py src/controllers`
+  - 命中 `MainWindow._resolve_detail_edit_target(...)`、MainWindow 对 week/month/todo_board 的 picker 分发，以及 Dashboard/Todo 的 source_view 转发。
+- `rg -n "go_to_time_picker_for_edit|go_to_alarm_picker_for_edit|go_to_list_picker_for_edit|editing_schedule|update_schedule_with_repeat|on_time_confirmed|on_alarm_confirmed|on_list_confirmed|page_time|page_alarm|page_list" src/ui/month_window.py`
+  - 命中 `MonthWindow` 的三条 edit picker 路径、`editing_schedule` 和 `update_schedule_with_repeat(...)` 写回链路。
+- `rg -n "_refresh_schedule_marker_cache|_build_schedule_marker_cache|_build_hover_schedule_cache|refresh_data|refresh|req_refresh|req_refresh_all|global_signals|schedule_updated|schedule_deleted|_on_schedule_saved|on_time_confirmed|on_alarm_confirmed|on_list_confirmed" src/ui/main_window.py src/ui/month_window.py src/ui/dashboard.py src/ui/week_window.py src/ui/todo.py src/ui/todo_board.py src/utils/signals.py src/controllers`
+  - 命中第六轮后的 `RefreshCoordinator` 接入点、`req_refresh_all` 旧链路、`schedule_updated` 旧链路，以及 `MonthWindow.schedule_updated` / `WeekWindow.schedule_updated` 回流。
+
+MonthDayPanel 生命周期与月界面日期弹层结论：
+
+- `MonthDayPanel` 是独立 `QWidget(Qt.Tool | FramelessWindowHint)`，只持有：
+  - `panel_date`
+  - 文本展示数据
+  - `closed = pyqtSignal(object)`
+- `MonthWindow` 持有 `self.open_day_panels`，通过：
+  - `_find_open_day_panel(qdate)` 查重
+  - `_open_day_panel(qdate)` 创建/显示
+  - `_remove_day_panel(panel)` 从列表移除
+  - `close_day_panels()` 统一关闭
+- `_on_calendar_date_clicked(qdate)`：
+  - 只刷新 marker / hover 状态；
+  - 若该日期面板已开则关闭；否则打开日弹层。
+- `_on_calendar_date_activated(qdate)`：
+  - 关闭全部 day panel；
+  - `date_selected.emit(qdate)` 给主窗口做“跳日视图”。
+- 右键菜单路径 `_handle_context_view('day')` 也会先 `close_day_panels()`，再 `date_selected.emit(target_date)`。
+- `MonthWindow.hideEvent(...)` 与 `closeEvent(...)` 都会执行：
+  - `close_day_panels()`
+  - `_hide_hover_preview()`
+- 这意味着当前真实行为是：月视图一旦 `hide()`，所有 `MonthDayPanel` 都会被关掉。
+- 因此若后续需求是“视图切换时不关闭 day panel”，会直接与现有 `hideEvent/closeEvent` 清理策略冲突；这应单独拆到后续 popup 生命周期工单，而不应和右键菜单/跳转逻辑混改。
+
+ScheduleDetailPop 信号、source_view 与职责边界：
+
+- `ScheduleDetailPop` 当前对外信号：
+  - `schedule_updated = pyqtSignal()`
+  - `req_edit_time = pyqtSignal(object)`
+  - `req_edit_alarm = pyqtSignal(object)`
+  - `req_edit_list = pyqtSignal(object)`
+  - `popup_closed = pyqtSignal(object)`
+- `source_view` 当前语义不是路由器，而是 popup 自身 UI/行为分支输入：
+  - `week`：详情区背景、边框、文字颜色特殊处理。
+  - `todo_board`：顶部额外显示便签来源图标。
+  - 其余默认按 dashboard 风格处理。
+- popup 内部实际双击编辑发射点：
+  - 双击时间 -> `req_edit_time.emit(self.data)`
+  - 双击提醒 -> `req_edit_alarm.emit(self.data)`
+  - 双击清单 -> `req_edit_list.emit(self.data)`
+- popup 内部直接写库路径仍存在，且每次成功后 `schedule_updated.emit()`：
+  - 标题编辑 `_finish_edit_title()`
+  - 详情编辑 `_finish_edit_desc()`
+  - 优先级编辑 `_finish_edit_priority()`
+  - 重复规则编辑 `_finish_edit_repeat()`
+- `closeEvent(...)` 只负责 `popup_closed.emit(self)`，不负责跨视图刷新。
+
+详情弹窗打开来源地图：
+
+- `DashboardView._show_detail_popup(schedule_data, source_view='dashboard')`
+  - 创建 `ScheduleDetailPop(schedule_data, source_view=source_view)`。
+  - `schedule_updated -> refresh_data + req_refresh_all.emit()`。
+  - `req_edit_time/alarm/list` 通过 lambda 连带 `source_view` 向上转发。
+- `TodoView._show_detail_popup(schedule_data, source_view='todo')`
+  - 创建 `ScheduleDetailPop(..., source_view='todo')`。
+  - `schedule_updated -> refresh_data + req_refresh_all.emit()`。
+  - 仅 `req_edit_list` 向上转发，时间/提醒不在 TodoView 承接。
+- `WeekWindow.request_schedule_detail.emit(schedule_obj)`
+  - 在 `MainWindow.__init__` 中被接成 `lambda data: self.page_dashboard._show_detail_popup(data, source_view='week')`。
+  - 即 Week 来源详情弹窗仍借道 Dashboard popup 机制。
+- `TodoBoardWindow._show_detail_popup(schedule_data)`
+  - 直接调用 `main_win.page_dashboard._show_detail_popup(schedule_data, source_view='todo_board')`。
+  - 弹窗位置再被强制挪到 TodoBoard 右侧。
+
+MainWindow 动态路由与 `_resolve_detail_edit_target(...)` 结论：
+
+- `_resolve_detail_edit_target(source_view='dashboard')` 不是单纯按 source_view 决策，而是优先按当前可见窗口决策：
+  - `week_window.isVisible()` -> `week`
+  - `month_window.isVisible()` -> `month`
+  - `source_view == 'todo_board'` 且 `todo_board.isVisible()` -> `todo_board`
+  - `body_stack.currentWidget() == page_todo` -> `todo`
+  - `self.isVisible()` -> `day`
+  - 否则回退到 `source_view` 或 `day`
+- 结论：该方法当前是“按当前可见宿主窗口承接详情编辑”的动态路由，不是“严格按详情来源视图回流”。
+- 这能兼容 week/month/todo_board 借道 dashboard 打开 popup 的现状，但也意味着：
+  - popup 的 `source_view` 仍是 UI 来源标识；
+  - 真正 picker 承接窗口由 `MainWindow` 运行时可见性决定。
+- 因此后续若要改详情编辑回流，不应先动 `ScheduleDetailPop`，而应先明确 `MainWindow` 是否继续保留这层动态决策。
+
+MonthWindow 是否具备 edit picker 承接能力：
+
+- 已具备三条独立 edit picker 路径：
+  - `go_to_time_picker_for_edit(schedule_data)`
+  - `go_to_alarm_picker_for_edit(schedule_data)`
+  - `go_to_list_picker_for_edit(schedule_data)`
+- 已持有 `self.editing_schedule` 和三种 mode：
+  - `time_picker_mode`
+  - `alarm_picker_mode`
+  - `list_picker_mode`
+- 三条确认路径均支持：
+  - `db_manager.update_schedule_with_repeat(...)`
+  - `if not update_future: schedule.group_id = None`
+  - `_complete_schedule_edit(schedule)`
+  - `schedule_updated.emit(schedule)`
+- `_complete_schedule_edit(schedule)` 只做：
+  - `_refresh_schedule_marker_cache()`
+  - `schedule_updated.emit(schedule)`
+- 结论：MonthWindow 现在已经是“可独立承接详情编辑 picker + 本地写回 + 向 MainWindow 回流刷新”的完整闭环，不再只是 add-only 页面。
+
+保存与刷新回流链路结论：
+
+- Dashboard：
+  - 详情弹窗 `schedule_updated` -> `DashboardView.refresh_data()` + `req_refresh_all.emit()`。
+- Todo：
+  - 详情弹窗 `schedule_updated` -> `TodoView.refresh_data()` + `req_refresh_all.emit()`。
+- Week：
+  - picker/edit 成功后 `refresh_week_data()` + `schedule_updated.emit(schedule or None)`。
+  - `MainWindow._on_week_schedule_updated(...)` 当前只直接 `page_dashboard.refresh_data()`，再局部刷新 dashboard open_popups；没有走第六轮三连刷新协调。
+- Month：
+  - picker/edit 成功后 `_refresh_schedule_marker_cache()` + `schedule_updated.emit(schedule)`。
+  - `MainWindow` 复用同一个 `_on_week_schedule_updated(...)` 处理 `month_window.schedule_updated`。
+  - 该路径同样只直刷 dashboard，不会自动刷新 todo 或 week。
+- MainWindow 自身 add/edit 页：
+  - `on_schedule_saved()`、`on_time_confirmed(edit)`、`on_alarm_confirmed(edit)`、`on_list_confirmed(edit)` 已切到 `_refresh_dashboard_todo_week()`，即第六轮协调边界。
+- TodoBoard：
+  - `notify_main_window_refresh()` 仍直接：`page_todo.refresh_data()` + `page_dashboard.req_refresh_all.emit()`。
+  - 仍未接入第六轮 `RefreshCoordinator`。
+- 结论：当前“add/edit 主链路”与“详情弹窗/board 借道链路”存在两套并行刷新体系；MP-0 只记录现状，不建议在同一工单里合并。
+
+主风险点与边界判断：
+
+- `MonthDayPanel` 生命周期与“视图切走是否保留面板”冲突：中高风险，必须单拆 popup 生命周期工单。
+- `ScheduleDetailPop` 既管显示，又直接写库，又发编辑请求，又依赖 `source_view` 分支：高风险，不适合在 MP-1 直接改。
+- `MainWindow._resolve_detail_edit_target(...)` 当前承担跨宿主动态路由：中风险；若后续要改，建议先做只读基线再拆最小接管。
+- `WeekWindow -> MainWindow lambda -> Dashboard popup` 与 `TodoBoard -> page_dashboard._show_detail_popup(...)` 都是直接耦合点：高风险，应保留旁路兼容策略。
+- `MonthWindow` 已有 edit picker 承接能力，说明月视图详情编辑回流更适合“复用现有承接窗口”，不适合新造一套 popup 编辑逻辑。
+
+对后续 MP-1 ~ MP-5 的建议：
+
+- `MP-1`：建议只做 `MonthDayPanel` / 月视图 day panel 生命周期与显示规则基线，不改详情弹窗。
+- `MP-2`：建议只处理 `MonthWindow` 到 `MainWindow` 的“跳日视图 / 视图切换 / 右键目标日期”边界，不碰 popup 编辑回流。
+- `MP-3`：若要动详情弹窗，建议先只做 `source_view` / 编辑承接路由基线，不直接改 `ScheduleDetailPop` 写库逻辑。
+- `MP-4`：若要补月视图详情编辑闭环，优先复用 `MonthWindow.go_to_*_picker_for_edit(...)` 和 `schedule_updated` 现有路径，不要新造 picker 页面。
+- `MP-5`：刷新统一建议最后做，只在前述 popup / picker / 路由边界稳定后，评估是否把 month/detail/todo_board 回流接到第六轮协调层。
+- 建议继续拆分 `MP-1 / MP-2 / MP-3 / MP-4 / MP-5`；当前边界仍然过大，不建议合并执行。
+
+import 验证结果：
+
+- `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.ui.month_window import MonthWindow; from src.ui.popups.month_day_panel import MonthDayPanel; from src.ui.schedule_detail_pop import ScheduleDetailPop; from src.ui.main_window import MainWindow; print('mp0 imports ok', MonthWindow, MonthDayPanel, ScheduleDetailPop, MainWindow)"`
+- 结果：通过，输出 `mp0 imports ok ...`。
+
+diff 范围检查结果：
+
+- `git diff --name-only -- src`：无输出。
+- `git diff --name-only -- assets`：无输出。
+- `git diff --name-only -- main.py`：无输出。
+- `git diff --name-only -- requirements.txt`：无输出。
+- `git diff --name-only -- schedule.db`：无输出。
+- `git diff --check`：通过，仅有 Git 的 LF/CRLF 工作区提示，无 whitespace error。
+- `git diff --name-only`：仅 `manage_instruction/Work_Task_Prompts.md`（开工前既有）与本轮新增的 `manage_instruction/Work_Log.md`。
+- `git status --short --branch`：主分支 `ahead 101`；脏文件为 `manage_instruction/Work_Log.md`、`manage_instruction/Work_Task_Prompts.md`。
+
+未完成事项：
+
+- 本轮只完成 MP-0 基线审查，未开始 MP-1 及后续执行。
+- 未对 MonthDayPanel 生命周期、详情弹窗回流、MainWindow 动态编辑路由做任何源码调整。
+
+风险或疑点：
+
+- `MainWindow._on_week_schedule_updated(...)` 同时承接 week 与 month 的 `schedule_updated`，但当前仅直刷 dashboard；这与第六轮三连刷新边界并不一致，后续若补修需要单独验收。
+- `TodoBoardWindow` 仍直接借用 `page_dashboard._show_detail_popup(...)`；若未来要清理该耦合，应单独开工单，避免和月视图改造串联。
+- `MonthWindow.hideEvent(...)` 当前无条件 `close_day_panels()`；若后续产品要求“切视图保留弹层”，将不是小修级改动。
