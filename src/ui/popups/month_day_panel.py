@@ -1,6 +1,14 @@
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
-from PyQt6.QtCore import Qt, pyqtSignal, QRectF
-from PyQt6.QtGui import QPainter, QColor, QPen, QBrush
+from PyQt6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
+)
+from PyQt6.QtCore import Qt, QRectF, pyqtSignal
+from PyQt6.QtGui import QBrush, QColor, QLinearGradient, QPainter, QPen
 
 
 class MonthDayPanel(QWidget):
@@ -14,48 +22,97 @@ class MonthDayPanel(QWidget):
 
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setFixedWidth(280)
 
         self._layout = QVBoxLayout(self)
-        self._layout.setContentsMargins(12, 10, 12, 10)
-        self._layout.setSpacing(6)
+        self._layout.setContentsMargins(14, 12, 14, 12)
+        self._layout.setSpacing(8)
 
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(0, 0, 0, 0)
-        header_layout.setSpacing(8)
+        header_layout.setSpacing(10)
 
         self.date_label = QLabel()
+        self.date_label.setWordWrap(True)
         self.date_label.setStyleSheet(
-            "color: #0cc0df; font-family: 'Microsoft YaHei'; font-size: 12px; font-weight: bold;"
+            "color: white; font-family: 'Microsoft YaHei'; font-size: 14px; font-weight: bold;"
         )
-        header_layout.addWidget(self.date_label)
-        header_layout.addStretch()
+        header_layout.addWidget(self.date_label, 1)
 
         self.btn_close = QPushButton("×")
-        self.btn_close.setFixedSize(20, 20)
+        self.btn_close.setFixedSize(22, 22)
         self.btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_close.setStyleSheet("""
+        self.btn_close.setStyleSheet(
+            """
             QPushButton {
                 background: transparent;
                 border: none;
-                color: #666666;
-                font-size: 14px;
+                color: rgba(255, 255, 255, 0.92);
+                font-size: 15px;
                 font-weight: bold;
             }
             QPushButton:hover {
-                background: rgba(0, 0, 0, 0.06);
-                border-radius: 10px;
+                background: rgba(255, 255, 255, 0.18);
+                border-radius: 11px;
             }
-        """)
+            """
+        )
         self.btn_close.clicked.connect(self.close)
-        header_layout.addWidget(self.btn_close)
+        header_layout.addWidget(self.btn_close, 0, Qt.AlignmentFlag.AlignTop)
         self._layout.addLayout(header_layout)
 
-        self.body_label = QLabel()
-        self.body_label.setStyleSheet(
-            "color: #333333; font-family: 'Microsoft YaHei'; font-size: 11px; background: transparent;"
+        self.empty_label = QLabel("当日暂无日程")
+        self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_label.setWordWrap(True)
+        self.empty_label.setStyleSheet(
+            "color: rgba(255, 255, 255, 0.86); font-family: 'Microsoft YaHei'; "
+            "font-size: 12px; padding: 18px 8px;"
         )
-        self.body_label.setWordWrap(True)
-        self._layout.addWidget(self.body_label)
+        self._layout.addWidget(self.empty_label)
+
+        self.body_scroll = QScrollArea()
+        self.body_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.body_scroll.setWidgetResizable(True)
+        self.body_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.body_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.body_scroll.setStyleSheet(
+            """
+            QScrollArea {
+                background: transparent;
+                border: none;
+            }
+            QScrollBar:vertical {
+                background: transparent;
+                width: 4px;
+                margin: 0;
+            }
+            QScrollBar::handle:vertical {
+                background: rgba(255, 255, 255, 0.35);
+                border-radius: 2px;
+                min-height: 18px;
+            }
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical {
+                height: 0;
+                background: transparent;
+            }
+            """
+        )
+
+        self.body_container = QWidget()
+        self.body_container.setStyleSheet("background: transparent;")
+        self.body_layout = QVBoxLayout(self.body_container)
+        self.body_layout.setContentsMargins(0, 0, 0, 0)
+        self.body_layout.setSpacing(4)
+        self.body_layout.addStretch()
+        self.body_scroll.setWidget(self.body_container)
+        self._layout.addWidget(self.body_scroll)
+
+        self.summary_label = QLabel()
+        self.summary_label.setStyleSheet(
+            "color: rgba(255, 255, 255, 0.78); font-family: 'Microsoft YaHei'; font-size: 11px;"
+        )
+        self._layout.addWidget(self.summary_label)
 
         self.set_panel_data(qdate, schedules)
 
@@ -63,9 +120,14 @@ class MonthDayPanel(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        painter.setPen(QPen(QColor(0, 0, 0, 26), 1))
-        painter.setBrush(QBrush(QColor("#ffffff")))
-        painter.drawRoundedRect(rect, 10, 10)
+
+        gradient = QLinearGradient(rect.topLeft(), rect.bottomLeft())
+        gradient.setColorAt(0.0, QColor("#0cc0df"))
+        gradient.setColorAt(1.0, QColor("#71dce8"))
+
+        painter.setPen(QPen(QColor(255, 255, 255, 110), 1))
+        painter.setBrush(QBrush(gradient))
+        painter.drawRoundedRect(rect, 12, 12)
         super().paintEvent(event)
 
     def set_panel_data(self, qdate, schedules):
@@ -75,32 +137,111 @@ class MonthDayPanel(QWidget):
             f"{qdate.toString('yyyy-MM-dd')} {week_names[qdate.dayOfWeek() - 1]}"
         )
 
+        self._clear_schedule_items()
+
         if not schedules:
-            self.body_label.setText("无日程")
+            self.empty_label.show()
+            self.body_scroll.hide()
+            self.summary_label.hide()
             self.adjustSize()
             return
 
-        lines = []
-        for schedule in schedules[:8]:
-            time_text = "--:--"
-            start_time = getattr(schedule, "start_time", None)
-            end_time = getattr(schedule, "end_time", None)
-            if start_time:
-                time_text = start_time.strftime("%H:%M")
-            elif end_time:
-                time_text = end_time.strftime("%H:%M")
+        self.empty_label.hide()
+        self.body_scroll.show()
 
-            priority = int(getattr(schedule, "priority", 0))
-            priority_text = {2: "高", 1: "中", 0: "低"}.get(priority, "低")
-            status_text = "已完成" if getattr(schedule, "status", 0) == 1 else "未完成"
-            title = getattr(schedule, "title", "") or "未命名日程"
-            lines.append(f"{time_text}  {title}  [{priority_text}/{status_text}]")
+        visible_items = schedules[:8]
+        insert_at = self.body_layout.count() - 1
+        for schedule in visible_items:
+            self.body_layout.insertWidget(insert_at, self._build_schedule_item(schedule))
+            insert_at += 1
 
-        if len(schedules) > 8:
-            lines.append(f"... 共 {len(schedules)} 条")
+        item_height = 30
+        item_spacing = 4
+        visible_height = len(visible_items) * item_height + max(len(visible_items) - 1, 0) * item_spacing
+        self.body_scroll.setFixedHeight(min(visible_height + 2, 220))
 
-        self.body_label.setText("\n".join(lines))
+        if len(schedules) > len(visible_items):
+            self.summary_label.setText(f"... 共 {len(schedules)} 条")
+        else:
+            self.summary_label.setText(f"共 {len(schedules)} 条")
+        self.summary_label.show()
+
         self.adjustSize()
+
+    def _clear_schedule_items(self):
+        while self.body_layout.count() > 1:
+            item = self.body_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+    def _build_schedule_item(self, schedule):
+        item_frame = QFrame()
+        item_frame.setObjectName("monthDayPanelItem")
+        item_frame.setFixedHeight(30)
+        item_frame.setStyleSheet(
+            """
+            QFrame#monthDayPanelItem {
+                background: rgba(255, 255, 255, 0.12);
+                border: 1px solid rgba(255, 255, 255, 0.22);
+                border-radius: 7px;
+            }
+            """
+        )
+
+        layout = QHBoxLayout(item_frame)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(6)
+
+        time_label = QLabel(self._format_time_text(schedule))
+        time_label.setFixedWidth(40)
+        time_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        time_label.setStyleSheet(
+            "background: transparent; border: none; color: white; "
+            "font-family: 'Segoe UI'; font-size: 11px; font-weight: bold;"
+        )
+        layout.addWidget(time_label)
+
+        title_label = QLabel(self._format_title_text(schedule))
+        title_label.setMinimumWidth(0)
+        title_label.setWordWrap(False)
+        title_label.setStyleSheet(
+            "background: transparent; border: none; color: white; "
+            "font-family: 'Microsoft YaHei'; font-size: 11px; font-weight: bold;"
+        )
+        layout.addWidget(title_label, 1)
+
+        meta_label = QLabel(
+            f"{self._format_priority_text(schedule)}/{self._format_status_text(schedule)}"
+        )
+        meta_label.setFixedWidth(66)
+        meta_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        meta_label.setStyleSheet(
+            "background: transparent; border: none; color: rgba(255, 255, 255, 0.84); "
+            "font-family: 'Microsoft YaHei'; font-size: 10px;"
+        )
+        layout.addWidget(meta_label)
+
+        return item_frame
+
+    def _format_time_text(self, schedule):
+        start_time = getattr(schedule, "start_time", None)
+        end_time = getattr(schedule, "end_time", None)
+        if start_time:
+            return start_time.strftime("%H:%M")
+        if end_time:
+            return end_time.strftime("%H:%M")
+        return "--:--"
+
+    def _format_title_text(self, schedule):
+        return getattr(schedule, "title", "") or "未命名日程"
+
+    def _format_priority_text(self, schedule):
+        priority = int(getattr(schedule, "priority", 0))
+        return {2: "高", 1: "中", 0: "低"}.get(priority, "低")
+
+    def _format_status_text(self, schedule):
+        return "已完成" if getattr(schedule, "status", 0) == 1 else "未完成"
 
     def closeEvent(self, event):
         if not self._closed_emitted:

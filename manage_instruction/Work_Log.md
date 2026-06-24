@@ -977,3 +977,224 @@ diff 范围检查结果：
 - `MainWindow._on_week_schedule_updated(...)` 同时承接 week 与 month 的 `schedule_updated`，但当前仅直刷 dashboard；这与第六轮三连刷新边界并不一致，后续若补修需要单独验收。
 - `TodoBoardWindow` 仍直接借用 `page_dashboard._show_detail_popup(...)`；若未来要清理该耦合，应单独开工单，避免和月视图改造串联。
 - `MonthWindow.hideEvent(...)` 当前无条件 `close_day_panels()`；若后续产品要求“切视图保留弹层”，将不是小修级改动。
+
+---
+
+## 2026-06-24 MP-1：月日程弹窗青色渐变 UI 与列表承载
+
+任务来源：
+
+- 按 `manage_instruction/Work_Task_Prompts.md` 当前待执行提示词执行 `MP-1`。
+- 本轮只改造 `MonthDayPanel` 自身 UI 和只读列表承载，不接 `ScheduleDetailPop`，不改跨视图编辑路由，不改 popup 生命周期规则。
+
+开工前 git 状态：
+
+- `git status --short --branch`：`## main...temp/main [ahead 102]`
+- `git diff --name-only`：`manage_instruction/Work_Task_Prompts.md`
+- 存在开工前 diff：`manage_instruction/Work_Task_Prompts.md`
+- 该 diff 视为开工前既有管理文档改动，不计为本轮源码问题。
+
+实际修改文件：
+
+- `src/ui/popups/month_day_panel.py`
+- `manage_instruction/Work_Log.md`
+
+基线确认：
+
+- 本轮只执行 MP-1，不执行 MP-2 ~ MP-5。
+- `MP-0` 已记录 panel 生命周期与详情/路由边界。
+- `MonthDayPanel` 原本已接收 `qdate, schedules`，本轮保持该入口不变。
+- 本轮不触碰 `ScheduleDetailPop`。
+- 本轮不处理“普通视图切换时 panel 保留”的生命周期问题，该问题继续留给 MP-3。
+
+MonthDayPanel UI 改造说明：
+
+- 保持 `class MonthDayPanel(QWidget)` 不变。
+- 保持 `Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint` 不变。
+- 保持 `WA_ShowWithoutActivating` 与 `WA_TranslucentBackground` 不变。
+- `paintEvent(...)` 改为青色渐变圆角浮窗：
+  - 顶部到底部渐变：`#0cc0df -> #71dce8`
+  - 半透明白色边框
+  - 圆角半径 `12px`
+- 顶部 header 仍保留：
+  - 日期标题
+  - 关闭按钮
+- 中部从单一 `body_label` 升级为只读列表承载：
+  - `QScrollArea`
+  - 透明内容容器
+  - 多个日程 item `QFrame`
+- 底部新增摘要文本，用于显示 `共 N 条` 或 `... 共 N 条`。
+- `setFixedWidth(320)`，避免内容把 panel 撑成异常宽度。
+- 未引入外部依赖，未读写 QSS 文件，未新增资源。
+
+日程项展示字段说明：
+
+- 时间：
+  - 优先 `start_time.strftime('%H:%M')`
+  - 否则 `end_time.strftime('%H:%M')`
+  - 都没有则 `--:--`
+- 标题：
+  - `schedule.title`
+  - 空标题回退为 `未命名日程`
+- 重要性：
+  - `priority == 2` -> `高`
+  - `priority == 1` -> `中`
+  - 其他 -> `低`
+- 状态：
+  - `status == 1` -> `已完成`
+  - 其他 -> `未完成`
+- 展示顺序保持传入 `schedules` 的原顺序。
+- panel 内不重新查数据库。
+
+空状态与数量限制说明：
+
+- 无日程时显示 `当日暂无日程`。
+- 多日程时最多渲染前 `8` 条。
+- 超过 `8` 条时显示 `... 共 N 条`。
+- 未改 `MonthWindow` 的过滤、排序和缓存构建规则。
+
+兼容性保持说明：
+
+- 保持 `closed = pyqtSignal(object)`。
+- 保持 `closeEvent(...)` 中只 emit 一次 `closed`。
+- 保持 `btn_close.clicked.connect(self.close)`。
+- 保持左键拖动能力：
+  - `mousePressEvent(...)`
+  - `mouseMoveEvent(...)`
+  - `mouseReleaseEvent(...)`
+- 保持 `panel_date` 更新逻辑。
+- 保持 `set_panel_data(qdate, schedules)` 作为唯一对外刷新入口。
+- 未接 `ScheduleDetailPop`。
+- 未新增详情请求信号。
+- 未改编辑路由。
+- 未改 popup 生命周期规则。
+- `src/ui/month_window.py` 最终无需修改。
+
+验证命令与结果：
+
+- 静态定位：
+  - `rg -n "class MonthDayPanel|closed|set_panel_data|paintEvent|closeEvent|mousePressEvent|mouseMoveEvent|mouseReleaseEvent|btn_close|panel_date" src/ui/popups/month_day_panel.py`
+  - 结果：`closed`、`set_panel_data(...)`、拖动事件、`paintEvent(...)`、`btn_close` 均仍存在。
+- 禁止依赖检查：
+  - `rg -n "ScheduleDetailPop|db_manager|MainWindow|mouseDoubleClickEvent|doubleClicked|detail_requested" src/ui/popups/month_day_panel.py`
+  - 结果：无输出；未引入 `ScheduleDetailPop`、`db_manager` 或 `MainWindow`。
+- MonthWindow 生命周期定位：
+  - `rg -n "close_day_panels|_remove_day_panel|_find_open_day_panel|hideEvent|closeEvent|_open_day_panel" src/ui/month_window.py`
+  - 结果：生命周期方法仍在 `MonthWindow` 内，且本轮未改其语义。
+- import 验证：
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.ui.popups.month_day_panel import MonthDayPanel; from src.ui.month_window import MonthWindow; print('mp1 imports ok', MonthDayPanel, MonthWindow)"`
+  - 结果：通过。
+- offscreen 构造与空状态验证：
+  - `MonthDayPanel(QDate.currentDate(), [])` 可构造。
+  - `panel_date` 可更新。
+  - `closed` 与 `set_panel_data` 属性存在。
+  - 结果：通过，输出 `empty state ok`。
+- offscreen 日程列表展示验证：
+  - 使用 `SimpleNamespace` 假对象构造两条日程。
+  - `set_panel_data(q, schedules)` 可成功承载列表数据。
+  - 结果：通过，输出 `panel list smoke ok`。
+- 生命周期 smoke：
+  - `closed` 信号连接后 `show() -> close()`。
+  - 结果：通过，`closed hits 1`，且命中对象为同一 panel。
+- 月界面复用链路 smoke：
+  - `MonthWindow._open_day_panel(q)` 连续两次同日期调用。
+  - 结果：通过，`count1 == 1`、`count2 == 1`；`close_day_panels()` 后 `open_day_panels == []`。
+- `py_compile`：
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src/ui/popups/month_day_panel.py src/ui/month_window.py main.py`
+  - 结果：通过。
+
+diff 范围检查结果：
+
+- 禁止范围检查：
+  - `src/ui/schedule_detail_pop.py` 无 diff
+  - `src/ui/main_window.py` 无 diff
+  - `src/ui/dashboard.py` 无 diff
+  - `src/ui/week_window.py` 无 diff
+  - `src/ui/todo.py` 无 diff
+  - `src/ui/todo_board.py` 无 diff
+  - `src/controllers` 无 diff
+  - `src/data` 无 diff
+  - `src/repositories` 无 diff
+  - `src/services` 无 diff
+  - `src/theme` 无 diff
+  - `src/utils/signals.py` 无 diff
+  - `src/utils/styles.py` 无 diff
+  - `assets` 无 diff
+  - `main.py` 无 diff
+  - `requirements.txt` 无 diff
+  - `schedule.db` 无 diff
+- `git diff --check`：通过，仅有 Git 的 LF/CRLF 工作区提示，无 whitespace error。
+- `git diff --name-only` 预期范围：
+  - `src/ui/popups/month_day_panel.py`
+  - `manage_instruction/Work_Log.md`
+  - `manage_instruction/Work_Task_Prompts.md`（开工前既有）
+
+未完成事项：
+
+- 本轮未接 `ScheduleDetailPop`。
+- 本轮未给月日程项增加双击详情行为。
+- 本轮未处理普通视图切换时 panel 保留规则。
+- 本轮未统一详情保存后的多视图刷新。
+
+风险或疑点：
+
+- 当前 `MonthDayPanel` 仍只负责展示，不负责详情打开；这与 MP-1 目标一致，但 MP-2 接入详情时需要单独设计 item 信号和子 popup 生命周期。
+- `MonthWindow.hideEvent(...)` 仍会 `close_day_panels()`；本轮明确不改，MP-3 若处理跨视图保留，必须单独验收。
+- 当前列表承载使用 `QScrollArea`，如果后续 MP-2 需要在 item 上接更多交互，建议继续保持 panel 只做 UI 容器，不向其中塞入主窗口业务路由。
+
+---
+
+## 2026-06-24：MonthDayPanel 紧凑化 UI 返修
+
+任务背景：
+
+- 用户反馈 MP-1 后的月界面单击日期弹窗视觉过重，白底卡片感强，像“小广告贴”。
+- 日程项单条占用高度过大，不符合“辅助对比弹窗，可同时打开多个”的定位。
+- 本次为直接 UI 返修，不进入三窗口流程。
+
+实际修改文件：
+
+- `src/ui/popups/month_day_panel.py`
+- `manage_instruction/Work_Log.md`
+
+修改内容：
+
+- 将 `MonthDayPanel` 固定宽度调整为 `280px`，降低弹窗占用。
+- 保持弹窗本体青色渐变背景和白色标题，不回退到白底样式。
+- 将日程项从多行大卡片改为单行紧凑行：
+  - 左侧显示时间。
+  - 中间显示标题。
+  - 右侧显示 `重要性/完成状态`。
+- 单条日程行高度调整为 `30px`，列表项间距调整为 `4px`。
+- 日程项背景改为轻量半透明白，弱化卡片边界。
+- 使用 `QFrame#monthDayPanelItem` 精确限定日程项样式，避免 `QLabel` 继承 `QFrame` 后被错误套上背景框。
+- `QScrollArea` 保持透明背景，并保留细滚动条以承载多日程。
+- 未修改 `MonthWindow` 生命周期逻辑。
+- 未接入 `ScheduleDetailPop`。
+- 未修改详情编辑路由。
+- 未修改数据库、服务层、控制层或主题文件。
+
+验证结果：
+
+- offscreen 空状态构造验证：通过。
+- offscreen 两条日程列表构造验证：通过，输出宽度 `280`，列表高度 `66`。
+- offscreen `closed` 信号验证：通过，`closed hits 1`。
+- `py_compile src/ui/popups/month_day_panel.py src/ui/month_window.py main.py`：通过。
+
+范围检查：
+
+- 本次源码 diff 仅涉及 `src/ui/popups/month_day_panel.py`。
+- `src/ui/month_window.py` 无本次 diff。
+- `src/ui/schedule_detail_pop.py` 无 diff。
+- `src/ui/main_window.py` 无 diff。
+- `assets`、`main.py`、`requirements.txt`、`schedule.db` 无 diff。
+
+未完成事项：
+
+- 本次只做紧凑化视觉返修，未做日程项双击打开详情弹窗。
+- 真实视觉效果仍需用户在桌面环境中运行确认。
+
+风险或疑点：
+
+- 单行标题在极长文本下会被裁切；这是为紧凑化弹窗刻意保留的取舍。
+- 后续 MP-2 接入双击详情时，需要继续保持 `MonthDayPanel` 只负责展示和轻量信号，不直接承接主窗口路由。
