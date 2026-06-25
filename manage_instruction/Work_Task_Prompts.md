@@ -1,56 +1,50 @@
 # Work Task Prompts
 
-# 当前待执行提示词：MP-3
+# 当前待执行提示词：MP-4
 
-## MP-3：月日程弹窗生命周期与跨视图保留规则
+## MP-4：详情编辑请求按当前可见视图路由
 
-请执行 `MP-3（月日程弹窗生命周期与跨视图保留规则）`。本轮只处理月日程持久 panel 及其子详情弹窗的生命周期规则，不改编辑路由，不改详情内容，不改保存刷新策略。
+请执行 `MP-4（详情编辑请求按当前可见视图路由）`。本轮优先验证现有动态路由是否已经满足要求；只有发现明确缺口时，才做最小源码修正。不得默认重写整套路由。
 
 ## 1. 本轮目标
 
-基于 `MP-0 ~ MP-2` 当前结论，本轮专门收口月日程弹窗生命周期。
+基于 `MP-0 ~ MP-3` 当前结论，本轮只处理详情弹窗编辑请求的路由规则。
 
-当前事实：
+目标规则：
 
-- `MonthDayPanel` 已能承载日程列表。
-- `MonthDayPanel` 已支持日程项双击请求详情。
-- `MonthDayPanel` 已能登记并关闭自己打开的子 `ScheduleDetailPop`。
-- `MonthWindow.hideEvent(...)` 当前会调用 `close_day_panels()`。
-- `MainWindow.switch_view(...)` 从月视图切到日/周/待办时，会调用 `self.month_window.hide()`。
-- 因此普通视图切换目前会误触发 `MonthWindow.hideEvent(...)` 并关闭月日程 panel。
-
-本轮目标：
-
-- 普通视图切换导致的 `MonthWindow.hide()` 不应关闭月日程 panel。
-- 普通视图切换导致的 `MonthWindow.hide()` 不应关闭 panel 打开的子详情弹窗。
-- 用户手动关闭某个 `MonthDayPanel` 时，仍关闭它打开的子详情弹窗。
-- 子详情弹窗手动关闭时，不关闭父 `MonthDayPanel`。
-- 子详情弹窗手动关闭后，应从父 panel 的 `child_detail_popups` 中移除。
-- `MonthWindow.closeEvent(...)` 仍应清理所有月日程 panel。
-- 显式调用 `close_day_panels()` 的路径仍应清理所有 panel。
-- 双击月格跳日视图、右键菜单跳日视图、进入月界面 picker / edit picker 等已显式调用 `close_day_panels()` 的路径，本轮默认保持现状，不擅自改变产品规则。
-- 不改跨视图编辑路由；该项留给 MP-4。
+- `ScheduleDetailPop` 只发出编辑请求信号，不直接调用具体页面。
+- 详情弹窗中的修改操作应按当前可见视图路由。
+- 不应被弹窗创建时的固定 `source_view` 锁死。
+- 当前可见周界面时，编辑请求走 `WeekWindow`。
+- 当前可见月界面时，编辑请求走 `MonthWindow`。
+- 当前可见主窗口日视图时，编辑请求走主窗口日视图编辑链路。
+- 当前可见待办视图时，编辑请求走待办对应链路或主窗口已有待办返回链路。
+- 当前可见待办看板且来源为 `todo_board` 时，允许继续走既有待办看板编辑链路。
+- 若当前没有明确可见视图，可保留旧 `source_view` 作为兼容 fallback。
+- 不改月日程 panel UI。
+- 不改 MP-3 的 panel 生命周期。
 - 不改保存后多视图刷新；该项留给 MP-5。
 
-重要边界：
+当前重点：
 
-- 本轮只修正“普通 `hide()` 误清理 panel”的问题。
-- 本轮不把“所有视图变化都保留 panel”扩大到显式清理路径。
-- 如果执行中发现普通视图切换和显式跳日 / picker 清理无法区分，必须记录并暂停该分支，不得自行扩大修改。
+- `MainWindow._resolve_detail_edit_target(...)` 已存在，本轮必须先验证它是否已满足动态路由。
+- `open_schedule_detail_from_month_panel(...)` 当前创建 `ScheduleDetailPop(source_view="month")`，并将编辑信号连接到 `go_to_*_picker_for_edit(data, "month")`。
+- 如果 `_resolve_detail_edit_target(...)` 已能基于当前可见视图覆盖这个固定来源，本轮可不改源码，只记录“MP-4 无需源码修正”。
+- 如果发现固定 `source_view` 仍会导致错误路由，只允许在 `MainWindow` 做最小修正。
 
 ## 2. 允许 / 禁止
 
 允许修改：
 
-- `src/ui/month_window.py`
-- `src/ui/popups/month_day_panel.py`（仅当需要补强生命周期兼容时）
-- `src/ui/schedule_detail_pop.py`（仅当需要补强非业务生命周期信号兼容时；若无需修改则不改）
+- `src/ui/main_window.py`（仅在发现路由缺口时做最小修正）
+- `src/ui/schedule_detail_pop.py`（仅限信号/参数兼容；原则上不改）
 - `manage_instruction/Work_Log.md`
 - `manage_instruction/Work_Task_Prompts.md`（仅在需要维护复核锚点时）
 
 禁止修改：
 
-- `src/ui/main_window.py`
+- `src/ui/popups/month_day_panel.py`
+- `src/ui/month_window.py`
 - `src/ui/dashboard.py`
 - `src/ui/week_window.py`
 - `src/ui/todo.py`
@@ -73,16 +67,17 @@
 
 禁止事项：
 
-- 不改 `MainWindow.switch_view(...)`。
-- 不改 `_resolve_detail_edit_target(...)`。
-- 不改 `ScheduleDetailPop` 的编辑字段逻辑。
-- 不改月日程 panel UI 样式。
-- 不改日程项双击打开详情逻辑。
 - 不改数据库。
 - 不写入 `schedule.db`。
+- 不改保存逻辑。
+- 不改 `ScheduleDetailPop` 的字段编辑业务逻辑。
+- 不让 `ScheduleDetailPop` 直接调用 `MainWindow`、`MonthWindow`、`WeekWindow`、`DashboardView`、`TodoView` 或 `TodoBoardWindow`。
+- 不把路由逻辑写进 `MonthDayPanel`。
+- 不改 MP-3 的生命周期规则。
+- 不新增协调器。
 - 不提交 Git。
 
-若开工前已有 diff，必须在 `Work_Log.md` 记录，并区分是否为本轮产生。尤其如果 MP-2 尚未提交，必须明确记录已有 diff。
+若开工前已有 diff，必须记录到 `Work_Log.md`，并区分是否为本轮产生。
 
 ## 3. 具体任务
 
@@ -90,97 +85,101 @@
 
 运行：
 
-```powershell
+~~~powershell
 git status --short --branch
 git diff --name-only
-```
+~~~
 
 记录：
 
 - 开工前 git 状态。
 - 是否存在已有 diff。
-- 已有 diff 是否来自 MP-2 未提交内容。
-- 本轮不得回退或改动无关 diff。
+- 已有 diff 是否与本轮有关。
+- 不得回退或清理无关 diff。
 
 ### 3.2 读取基线
 
 读取：
 
-```powershell
+~~~powershell
 Get-Content -Path manage_instruction\Work_Instruction.md -Encoding UTF8
 Get-Content -Path manage_instruction\Work_Log.md -Encoding UTF8
 Get-Content -Path manage_instruction\Work_Task_Prompts.md -Encoding UTF8
-Get-Content -Path src\ui\month_window.py -Encoding UTF8
-Get-Content -Path src\ui\popups\month_day_panel.py -Encoding UTF8
+Get-Content -Path src\ui\main_window.py -Encoding UTF8
 Get-Content -Path src\ui\schedule_detail_pop.py -Encoding UTF8
-```
+Get-Content -Path src\ui\month_window.py -Encoding UTF8
+Get-Content -Path src\ui\week_window.py -Encoding UTF8
+Get-Content -Path src\ui\dashboard.py -Encoding UTF8
+Get-Content -Path src\ui\todo.py -Encoding UTF8
+Get-Content -Path src\ui\todo_board.py -Encoding UTF8
+~~~
 
 确认：
 
-- 本轮只执行 MP-3，不执行 MP-4 / MP-5。
-- `MonthWindow.hideEvent(...)` 当前是否仍调用 `close_day_panels()`。
-- `MonthWindow.closeEvent(...)` 当前是否调用 `close_day_panels()`。
-- `MonthWindow.close_day_panels()` 当前是否关闭所有 panel。
-- `MonthDayPanel.closeEvent(...)` 当前是否关闭子详情弹窗。
-- `MonthDayPanel.register_child_detail_popup(...)` 是否仍存在。
-- 显式调用 `close_day_panels()` 的路径有哪些。
+- 本轮只执行 MP-4，不执行 MP-5。
+- `ScheduleDetailPop` 是否仍只发 `req_edit_time` / `req_edit_alarm` / `req_edit_list` 信号。
+- `ScheduleDetailPop` 是否直接调用具体页面。
+- `MainWindow._resolve_detail_edit_target(...)` 当前判断顺序。
+- `MainWindow.go_to_time_picker_for_edit(...)`、`go_to_alarm_picker_for_edit(...)`、`go_to_list_picker_for_edit(...)` 当前是否都调用 `_resolve_detail_edit_target(...)`。
+- `MonthWindow` 是否已有 `go_to_time_picker_for_edit(...)` / `go_to_alarm_picker_for_edit(...)` / `go_to_list_picker_for_edit(...)`。
+- `WeekWindow` 是否已有对应 edit picker 入口。
+- `TodoBoardWindow` 是否仍有既有待办看板 list picker edit 入口。
+- 月 panel 详情桥接是否仍在 `MainWindow.open_schedule_detail_from_month_panel(...)`。
 
-### 3.3 调整 MonthWindow.hideEvent 生命周期
+### 3.3 优先做无代码验证
 
-目标：普通 `hide()` 不再清理月日程 panel。
+先不改源码，验证现有动态路由是否满足 MP-4。
 
-建议修改：
+重点判断：
 
-- 修改 `MonthWindow.hideEvent(...)`：
-  - 不再调用 `self.close_day_panels()`。
-  - 如当前类中已有 hover preview 隐藏 helper，可继续隐藏 hover preview。
-  - 仍调用 `super().hideEvent(event)`。
+- 当 `month_window.isVisible()` 为 True 时，编辑请求是否路由到 month。
+- 当 `week_window.isVisible()` 为 True 时，编辑请求是否路由到 week。
+- 当主窗口可见且当前是日视图时，编辑请求是否路由到 day。
+- 当主窗口可见且当前是待办视图时，编辑请求是否路由到 todo 或既有待办返回链路。
+- 当来源为 `todo_board` 且待办看板可见时，是否保留既有 `todo_board` 路由。
+- 从月 panel 打开的详情弹窗，即使连接时传入 `source_view="month"`，在月界面隐藏、主窗口日视图可见后，是否会路由到 day。
+- 从月 panel 打开的详情弹窗，在周界面可见后，是否会路由到 week。
 
-要求：
+如果全部通过：
 
-- 不删除 `close_day_panels()`。
-- 不改变 `close_day_panels()` 本身的显式清理语义。
-- 不改变 `closeEvent(...)` 清理语义。
-- 不改变 `_on_calendar_date_activated(...)` 中显式 `close_day_panels()`。
-- 不改变 `_handle_context_view("day")` 中显式 `close_day_panels()`。
-- 不改变 `go_to_time_picker(...)`、`go_to_alarm_picker(...)`、`go_to_list_picker(...)`、`_show_edit_picker(...)` 等已有显式 `close_day_panels()` 路径，除非该路径被明确证明是普通视图切换误清理。
-- 若发现歧义，记录并暂停该分支，不擅自扩大修改。
+- 不修改源码。
+- 在 `Work_Log.md` 记录“MP-4 无需源码修正，现有 `_resolve_detail_edit_target(...)` 已满足当前动态路由要求”。
 
-### 3.4 保持显式清理路径
+如果发现缺口：
 
-必须保持：
+- 只允许最小修改 `src/ui/main_window.py`。
+- 优先修正 `_resolve_detail_edit_target(...)` 或月 panel 详情桥接传参方式。
+- 不新建协调器。
+- 不改 `ScheduleDetailPop`，除非确实必须补信号参数兼容。
+- 不改具体页面业务逻辑。
+- 不改 MP-5 范围的保存后刷新。
 
-- 用户点击 panel 关闭按钮时，该 panel 关闭。
-- panel 关闭时，它打开的子详情弹窗关闭。
-- 子详情弹窗手动关闭时，不关闭父 panel。
-- 子详情弹窗手动关闭后，从父 panel 维护列表移除。
-- `MonthWindow.closeEvent(...)` 清理所有 panel。
-- `MonthWindow.close_day_panels()` 显式调用时清理所有 panel。
-- 双击月格跳日视图目前仍显式清理所有 panel。
-- 右键菜单跳日视图目前仍显式清理所有 panel。
-- 进入月界面添加/编辑 picker 时目前仍显式清理所有 panel。
+### 3.4 如需源码修正的边界
 
-说明：
+若必须改 `src/ui/main_window.py`，要求：
 
-- “普通视图切换不关闭 panel”与“显式跳日 / picker 清理 panel”在当前产品规则中分开处理。
-- 本轮只修正普通 `hide()` 误清理。
-- 若执行中发现双击跳日与普通切换无法区分，必须写入日志并暂停该分支。
+- 保持 `_resolve_detail_edit_target(...)` 为唯一主要路由决策点。
+- 保持 `source_view` 只作为 fallback，不作为当前可见视图的优先决策。
+- 不改变 `go_to_*_picker_for_edit(...)` 对外方法名和参数兼容。
+- 不改 `open_schedule_detail_from_month_panel(...)` 的弹窗创建和 owner panel 生命周期逻辑，除非其传参导致路由错误。
+- 不改 Dashboard / Week / Month / Todo / TodoBoard 具体页面。
+- 不改 MP-5 范围的保存后刷新。
 
 ### 3.5 更新 Work_Log.md
 
 在 `manage_instruction/Work_Log.md` 追加记录，至少包含：
 
-- 本轮任务名称：`MP-3（月日程弹窗生命周期与跨视图保留规则）`
+- 本轮任务名称：`MP-4（详情编辑请求按当前可见视图路由）`
 - 开工前 git 状态
 - 开工前是否已有 diff
 - 实际修改文件
-- `MonthWindow.hideEvent(...)` 调整说明
-- `MonthWindow.closeEvent(...)` 是否保持清理
-- `close_day_panels(...)` 是否保持显式清理
-- panel 手动关闭是否仍关闭子详情
-- 子详情手动关闭是否不关闭父 panel
-- 子详情手动关闭后是否从父 panel 维护列表移除
-- 双击跳日/右键跳日/进入 picker 的显式清理是否保持现状
+- 是否修改源码；如果未改，明确记录“无需源码修正”
+- `ScheduleDetailPop` 信号边界检查结果
+- `_resolve_detail_edit_target(...)` 判断顺序检查结果
+- time/alarm/list 三类编辑请求路由验证结果
+- 月 panel 详情弹窗固定 `source_view="month"` 是否会锁死路由
+- day/week/month/todo/todo_board 路由验证结果
+- 是否未改 MP-3 生命周期
 - 验证命令和结果
 - diff 范围检查结果
 - 未完成事项
@@ -190,85 +189,66 @@ Get-Content -Path src\ui\schedule_detail_pop.py -Encoding UTF8
 
 ### 4.1 静态定位
 
-```powershell
-rg -n "def hideEvent|def closeEvent|close_day_panels|_on_calendar_date_activated|_handle_context_view|go_to_time_picker|go_to_alarm_picker|go_to_list_picker|_show_edit_picker" src/ui/month_window.py
-rg -n "register_child_detail_popup|child_detail_popups|_close_child_detail_popups|closeEvent|popup_closed|schedule_double_clicked" src/ui/popups/month_day_panel.py
-rg -n "popup_closed|closeEvent" src/ui/schedule_detail_pop.py
-```
+~~~powershell
+rg -n "def _resolve_detail_edit_target|go_to_time_picker_for_edit|go_to_alarm_picker_for_edit|go_to_list_picker_for_edit|open_schedule_detail_from_month_panel|source_view|ScheduleDetailPop|req_edit_time|req_edit_alarm|req_edit_list" src/ui/main_window.py src/ui/schedule_detail_pop.py
+rg -n "go_to_time_picker_for_edit|go_to_alarm_picker_for_edit|go_to_list_picker_for_edit" src/ui/month_window.py src/ui/week_window.py src/ui/todo_board.py
+rg -n "req_edit_time|req_edit_alarm|req_edit_list|_show_detail_popup|ScheduleDetailPop" src/ui/dashboard.py src/ui/todo.py
+~~~
 
 预期：
 
-- `MonthWindow.hideEvent(...)` 不再调用 `close_day_panels()`。
-- `MonthWindow.closeEvent(...)` 仍调用 `close_day_panels()`。
-- `close_day_panels()` 方法仍存在。
-- 显式调用 `close_day_panels()` 的路径仍可定位。
-- `MonthDayPanel.closeEvent(...)` 仍关闭子详情弹窗。
-- `MonthDayPanel.register_child_detail_popup(...)` 仍存在。
+- `ScheduleDetailPop` 只发信号，不直接调用具体页面。
+- `MainWindow.go_to_time_picker_for_edit(...)` 调用 `_resolve_detail_edit_target(...)`。
+- `MainWindow.go_to_alarm_picker_for_edit(...)` 调用 `_resolve_detail_edit_target(...)`。
+- `MainWindow.go_to_list_picker_for_edit(...)` 调用 `_resolve_detail_edit_target(...)`。
+- `MonthWindow` 和 `WeekWindow` 仍有对应 edit picker 入口。
+- `todo_board` 相关既有入口若被定位到，只记录现状，不在本轮扩展。
 
 ### 4.2 import 验证
 
-```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.ui.month_window import MonthWindow; from src.ui.popups.month_day_panel import MonthDayPanel; from src.ui.schedule_detail_pop import ScheduleDetailPop; print('mp3 imports ok', MonthWindow, MonthDayPanel, ScheduleDetailPop)"
-```
+~~~powershell
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.ui.main_window import MainWindow; from src.ui.schedule_detail_pop import ScheduleDetailPop; from src.ui.month_window import MonthWindow; from src.ui.week_window import WeekWindow; print('mp4 imports ok', MainWindow, ScheduleDetailPop, MonthWindow, WeekWindow)"
+~~~
 
-### 4.3 普通 hide 不清理 panel 验证
+### 4.3 直接验证 _resolve_detail_edit_target 判断
 
-```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from PyQt6.QtCore import QDate; from src.ui.month_window import MonthWindow; app=QApplication([]); w=MonthWindow(); q=QDate.currentDate().addDays(1); w.show(); app.processEvents(); w._open_day_panel(q); assert len(w.open_day_panels) == 1; panel=w.open_day_panels[0]; w.hide(); app.processEvents(); print('panel count after hide', len(w.open_day_panels)); assert len(w.open_day_panels) == 1; assert w.open_day_panels[0] is panel; w.close_day_panels(); assert w.open_day_panels == []"
-```
+~~~powershell
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from src.ui.main_window import MainWindow; app=QApplication([]); w=MainWindow(); w.show(); app.processEvents(); print('day target', w._resolve_detail_edit_target('month')); assert w._resolve_detail_edit_target('month') == 'day'; w.month_window.show(); app.processEvents(); print('month target', w._resolve_detail_edit_target('dashboard')); assert w._resolve_detail_edit_target('dashboard') == 'month'; w.month_window.hide(); w.week_window.show(); app.processEvents(); print('week target', w._resolve_detail_edit_target('month')); assert w._resolve_detail_edit_target('month') == 'week'; w.week_window.hide(); w.body_stack.setCurrentWidget(w.page_todo); w.show(); app.processEvents(); print('todo target', w._resolve_detail_edit_target('dashboard')); assert w._resolve_detail_edit_target('dashboard') == 'todo'"
+~~~
 
-### 4.4 closeEvent 仍清理 panel 验证
+### 4.4 time 编辑请求路由 smoke
 
-```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from PyQt6.QtCore import QDate; from src.ui.month_window import MonthWindow; app=QApplication([]); w=MonthWindow(); q=QDate.currentDate().addDays(1); w.show(); app.processEvents(); w._open_day_panel(q); assert len(w.open_day_panels) == 1; w.close(); app.processEvents(); print('panel count after close', len(w.open_day_panels)); assert w.open_day_panels == []"
-```
+使用 monkeypatch，不写数据库，不打开真实 picker：
 
-### 4.5 显式 close_day_panels 仍清理验证
+~~~powershell
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from types import SimpleNamespace; from PyQt6.QtWidgets import QApplication; from src.ui.main_window import MainWindow; app=QApplication([]); w=MainWindow(); s=SimpleNamespace(id=1, title='mp4', start_time=None, end_time=None); hits=[]; w.week_window.go_to_time_picker_for_edit=lambda data: hits.append(('week', data)); w.month_window.go_to_time_picker_for_edit=lambda data: hits.append(('month', data)); w.month_window.show(); app.processEvents(); w.go_to_time_picker_for_edit(s, 'dashboard'); assert hits[-1][0]=='month'; w.month_window.hide(); w.week_window.show(); app.processEvents(); w.go_to_time_picker_for_edit(s, 'month'); assert hits[-1][0]=='week'; w.week_window.hide(); w.show(); app.processEvents(); w.go_to_time_picker_for_edit(s, 'month'); assert w.time_picker_mode == 'edit'; print('time route ok', hits)"
+~~~
 
-```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from PyQt6.QtCore import QDate; from src.ui.month_window import MonthWindow; app=QApplication([]); w=MonthWindow(); q=QDate.currentDate().addDays(1); w._open_day_panel(q); assert len(w.open_day_panels) == 1; w.close_day_panels(); print('panel count after explicit close', len(w.open_day_panels)); assert w.open_day_panels == []"
-```
+### 4.5 alarm 编辑请求路由 smoke
 
-### 4.6 panel 手动关闭仍关闭子详情验证
+~~~powershell
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from types import SimpleNamespace; from PyQt6.QtWidgets import QApplication; from src.ui.main_window import MainWindow; app=QApplication([]); w=MainWindow(); s=SimpleNamespace(id=1, title='mp4', start_time=None, end_time=None, is_alarm=False, alarm_duration=0); hits=[]; w.week_window.go_to_alarm_picker_for_edit=lambda data: hits.append(('week', data)); w.month_window.go_to_alarm_picker_for_edit=lambda data: hits.append(('month', data)); w.month_window.show(); app.processEvents(); w.go_to_alarm_picker_for_edit(s, 'dashboard'); assert hits[-1][0]=='month'; w.month_window.hide(); w.week_window.show(); app.processEvents(); w.go_to_alarm_picker_for_edit(s, 'month'); assert hits[-1][0]=='week'; w.week_window.hide(); w.show(); app.processEvents(); w.go_to_alarm_picker_for_edit(s, 'month'); assert w.alarm_picker_mode == 'edit'; print('alarm route ok', hits)"
+~~~
 
-使用假 popup，不打开真实详情弹窗：
+### 4.6 list 编辑请求路由 smoke
 
-```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication, QWidget; from PyQt6.QtCore import QDate; from src.ui.popups.month_day_panel import MonthDayPanel; app=QApplication([]); p=MonthDayPanel(QDate.currentDate(), []); child=QWidget(); p.register_child_detail_popup(child); assert child in p.child_detail_popups; p.close(); app.processEvents(); print('child count after panel close', len(p.child_detail_popups)); assert len(p.child_detail_popups) == 0"
-```
+~~~powershell
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from types import SimpleNamespace; from PyQt6.QtWidgets import QApplication; from src.ui.main_window import MainWindow; app=QApplication([]); w=MainWindow(); s=SimpleNamespace(id=1, title='mp4', category_id=None, item_type='schedule'); hits=[]; w.week_window.go_to_list_picker_for_edit=lambda data: hits.append(('week', data)); w.month_window.go_to_list_picker_for_edit=lambda data: hits.append(('month', data)); w.month_window.show(); app.processEvents(); w.go_to_list_picker_for_edit(s, 'dashboard'); assert hits[-1][0]=='month'; w.month_window.hide(); w.week_window.show(); app.processEvents(); w.go_to_list_picker_for_edit(s, 'month'); assert hits[-1][0]=='week'; w.week_window.hide(); w.body_stack.setCurrentWidget(w.page_todo); w.show(); app.processEvents(); w.go_to_list_picker_for_edit(s, 'month'); assert getattr(w, 'list_picker_source', None) == 'todo'; print('list route ok', hits, getattr(w, 'list_picker_source', None))"
+~~~
 
-### 4.7 子详情手动关闭不关闭父 panel 验证
+### 4.7 月 panel 详情弹窗固定 source_view 不锁死路由验证
 
-使用带 `popup_closed` 信号的假 popup，验证父 panel 不关闭且登记列表移除：
+验证从月 panel 打开的 popup 在切换到 day/week 后仍按当前可见视图路由。
 
-```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication, QWidget; from PyQt6.QtCore import QDate, pyqtSignal; from src.ui.popups.month_day_panel import MonthDayPanel; class FakeDetailPopup(QWidget):\n    popup_closed = pyqtSignal(object)\n    def closeEvent(self, event):\n        self.popup_closed.emit(self)\n        super().closeEvent(event)\napp=QApplication([]); p=MonthDayPanel(QDate.currentDate(), []); child=FakeDetailPopup(); p.register_child_detail_popup(child); p.show(); child.show(); app.processEvents(); assert child in p.child_detail_popups; child.close(); app.processEvents(); print('panel visible', p.isVisible()); print('child count', len(p.child_detail_popups)); assert p.isVisible(); assert child not in p.child_detail_popups; p.close()"
-```
+~~~powershell
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from datetime import datetime; from types import SimpleNamespace; from PyQt6.QtWidgets import QApplication; from PyQt6.QtCore import QDate; from src.ui.main_window import MainWindow; from src.ui.popups.month_day_panel import MonthDayPanel; app=QApplication([]); w=MainWindow(); panel=MonthDayPanel(QDate.currentDate(), []); s=SimpleNamespace(id=77, title='mp4 month popup', description='', start_time=None, end_time=None, priority=0, status=0, item_type='schedule', category_id=None, is_alarm=False, alarm_duration=0, reminder_time=None, repeat_rule='无', created_at=datetime.now()); pop=w.open_schedule_detail_from_month_panel(s, panel); assert pop.source_view == 'month'; hits=[]; w.week_window.go_to_time_picker_for_edit=lambda data: hits.append(('week', data)); w.month_window.hide(); w.week_window.hide(); w.show(); app.processEvents(); pop.req_edit_time.emit(s); assert w.time_picker_mode == 'edit'; w.week_window.show(); app.processEvents(); pop.req_edit_time.emit(s); assert hits[-1][0] == 'week'; print('month popup dynamic route ok', hits); panel.close()"
+~~~
 
-如果 Windows shell 对单行 class 定义转义不稳定，可改写为等价临时脚本或仅验证 `p.isVisible()`，但必须在日志说明验证方式差异。
+### 4.8 禁止范围检查
 
-### 4.8 双击跳日显式清理保持验证
-
-```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from PyQt6.QtCore import QDate; from src.ui.month_window import MonthWindow; app=QApplication([]); w=MonthWindow(); q=QDate.currentDate().addDays(1); w._open_day_panel(q); assert len(w.open_day_panels) == 1; hits=[]; w.date_selected.connect(lambda d: hits.append(d)); w._on_calendar_date_activated(q); print('panel count after activated', len(w.open_day_panels)); print('date hits', len(hits)); assert w.open_day_panels == []; assert hits == [q]"
-```
-
-### 4.9 进入月界面 picker 显式清理保持验证
-
-```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from datetime import datetime, timedelta; from PyQt6.QtWidgets import QApplication; from PyQt6.QtCore import QDate; from src.ui.month_window import MonthWindow; app=QApplication([]); w=MonthWindow(); q=QDate.currentDate().addDays(1); w._open_day_panel(q); assert len(w.open_day_panels) == 1; start=datetime.now(); end=start+timedelta(hours=1); w.go_to_time_picker(start, end); print('panel count after picker', len(w.open_day_panels)); assert w.open_day_panels == []"
-```
-
-### 4.10 语法检查
-
-```powershell
-D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src/ui/month_window.py src/ui/popups/month_day_panel.py src/ui/schedule_detail_pop.py main.py
-```
-
-### 4.11 禁止范围检查
-
-```powershell
-git diff --name-only -- src/ui/main_window.py
+~~~powershell
+git diff --name-only -- src/ui/popups/month_day_panel.py
+git diff --name-only -- src/ui/month_window.py
 git diff --name-only -- src/ui/dashboard.py
 git diff --name-only -- src/ui/week_window.py
 git diff --name-only -- src/ui/todo.py
@@ -284,42 +264,49 @@ git diff --name-only -- assets
 git diff --name-only -- main.py
 git diff --name-only -- requirements.txt
 git diff --name-only -- schedule.db
-```
+~~~
 
-预期以上均无本轮新增输出。
+预期：
 
-注意：
+- 如果现有路由已满足，本轮源码应无 diff。
+- 如果确需修正，原则上只允许 `src/ui/main_window.py` 出现 diff。
+- `schedule.db` 必须无 diff。
 
-- 如果 MP-2 尚未提交，`src/ui/main_window.py` 可能已有开工前 diff。执行窗口必须在日志中明确它是开工前 MP-2 diff，不是 MP-3 新增修改。
-- 若 MP-2 已提交，MP-3 本轮新增源码 diff 原则上只应出现在 `src/ui/month_window.py`，除非确有生命周期兼容需要。
+### 4.9 语法检查
 
-### 4.12 总范围检查
+~~~powershell
+D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src/ui/main_window.py src/ui/schedule_detail_pop.py src/ui/month_window.py src/ui/week_window.py main.py
+~~~
 
-```powershell
+### 4.10 总范围检查
+
+~~~powershell
 git diff --check
 git diff --name-only
 git status --short --branch
-```
+~~~
 
 预期：
 
 - `git diff --check` 无 whitespace error；LF/CRLF warning 可记录。
-- 若 MP-2 已提交，本轮最终只允许：
-  - `src/ui/month_window.py`
+- 如无需源码修正，最终只允许：
   - `manage_instruction/Work_Log.md`
   - 必要时 `manage_instruction/Work_Task_Prompts.md`
-- 若 MP-2 未提交，最终 diff 会包含 MP-2 文件；必须在日志中分清开工前 diff 与本轮新增 diff。
+- 如需要源码修正，最终只允许：
+  - `src/ui/main_window.py`
+  - `manage_instruction/Work_Log.md`
+  - 必要时 `manage_instruction/Work_Task_Prompts.md`
 
 ## 5. Work_Task_Prompts.md 处理要求
 
 如需要维护复核锚点，可将当前状态更新为：
 
-```text
-MP-3 已执行，等待决策/顾问窗口复核。
-下一步候选：MP-4。
-```
+~~~text
+MP-4 已执行，等待决策/顾问窗口复核。
+下一步候选：MP-5。
+~~~
 
-不得在本轮自行写入 `MP-4` 的执行提示词。
+不得在本轮自行写入 `MP-5` 的执行提示词。
 
 ## 6. 完成后要求
 

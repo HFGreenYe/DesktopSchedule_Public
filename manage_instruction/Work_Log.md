@@ -1567,3 +1567,180 @@ diff 范围检查结果：
 - 目前“普通视图切换保留 panel”与“显式跳日 / picker 清理 panel”已经在代码路径上区分开：前者依赖 `hideEvent(...)`，后者依赖显式 `close_day_panels()`；本轮未发现需要暂停的规则冲突。
 - 子详情手动关闭验证在 Windows 单行 `python -c` 下需要绕开 shell 对内联 `class` 的限制；复核时应按“验证方式调整”理解，而不是代码缺陷。
 - `manage_instruction/Work_Task_Prompts.md` 仍为开工前既有 diff，不属于 MP-3 本轮新增修改。
+
+---
+
+## 2026-06-25 MP-4：详情编辑请求按当前可见视图路由
+
+任务来源：
+
+- 按 `manage_instruction/Work_Task_Prompts.md` 当前待执行提示词执行 `MP-4`。
+- 本轮先做现有动态路由验证；只有发现明确缺口时才允许最小修正源码。
+
+开工前 git 状态：
+
+- `git status --short --branch`：`## main...temp/main [ahead 105]`
+- `git diff --name-only`：`manage_instruction/Work_Task_Prompts.md`
+- 开工前已有 diff：`manage_instruction/Work_Task_Prompts.md`
+- 结论：开工前无 `src/` 相关 diff，本轮不回退、不清理该既有管理文档 diff。
+
+实际修改文件：
+
+- `manage_instruction/Work_Log.md`
+
+是否修改源码：
+
+- 未修改源码。
+- 结论：`MP-4` 无需源码修正，现有 `_resolve_detail_edit_target(...)` 已满足当前动态路由要求。
+
+`ScheduleDetailPop` 信号边界检查结果：
+
+- `ScheduleDetailPop` 仍只发：
+  - `req_edit_time`
+  - `req_edit_alarm`
+  - `req_edit_list`
+- `ScheduleDetailPop` 未直接调用 `MainWindow`、`MonthWindow`、`WeekWindow`、`DashboardView`、`TodoView`、`TodoBoardWindow`。
+- `source_view` 当前仍用于弹窗内部样式/展示分支，但不是详情编辑请求信号的直接业务调用入口。
+
+`MainWindow._resolve_detail_edit_target(...)` 判断顺序检查结果：
+
+- 当前顺序为：
+  1. `week_window.isVisible()` -> `week`
+  2. `month_window.isVisible()` -> `month`
+  3. `source_view == "todo_board"` 且 `todo_board.isVisible()` -> `todo_board`
+  4. `body_stack.currentWidget() == page_todo` -> `todo`
+  5. `MainWindow.isVisible()` -> `day`
+  6. 最后才以 `source_view` 作为 fallback
+- 结论：当前可见视图优先级已经覆盖固定 `source_view`，满足 MP-4 的核心要求。
+
+time / alarm / list 三类编辑请求静态检查结果：
+
+- `MainWindow.go_to_time_picker_for_edit(...)` 调用 `_resolve_detail_edit_target(...)`。
+- `MainWindow.go_to_alarm_picker_for_edit(...)` 调用 `_resolve_detail_edit_target(...)`。
+- `MainWindow.go_to_list_picker_for_edit(...)` 调用 `_resolve_detail_edit_target(...)`。
+- `MonthWindow` 仍有：
+  - `go_to_time_picker_for_edit(...)`
+  - `go_to_alarm_picker_for_edit(...)`
+  - `go_to_list_picker_for_edit(...)`
+- `WeekWindow` 仍有：
+  - `go_to_time_picker_for_edit(...)`
+  - `go_to_alarm_picker_for_edit(...)`
+  - `go_to_list_picker_for_edit(...)`
+- `TodoBoardWindow` 仍保留既有 `go_to_list_picker_for_edit(...)` 入口，仅作现状记录，本轮未扩展。
+
+月 panel 详情桥接检查结果：
+
+- `MainWindow.open_schedule_detail_from_month_panel(...)` 仍创建：
+  - `ScheduleDetailPop(schedule_data, source_view="month")`
+- 并将编辑信号连接为：
+  - `go_to_time_picker_for_edit(data, "month")`
+  - `go_to_alarm_picker_for_edit(data, "month")`
+  - `go_to_list_picker_for_edit(data, "month")`
+- 结论：虽然桥接时固定传入 `source_view="month"`，但因为 `MainWindow.go_to_*_picker_for_edit(...)` 内部统一调用 `_resolve_detail_edit_target(...)`，该固定值不会锁死动态路由。
+
+day / week / month / todo / todo_board 路由验证结果：
+
+- `_resolve_detail_edit_target(...)` offscreen 验证输出：
+  - `day`
+  - `month`
+  - `week`
+  - `todo`
+- 说明：
+  - 主窗口可见且默认日视图时，`source_view="month"` 仍解析到 `day`
+  - `month_window` 可见时解析到 `month`
+  - `week_window` 可见时解析到 `week`
+  - `page_todo` 当前可见时解析到 `todo`
+- `time` 编辑请求 smoke：通过
+  - `month_window` 可见时命中 `month`
+  - `week_window` 可见时命中 `week`
+  - 主窗口日视图可见时进入主窗口 `edit` 链路
+- `alarm` 编辑请求 smoke：通过
+  - `month_window` 可见时命中 `month`
+  - `week_window` 可见时命中 `week`
+  - 主窗口日视图可见时进入主窗口 `edit` 链路
+- `list` 编辑请求 smoke：通过
+  - `month_window` 可见时命中 `month`
+  - `week_window` 可见时命中 `week`
+  - `page_todo` 当前可见时回到主窗口既有 `todo` 返回链路，`list_picker_source == "todo"`
+- `todo_board`：
+  - 静态代码显示 `_resolve_detail_edit_target(...)` 仍保留 `source_view == "todo_board"` 且 `todo_board.isVisible()` 时返回 `todo_board`
+  - 本轮未额外构造 `TodoBoardWindow` 做运行 smoke，仅记录现状，不扩展验证范围
+
+月 panel 固定 `source_view="month"` 是否会锁死路由：
+
+- 结论：不会锁死。
+- 依据：
+  1. `open_schedule_detail_from_month_panel(...)` 的三条编辑连接最终都进入 `MainWindow.go_to_*_picker_for_edit(..., "month")`
+  2. 三个 `go_to_*_picker_for_edit(...)` 都统一调用 `_resolve_detail_edit_target("month")`
+  3. 已通过 direct-source smoke 证明：即使传入 `"month"`，当前可见周界面时仍会改路由到 `week`，当前可见主窗口时仍会改路由到 `day`
+
+是否未改 MP-3 生命周期：
+
+- 是。
+- 未修改：
+  - `src/ui/month_window.py`
+  - `src/ui/popups/month_day_panel.py`
+  - `src/ui/schedule_detail_pop.py`
+- 普通 hide 不清理 panel 的 MP-3 规则保持不变。
+
+验证命令与结果：
+
+- 静态定位：
+  - `rg -n "def _resolve_detail_edit_target|go_to_time_picker_for_edit|go_to_alarm_picker_for_edit|go_to_list_picker_for_edit|open_schedule_detail_from_month_panel|source_view|ScheduleDetailPop|req_edit_time|req_edit_alarm|req_edit_list" src/ui/main_window.py src/ui/schedule_detail_pop.py`
+  - `rg -n "go_to_time_picker_for_edit|go_to_alarm_picker_for_edit|go_to_list_picker_for_edit" src/ui/month_window.py src/ui/week_window.py src/ui/todo_board.py`
+  - `rg -n "req_edit_time|req_edit_alarm|req_edit_list|_show_detail_popup|ScheduleDetailPop" src/ui/dashboard.py src/ui/todo.py`
+  - 结果：通过，静态链路与 MP-4 目标一致。
+- import 验证：
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.ui.main_window import MainWindow; from src.ui.schedule_detail_pop import ScheduleDetailPop; from src.ui.month_window import MonthWindow; from src.ui.week_window import WeekWindow; print('mp4 imports ok', MainWindow, ScheduleDetailPop, MonthWindow, WeekWindow)"`
+  - 结果：通过。
+- `_resolve_detail_edit_target(...)` offscreen 验证：
+  - 结果输出：`day` / `month` / `week` / `todo`
+  - 结论：通过。
+- time 编辑请求路由 smoke：
+  - 结果：通过，输出 `time route ok [...]`
+- alarm 编辑请求路由 smoke：
+  - 结果：通过，输出 `alarm route ok [...]`
+- list 编辑请求路由 smoke：
+  - 结果：通过，输出 `list route ok [...] todo`
+- 月 panel popup 动态路由专门 smoke：
+  - 直接构造 `MonthDayPanel + ScheduleDetailPop` 并 `emit` 的 offscreen 命令在当前环境下退出码为 1，未回显 Python traceback。
+  - 结合本地环境已知的 `.venv` 启动器不稳定问题，本轮将其记录为“专项 smoke 命令环境不稳定”，不据此判断源码缺陷。
+  - 等价依据已由以下两项覆盖：
+    1. `open_schedule_detail_from_month_panel(...)` 三条桥接 lambda 的静态检查
+    2. `source_view="month"` 下的 direct-source time/alarm/list 路由 smoke 全部通过
+  - 顾问窗口复核补充：加入分步输出和显式 `close()` / `app.quit()` 后，专项 smoke 通过。
+    - 输出：`target before first day`、`after first emit edit`、`target before second week`、`after second emit [('week', ...)]`。
+    - 结论：月 panel 打开的详情弹窗即使固定 `source_view="month"`，在当前日视图可见时走 day，在周界面可见时走 week，不会锁死到 month。
+- `py_compile`：
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src/ui/main_window.py src/ui/schedule_detail_pop.py src/ui/month_window.py src/ui/week_window.py main.py`
+  - 结果：通过。
+
+diff 范围检查结果：
+
+- `git diff --name-only -- src/ui/popups/month_day_panel.py`：无输出。
+- `git diff --name-only -- src/ui/month_window.py`：无输出。
+- `git diff --name-only -- src/ui/dashboard.py`：无输出。
+- `git diff --name-only -- src/ui/week_window.py`：无输出。
+- `git diff --name-only -- src/ui/todo.py`：无输出。
+- `git diff --name-only -- src/ui/todo_board.py`：无输出。
+- `git diff --name-only -- src/controllers`：无输出。
+- `git diff --name-only -- src/data`：无输出。
+- `git diff --name-only -- src/repositories`：无输出。
+- `git diff --name-only -- src/services`：无输出。
+- `git diff --name-only -- src/theme`：无输出。
+- `git diff --name-only -- src/utils/signals.py`：无输出。
+- `git diff --name-only -- src/utils/styles.py`：无输出。
+- `git diff --name-only -- assets`：无输出。
+- `git diff --name-only -- main.py`：无输出。
+- `git diff --name-only -- requirements.txt`：无输出。
+- `git diff --name-only -- schedule.db`：无输出。
+
+未完成事项：
+
+- 本轮未处理保存后多视图刷新；继续留给 `MP-5`。
+- 本轮未扩大 `todo_board` 运行态验证；仅记录现有 fallback 分支。
+
+风险或疑点：
+
+- 第一版月 panel 专项 popup emit 命令曾在进程收尾阶段无 traceback 退出；顾问窗口使用显式关闭/退出的命令复跑通过，判断为验证命令收尾问题，不是 MP-4 路由缺陷。
+- `ScheduleDetailPop.source_view` 仍参与内部 UI/样式分支；本轮只确认其不会锁死编辑路由，不处理该字段的长期语义收敛。
