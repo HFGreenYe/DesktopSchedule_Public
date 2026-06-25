@@ -306,6 +306,11 @@ class MainWindow(FramelessMainWindow):
         popup.req_edit_time.connect(lambda data: self.go_to_time_picker_for_edit(data, "month"))
         popup.req_edit_alarm.connect(lambda data: self.go_to_alarm_picker_for_edit(data, "month"))
         popup.req_edit_list.connect(lambda data: self.go_to_list_picker_for_edit(data, "month"))
+        popup.schedule_updated.connect(
+            lambda popup_ref=popup: self.month_window.refresh_after_schedule_change(
+                getattr(popup_ref, "data", None)
+            )
+        )
 
         if owner_panel is not None and hasattr(owner_panel, "register_child_detail_popup"):
             owner_panel.register_child_detail_popup(popup)
@@ -832,7 +837,7 @@ class MainWindow(FramelessMainWindow):
 
     def _on_week_schedule_updated(self, updated_schedule):
         """当周视图完成修改时，顺便把弹窗里的文字刷新一下"""
-        self.page_dashboard.refresh_data()
+        self._refresh_dashboard_todo_week()
         if not updated_schedule:
             return
         for p in self.page_dashboard.open_popups:

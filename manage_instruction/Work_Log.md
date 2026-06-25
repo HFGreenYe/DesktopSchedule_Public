@@ -1744,3 +1744,224 @@ diff 范围检查结果：
 
 - 第一版月 panel 专项 popup emit 命令曾在进程收尾阶段无 traceback 退出；顾问窗口使用显式关闭/退出的命令复跑通过，判断为验证命令收尾问题，不是 MP-4 路由缺陷。
 - `ScheduleDetailPop.source_view` 仍参与内部 UI/样式分支；本轮只确认其不会锁死编辑路由，不处理该字段的长期语义收敛。
+
+---
+
+## 2026-06-25 MP-5：保存后多视图刷新与阶段整体验收
+
+任务来源：
+
+- 按 `manage_instruction/Work_Task_Prompts.md` 当前待执行提示词执行 `MP-5`。
+- 本轮先做刷新链路审查和验收，只有发现明确刷新缺口时才做最小源码修正。
+
+开工前 git 状态：
+
+- `git status --short --branch`：`## main...temp/main [ahead 106]`
+- `git diff --name-only`：`manage_instruction/Work_Task_Prompts.md`
+- 开工前已有 diff：`manage_instruction/Work_Task_Prompts.md`
+- 结论：开工前无 `src/` 相关 diff，本轮不回退、不清理该既有管理文档 diff。
+
+实际修改文件：
+
+- `src/ui/month_window.py`
+- `src/ui/main_window.py`
+- `manage_instruction/Work_Log.md`
+
+是否修改源码：
+
+- 已做最小源码修正。
+- 原因：现有刷新链路存在明确缺口，不能满足 MP-5 的“marker / hover cache / open panel / child popup / 当前可见相关视图”一致刷新要求。
+
+现有刷新链路审查结果：
+
+- `MonthWindow._complete_schedule_edit(...)` 基线只做：
+  - `_refresh_schedule_marker_cache()`
+  - `schedule_updated.emit(schedule)`
+- 基线缺口：
+  1. 不刷新 `open_day_panels`
+  2. 不刷新 `child_detail_popups`
+  3. `MainWindow.open_schedule_detail_from_month_panel(...)` 基线未把 month panel 子 `ScheduleDetailPop.schedule_updated` 接回月界面刷新链路
+  4. `MainWindow._on_week_schedule_updated(...)` 基线只刷新 dashboard，不足以覆盖跨视图保留后“当前可见 week / todo”的刷新
+
+marker / hover cache 刷新结论：
+
+- `MonthWindow._refresh_schedule_marker_cache()` 已同时刷新：
+  - `schedule_marker_cache`
+  - `schedule_marker_count_cache`
+  - `hover_schedule_cache`
+- 本轮保留该实现，作为月界面刷新链的底层入口。
+
+open day panels 刷新结论：
+
+- 基线无刷新已打开 panel 的 helper。
+- 本轮新增：
+  - `MonthWindow.refresh_open_day_panels()`
+- 策略：
+  - 遍历 `open_day_panels`
+  - 按 `panel.panel_date` 从最新 `hover_schedule_cache` 重新取列表
+  - 调用 `panel.set_panel_data(panel_date, schedules)` 重新渲染
+- 结果：
+  - 日程时间跨日期后，旧日期 panel 会按最新数据重载，不再长期显示脏数据
+  - 标题 / 时间 / 重要性 / 状态变化也会同步回 panel 列表
+
+child detail popups 刷新结论：
+
+- 基线 `MonthDayPanel` 已有：
+  - `child_detail_popups`
+  - `register_child_detail_popup(...)`
+  - `_prune_child_detail_popups()`
+- 但基线没有 month 级 helper 去刷新这些子详情 popup。
+- 本轮新增：
+  - `MonthWindow.refresh_month_detail_popups(updated_schedule=None)`
+- 策略：
+  - 遍历所有 open panel 的 `child_detail_popups`
+  - 若传入 `updated_schedule`，只刷新同 `id` popup
+  - 对命中的 popup 调用已存在刷新方法：
+    - `refresh_time_display`
+    - `refresh_alarm_display`
+    - `refresh_list_display`
+    - `refresh_created_display`
+    - `refresh_priority_display`
+    - `refresh_repeat_display`
+  - 若 popup 当前 `data.id` 命中 `updated_schedule.id`，先将 `popup.data = updated_schedule`
+- 说明：
+  - 未直接改 `ScheduleDetailPop`。
+  - 顾问复核时发现初版 helper 只调用时间 / 提醒 / 清单 / 创建时间 / 重要性 / 重复刷新方法；若同一日程存在多个月 panel 子详情 popup，标题与详情说明可能仍显示旧值。
+  - 已补充 `refresh_month_detail_popups(...)` 对命中 popup 的 `lbl_title`、`edit_title`、`lbl_desc`、`edit_desc` 同步更新，并沿用 `ScheduleDetailPop._get_desc_color(...)` 计算详情文字颜色。
+  - 复核命令构造同 id 的 old/new fake schedule 后调用 `refresh_month_detail_popups(new)`，确认 popup 标题从 `old title` 更新为 `new title`，详情从 `old desc` 更新为 `new desc`。
+
+月 panel 子 `ScheduleDetailPop.schedule_updated` 连接结论：
+
+- 基线缺口：
+  - `MainWindow.open_schedule_detail_from_month_panel(...)` 只连接了 `req_edit_time / req_edit_alarm / req_edit_list`
+  - 没有把 `popup.schedule_updated` 接回 month 刷新链
+- 本轮补齐：
+  - `popup.schedule_updated.connect(lambda popup_ref=popup: self.month_window.refresh_after_schedule_change(getattr(popup_ref, "data", None)))`
+- 结果：
+  - month panel 子详情 popup 内直接修改标题 / 详情 / 重要性 / 重复后，会立刻回接 month 界面刷新链
+
+统一刷新 helper 与调用点：
+
+- 本轮新增：
+  - `MonthWindow.refresh_after_schedule_change(updated_schedule=None)`
+- 策略：
+  1. `_refresh_schedule_marker_cache()`
+  2. `refresh_open_day_panels()`
+  3. `refresh_month_detail_popups(updated_schedule)`
+  4. `schedule_updated.emit(updated_schedule)`
+- 调用点：
+  - `MonthWindow._complete_schedule_edit(schedule)` 现在改为调用 `refresh_after_schedule_change(schedule)`
+  - `MainWindow.open_schedule_detail_from_month_panel(...)` 中 month 子 popup 的 `schedule_updated` 也回接到该 helper
+
+day / week / month / todo 相关刷新结论：
+
+- `MonthWindow.schedule_updated` 仍连接到 `MainWindow._on_week_schedule_updated(...)`
+- 基线缺口：
+  - `_on_week_schedule_updated(...)` 原本只 `page_dashboard.refresh_data()`
+  - 无法覆盖当前可见 `week` / `todo`
+- 本轮补齐：
+  - `_on_week_schedule_updated(...)` 先调用 `_refresh_dashboard_todo_week()`
+- 结果：
+  - day：通过 `dashboard` 刷新
+  - todo：通过 `todo` 刷新
+  - week：通过 `week_if_visible` 刷新
+  - month：由 `MonthWindow.refresh_after_schedule_change(...)` 自身负责
+- 说明：
+  - 本轮复用既有 RefreshCoordinator 边界，没有新增全局 EventBus，也没有改 MP-4 路由规则。
+
+是否未改 MP-3 生命周期：
+
+- 是。
+- 未修改普通视图切换保留 panel 的规则。
+- 未修改：
+  - panel 手动关闭清理子详情
+  - 普通 `hide()` 不清理 panel
+  - 显式跳日 / picker 仍显式清理 panel
+
+是否未改 MP-4 动态路由：
+
+- 是。
+- `MainWindow._resolve_detail_edit_target(...)` 未修改。
+- `ScheduleDetailPop` 的编辑请求路由规则未修改。
+
+验证命令与结果：
+
+- 静态定位：
+  - `rg -n "_complete_schedule_edit|_refresh_schedule_marker_cache|open_day_panels|set_panel_data|child_detail_popups|schedule_updated|refresh_open|refresh_after|refresh_month|refresh_data|refresh_week_data|refresh_time_display|refresh_alarm_display|refresh_list_display|refresh_created_display" src/ui/main_window.py src/ui/month_window.py src/ui/popups/month_day_panel.py src/ui/schedule_detail_pop.py src/ui/dashboard.py src/ui/week_window.py src/ui/todo.py src/ui/todo_board.py`
+  - 结果：通过，可定位新增 helper 和 month/month-popup/main refresh 链。
+- import 验证：
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "from src.ui.main_window import MainWindow; from src.ui.month_window import MonthWindow; from src.ui.popups.month_day_panel import MonthDayPanel; from src.ui.schedule_detail_pop import ScheduleDetailPop; print('mp5 imports ok', MainWindow, MonthWindow, MonthDayPanel, ScheduleDetailPop)"`
+  - 结果：通过。
+- 月 panel 可重复刷新列表验证：
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from datetime import datetime; from types import SimpleNamespace; from PyQt6.QtWidgets import QApplication; from PyQt6.QtCore import QDate; from src.ui.popups.month_day_panel import MonthDayPanel; app=QApplication([]); q=QDate.currentDate(); s1=SimpleNamespace(id=1, title='old title', start_time=datetime.now(), end_time=None, priority=0, status=0); s2=SimpleNamespace(id=1, title='new title', start_time=datetime.now(), end_time=None, priority=2, status=1); p=MonthDayPanel(q, [s1]); p.set_panel_data(q, [s2]); print('panel refresh ok', p.panel_date.toString('yyyy-MM-dd')); assert p.panel_date == q; p.close(); app.quit()"`
+  - 结果：通过。
+- MonthWindow marker/cache 刷新 smoke：
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from src.ui.month_window import MonthWindow; app=QApplication([]); w=MonthWindow(); w._refresh_schedule_marker_cache(); print('marker cache type', type(w.hover_schedule_cache).__name__); assert isinstance(w.hover_schedule_cache, dict); w.close(); app.quit()"`
+  - 结果：通过。
+- open panel 刷新 helper 验证：
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from PyQt6.QtCore import QDate; from src.ui.month_window import MonthWindow; app=QApplication([]); w=MonthWindow(); q=QDate.currentDate().addDays(1); w._open_day_panel(q); assert len(w.open_day_panels) == 1; assert hasattr(w, 'refresh_open_day_panels'); w.refresh_open_day_panels(); print('open panel refresh helper ok', len(w.open_day_panels)); assert len(w.open_day_panels) == 1; w.close_day_panels(); w.close(); app.quit()"`
+  - 结果：通过。
+- detail popup 刷新 helper 验证：
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from datetime import datetime; from types import SimpleNamespace; from PyQt6.QtWidgets import QApplication; from PyQt6.QtCore import QDate; from src.ui.month_window import MonthWindow; from src.ui.popups.month_day_panel import MonthDayPanel; from src.ui.schedule_detail_pop import ScheduleDetailPop; app=QApplication([]); w=MonthWindow(); panel=MonthDayPanel(QDate.currentDate(), []); s=SimpleNamespace(id=55, title='mp5', description='', start_time=None, end_time=None, priority=0, status=0, item_type='schedule', category_id=None, is_alarm=False, alarm_duration=0, reminder_time=None, repeat_rule='无', created_at=datetime.now()); pop=ScheduleDetailPop(s, source_view='month'); panel.register_child_detail_popup(pop); w.open_day_panels.append(panel); assert hasattr(w, 'refresh_month_detail_popups'); w.refresh_month_detail_popups(s); print('detail popup refresh helper ok'); panel.close(); w.close(); app.quit()"`
+  - 结果：通过。
+- 统一刷新 helper 验证：
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication; from PyQt6.QtCore import QDate; from src.ui.month_window import MonthWindow; app=QApplication([]); w=MonthWindow(); q=QDate.currentDate().addDays(1); w._open_day_panel(q); assert hasattr(w, 'refresh_after_schedule_change'); w.refresh_after_schedule_change(); print('refresh after schedule change ok', len(w.open_day_panels), type(w.hover_schedule_cache).__name__); w.close_day_panels(); w.close(); app.quit()"`
+  - 结果：通过。
+- MainWindow 现有 `schedule_updated` 链路 smoke：
+  - 初版 monkeypatch 直接替换 `page_dashboard.refresh_data` / `page_todo.refresh_data` 后断言失败。
+  - 原因：`RefreshCoordinator` 在构造阶段已注册旧的 bound method，后置 monkeypatch 不会自动覆盖已注册 callable。
+  - 复跑方式：monkeypatch 后执行 `w._register_refresh_targets()` 再测。
+  - 复跑命令：
+    - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from types import SimpleNamespace; from PyQt6.QtWidgets import QApplication; from src.ui.main_window import MainWindow; app=QApplication([]); w=MainWindow(); hits=[]; w.page_dashboard.refresh_data=lambda: hits.append('dashboard'); w.page_todo.refresh_data=lambda: hits.append('todo'); w.week_window.refresh_week_data=lambda: hits.append('week'); w._register_refresh_targets(); w.week_window.show(); app.processEvents(); w._on_week_schedule_updated(SimpleNamespace(id=-999)); print('refresh hits', hits); assert 'dashboard' in hits; assert 'todo' in hits; assert 'week' in hits; w.close(); app.quit()"`
+  - 结果：通过，输出 `refresh hits ['week', 'dashboard', 'todo', 'week']`。
+- 月 panel 子详情 popup 的 `schedule_updated` 连接验证：
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from datetime import datetime; from types import SimpleNamespace; from PyQt6.QtWidgets import QApplication; from PyQt6.QtCore import QDate; from src.ui.main_window import MainWindow; from src.ui.popups.month_day_panel import MonthDayPanel; app=QApplication([]); w=MainWindow(); calls=[]; w.month_window.refresh_after_schedule_change=lambda updated_schedule=None: calls.append(getattr(updated_schedule,'id',None)); panel=MonthDayPanel(QDate.currentDate(), []); s=SimpleNamespace(id=88,title='mp5',description='',start_time=None,end_time=None,priority=0,status=0,item_type='schedule',category_id=None,is_alarm=False,alarm_duration=0,reminder_time=None,repeat_rule='无',created_at=datetime.now()); pop=w.open_schedule_detail_from_month_panel(s, panel); pop.schedule_updated.emit(); print('popup refresh calls', calls); assert calls == [88]; panel.close(); w.close(); app.quit()"`
+  - 结果：通过，输出 `popup refresh calls [88]`。
+- 顾问复核补充：子详情 popup 标题 / 详情同步验证：
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from datetime import datetime; from types import SimpleNamespace; from PyQt6.QtWidgets import QApplication; from PyQt6.QtCore import QDate; from src.ui.month_window import MonthWindow; from src.ui.popups.month_day_panel import MonthDayPanel; from src.ui.schedule_detail_pop import ScheduleDetailPop; app=QApplication([]); w=MonthWindow(); panel=MonthDayPanel(QDate.currentDate(), []); old=SimpleNamespace(id=55,title='old title',description='old desc',start_time=None,end_time=None,priority=0,status=0,item_type='schedule',category_id=None,is_alarm=False,alarm_duration=0,reminder_time=None,repeat_rule='无',created_at=datetime.now()); new=SimpleNamespace(id=55,title='new title',description='new desc',start_time=None,end_time=None,priority=2,status=0,item_type='schedule',category_id=None,is_alarm=False,alarm_duration=0,reminder_time=None,repeat_rule='每天',created_at=datetime.now()); pop=ScheduleDetailPop(old, source_view='month'); panel.register_child_detail_popup(pop); w.open_day_panels.append(panel); w.refresh_month_detail_popups(new); title=getattr(pop,'lbl_title').text(); desc=getattr(pop,'lbl_desc').text(); print('popup text after refresh', title, '|', desc); assert title == 'new title'; assert desc == 'new desc'; panel.close(); w.close(); app.quit()"`
+  - 结果：通过，输出 `popup text after refresh new title | new desc`。
+- `py_compile`：
+  - `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src/ui/main_window.py src/ui/month_window.py src/ui/popups/month_day_panel.py src/ui/schedule_detail_pop.py src/ui/dashboard.py src/ui/week_window.py src/ui/todo.py src/ui/todo_board.py main.py`
+  - 结果：通过。
+
+diff 范围检查结果：
+
+- `git diff --name-only -- src/controllers`：无输出。
+- `git diff --name-only -- src/data`：无输出。
+- `git diff --name-only -- src/repositories`：无输出。
+- `git diff --name-only -- src/services`：无输出。
+- `git diff --name-only -- src/theme`：无输出。
+- `git diff --name-only -- src/utils/signals.py`：无输出。
+- `git diff --name-only -- src/utils/styles.py`：无输出。
+- `git diff --name-only -- assets`：无输出。
+- `git diff --name-only -- main.py`：无输出。
+- `git diff --name-only -- requirements.txt`：无输出。
+- `git diff --name-only -- schedule.db`：无输出。
+
+MP-0 ~ MP-5 阶段完成结论：
+
+- MP-0：完成，现状审查与边界定位已完成。
+- MP-1：完成，月日程 panel UI 与列表承载已完成。
+- MP-2：完成，panel 内双击打开共享 `ScheduleDetailPop` 已完成。
+- MP-3：完成，panel 生命周期与跨视图保留规则已完成。
+- MP-4：完成，详情编辑请求按当前可见视图动态路由已验收通过。
+- MP-5：完成，本轮已补齐 month marker / hover cache / open panel / child popup / 当前可见相关视图的刷新链。
+
+阶段目标达成结论：
+
+- 月日程 panel UI：达到阶段目标。
+- 详情打开：达到阶段目标。
+- 生命周期：达到阶段目标。
+- 动态路由：达到阶段目标。
+- 刷新验收：达到阶段目标。
+- 结论：`MP` 阶段可归档。
+
+未完成事项：
+
+- 本轮未扩展 `todo_board` 专项运行态刷新验证；仍沿用既有 todo_board 链路。
+- 本轮未做真实写库验收；按提示词默认策略，仅做无写库 smoke。
+
+风险或疑点：
+
+- `MainWindow` 统一刷新链 smoke 的断言已通过并输出 `refresh hits ['week', 'dashboard', 'todo', 'week']`，但完整 `MainWindow` offscreen 进程在 `done` 后仍返回 code 1；判断为 Qt 窗口 / 后台对象收尾不稳定，不是刷新断言失败。手动验收仍需重点复测实际 GUI 中月 panel 子详情编辑后的跨视图刷新。
+- MainWindow 的 week/month 共用 `_on_week_schedule_updated(...)` 名称现在已经覆盖 month 刷新后的跨视图联动，但方法名语义仍偏旧；本轮不改名，只做最小补修。

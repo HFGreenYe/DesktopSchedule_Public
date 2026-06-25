@@ -2220,9 +2220,74 @@ class MonthWindow(FramelessMainWindow):
         self.inline_add_view.hide()
         self.search_box.show()
 
-    def _complete_schedule_edit(self, schedule):
+    def refresh_open_day_panels(self):
+        self.open_day_panels = [panel for panel in self.open_day_panels if panel is not None]
+        for panel in list(self.open_day_panels):
+            try:
+                panel_date = getattr(panel, "panel_date", None)
+                if panel_date is None or not panel_date.isValid():
+                    continue
+                schedules = self.hover_schedule_cache.get(panel_date.toPyDate(), [])
+                panel.set_panel_data(panel_date, schedules)
+            except RuntimeError:
+                continue
+
+    def refresh_month_detail_popups(self, updated_schedule=None):
+        target_id = getattr(updated_schedule, "id", None) if updated_schedule is not None else None
+
+        for panel in list(self.open_day_panels):
+            try:
+                if hasattr(panel, "_prune_child_detail_popups"):
+                    panel._prune_child_detail_popups()
+                child_popups = list(getattr(panel, "child_detail_popups", []))
+            except RuntimeError:
+                continue
+
+            for popup in child_popups:
+                try:
+                    popup_data = getattr(popup, "data", None)
+                    popup_id = getattr(popup_data, "id", None)
+                    if target_id is not None and popup_id != target_id:
+                        continue
+                    if updated_schedule is not None and popup_id == target_id:
+                        popup.data = updated_schedule
+                        if hasattr(popup, "lbl_title"):
+                            popup.lbl_title.setText(getattr(updated_schedule, "title", ""))
+                        if hasattr(popup, "edit_title"):
+                            popup.edit_title.setText(getattr(updated_schedule, "title", ""))
+                        if hasattr(popup, "lbl_desc"):
+                            description = getattr(updated_schedule, "description", "") or ""
+                            popup.lbl_desc.setText(description or "暂无详情，双击添加...")
+                            if hasattr(popup, "_get_desc_color"):
+                                desc_color = popup._get_desc_color(bool(description))
+                                popup.lbl_desc.setStyleSheet(
+                                    "color: "
+                                    f"{desc_color}; border: none; background: transparent; "
+                                    "font-size: 13px; font-family: 'Microsoft YaHei'; line-height: 1.5;"
+                                )
+                        if hasattr(popup, "edit_desc"):
+                            popup.edit_desc.setPlainText(getattr(updated_schedule, "description", "") or "")
+                    for method_name in (
+                        "refresh_time_display",
+                        "refresh_alarm_display",
+                        "refresh_list_display",
+                        "refresh_created_display",
+                        "refresh_priority_display",
+                        "refresh_repeat_display",
+                    ):
+                        if hasattr(popup, method_name):
+                            getattr(popup, method_name)()
+                except RuntimeError:
+                    continue
+
+    def refresh_after_schedule_change(self, updated_schedule=None):
         self._refresh_schedule_marker_cache()
-        self.schedule_updated.emit(schedule)
+        self.refresh_open_day_panels()
+        self.refresh_month_detail_popups(updated_schedule)
+        self.schedule_updated.emit(updated_schedule)
+
+    def _complete_schedule_edit(self, schedule):
+        self.refresh_after_schedule_change(schedule)
 
     def _check_repeat_and_execute(self, schedule_data, update_callback):
         rule = getattr(schedule_data, "repeat_rule", "")
