@@ -794,7 +794,47 @@ class SharedMoreMenu(QMenu):
         print(f"[{self.parent_window.__class__.__name__}] 点击了全部日程")
 
     def _on_show_axis(self):
-        print(f"[{self.parent_window.__class__.__name__}] 点击了坐标显示")
+        from PyQt6.QtGui import QGuiApplication
+        from PyQt6.QtWidgets import QApplication
+        from src.ui.popups.schedule_axis_board import ScheduleAxisBoard
+
+        if not hasattr(self.parent_window, "axis_board") or self.parent_window.axis_board is None:
+            self.parent_window.axis_board = ScheduleAxisBoard(self.parent_window)
+            detail_owner = self.parent_window
+            if not hasattr(detail_owner, "open_schedule_detail_from_month_panel"):
+                detail_owner = next(
+                    (
+                        widget
+                        for widget in QApplication.topLevelWidgets()
+                        if hasattr(widget, "open_schedule_detail_from_month_panel")
+                    ),
+                    None,
+                )
+            if detail_owner is not None:
+                self.parent_window.axis_board.set_detail_opener(
+                    detail_owner.open_schedule_detail_from_month_panel
+                )
+            parent_geometry = self.parent_window.frameGeometry()
+            board = self.parent_window.axis_board
+            x = parent_geometry.right() + 10
+            y = parent_geometry.top()
+            screen = QGuiApplication.screenAt(parent_geometry.center()) or QGuiApplication.primaryScreen()
+            if screen is not None:
+                available = screen.availableGeometry()
+                if x + board.width() > available.right() + 1:
+                    x = parent_geometry.left() - board.width() - 10
+                x = max(available.left(), min(x, available.right() - board.width() + 1))
+                y = max(available.top(), min(y, available.bottom() - board.height() + 1))
+            board.move(x, y)
+
+        board = self.parent_window.axis_board
+        if board.isVisible():
+            board.hide()
+            return
+        board.refresh_data()
+        board.show()
+        board.raise_()
+        board.activateWindow()
 
     def _on_modify_font(self):
         print(f"[{self.parent_window.__class__.__name__}] 点击了修改字体")
