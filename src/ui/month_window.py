@@ -2232,6 +2232,26 @@ class MonthWindow(FramelessMainWindow):
             except RuntimeError:
                 continue
 
+    def restore_open_day_panels(self):
+        """Keep month day panels above the newly shown view after a view switch."""
+        self.open_day_panels = [panel for panel in self.open_day_panels if panel is not None]
+        for panel in list(self.open_day_panels):
+            try:
+                panel.show()
+                panel.raise_()
+                if hasattr(panel, "_prune_child_detail_popups"):
+                    panel._prune_child_detail_popups()
+                child_popups = list(getattr(panel, "child_detail_popups", []))
+            except RuntimeError:
+                continue
+
+            for popup in child_popups:
+                try:
+                    popup.show()
+                    popup.raise_()
+                except RuntimeError:
+                    continue
+
     def refresh_month_detail_popups(self, updated_schedule=None):
         target_id = getattr(updated_schedule, "id", None) if updated_schedule is not None else None
 

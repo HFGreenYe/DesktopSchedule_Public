@@ -739,6 +739,7 @@ class MainWindow(FramelessMainWindow):
     def _restore_detail_popups(self):
         self.page_dashboard.restore_detail_popups()
         self.page_todo.restore_detail_popups()
+        self.month_window.restore_open_day_panels()
 
     def _sync_view_selector_state(self, view_name):
         if view_name not in {"day", "week", "month", "todo"}:

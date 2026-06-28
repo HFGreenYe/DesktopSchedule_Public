@@ -1965,3 +1965,94 @@ MP-0 ~ MP-5 阶段完成结论：
 
 - `MainWindow` 统一刷新链 smoke 的断言已通过并输出 `refresh hits ['week', 'dashboard', 'todo', 'week']`，但完整 `MainWindow` offscreen 进程在 `done` 后仍返回 code 1；判断为 Qt 窗口 / 后台对象收尾不稳定，不是刷新断言失败。手动验收仍需重点复测实际 GUI 中月 panel 子详情编辑后的跨视图刷新。
 - MainWindow 的 week/month 共用 `_on_week_schedule_updated(...)` 名称现在已经覆盖 month 刷新后的跨视图联动，但方法名语义仍偏旧；本轮不改名，只做最小补修。
+
+---
+
+## 2026-06-28 月日程 panel 跨视图可见性修复
+
+任务目标：
+
+- 核查月界面只打开某日 panel、未打开具体日程详情时，切换到日/周/待办视图后 panel 看似关闭的问题。
+- 目标行为：普通视图切换后，某日 panel 无论是否存在子详情 popup 都继续显示；显式关闭规则保持不变。
+
+开工前 git 状态：
+
+- `git status --short --branch`：`## main...temp/main [ahead 107]`
+- 工作区无未提交 diff。
+
+原因确认：
+
+- `MonthWindow.hideEvent(...)` 已按 MP-3 规则不再调用 `close_day_panels()`，因此普通视图切换并未真正销毁 panel。
+- `MainWindow.switch_view(...)` 在目标窗口显示后只通过 `_restore_detail_popups()` 恢复日/待办详情 popup，没有恢复或提升 `MonthWindow.open_day_panels` 的窗口层级。
+- 无子详情 popup 时，月日程 panel 容易落到新显示的顶层窗口后方，视觉上表现为“关闭”；打开子详情后，详情 popup 的恢复/层级行为使现象不一致。
+
+实际修改文件：
+
+- `src/ui/month_window.py`
+- `src/ui/main_window.py`
+- `manage_instruction/Work_Log.md`
+
+实现说明：
+
+- `MonthWindow` 新增 `restore_open_day_panels()`：
+  - 对仍登记在 `open_day_panels` 的 panel 执行 `show()` 和 `raise_()`。
+  - 清理失效的子详情引用后，对仍存在的子详情 popup 执行 `show()` 和 `raise_()`，保持详情位于所属 panel 上方。
+  - 不调用 `activateWindow()`，避免普通视图切换时抢占输入焦点。
+- `MainWindow._restore_detail_popups()` 在恢复日/待办详情 popup 后调用 `month_window.restore_open_day_panels()`。
+- 继续复用 `switch_view(...)` 既有 `QTimer.singleShot(0, ...)`，确保目标视图窗口完成显示后再恢复 popup 层级。
+
+保持不变的行为：
+
+- 月格再次单击同日仍可手动关闭该 panel。
+- 双击月格跳日、右键跳日、进入时间/提醒/清单 picker 和月窗口真正关闭时，既有显式 `close_day_panels()` 规则不变。
+- panel 手动关闭时仍关闭其所属子详情 popup。
+- 本轮未修改 MP-4 当前可见视图编辑路由和 MP-5 保存刷新链。
+
+验证结果：
+
+- `py_compile`：`src/ui/main_window.py`、`src/ui/month_window.py`、`src/ui/popups/month_day_panel.py`、`main.py` 通过。
+- 无子详情 panel 跨窗口恢复 offscreen：
+  - 打开某日 panel，隐藏月窗口并显示另一个顶层窗口，再调用 `restore_open_day_panels()`。
+  - 结果：`panel retained True`、`panel visible True`。
+- 主窗口恢复桥接 smoke：
+  - 结果：`restore hits ['day', 'todo', 'month']`，确认月 panel 已纳入既有恢复回调。
+- 显式关闭回归：调用 `close_day_panels()` 后结果 `explicit close count 0`。
+- 禁止范围检查：`src/controllers`、`src/data`、`src/repositories`、`src/services`、`src/theme`、`assets`、`main.py`、`requirements.txt`、`schedule.db` 均无 diff。
+- `git diff --check`：仅 LF/CRLF 提示，无 whitespace error。
+
+未完成事项与风险：
+
+- Qt offscreen 无法直接断言 Windows 桌面真实 Z-order；已验证对象保留、可见状态与恢复调用。仍建议手动复测“月 -> 日/周/待办 -> 月”以及无子详情/有子详情两种路径。
+- 本轮不提交 Git，等待用户检查实际界面后决定提交。
+
+---
+
+## 2026-06-29 Final_Formulation 进度同步
+
+核查结论：
+
+- `Final_Formulation.md` 已记录旧 `M-0 ~ M-7` 月界面功能补齐阶段，但尚未记录随后完成的 `MP-0 ~ MP-5` 月日程持久 panel 详情与编辑路由阶段。
+- 文档仍把“持久弹窗编辑能力”列为未完成缺口，与当前代码和阶段日志不一致。
+
+实际修改文件：
+
+- `manage_instruction/Final_Formulation.md`
+- `manage_instruction/Work_Log.md`
+
+更新内容：
+
+- 在当前状态和已完成阶段中补入 `MP-0 ~ MP-5`：
+  - 紧凑列表 UI 与数据承载。
+  - 双击日程项打开共享详情弹窗。
+  - 普通视图切换保留 panel、显式关闭继续清理。
+  - 编辑请求按当前可见视图动态路由。
+  - 保存后 marker、cache、panel、子详情及相关视图统一刷新。
+- 记录无子详情 panel 在普通视图切换后的层级恢复补修。
+- 将“持久弹窗编辑能力未完成”修正为“编辑主链已完成，剩余视觉与布局验收”。
+- 同步 Month View 技术债和后续第 1 项说明，不改变坐标看板、课表模式、搜索、导出、换肤、自定义重复、弹窗美化、节假日、字体和云功能的既定顺序。
+
+范围说明：
+
+- 本次进度同步不修改源码。
+- 当前源码 diff 仍仅来自上一项月日程 panel 跨视图可见性修复。
+- `Work_Instruction.md` 仍保留为本轮 MP 阶段合同，后续归档时再处理，不在本次进度同步中改写。
