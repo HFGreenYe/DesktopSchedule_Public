@@ -10,6 +10,8 @@ class MonthDayHoverPreview(QFrame):
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setMinimumWidth(150)
+        self.setMaximumWidth(260)
 
         self.setStyleSheet("""
             QFrame#MonthDayHoverPreview {
@@ -35,6 +37,7 @@ class MonthDayHoverPreview(QFrame):
         self.body_label = QLabel()
         self.body_label.setStyleSheet("font-size: 11px;")
         self.body_label.setWordWrap(True)
+        self.body_label.setMaximumWidth(238)
         self._layout.addWidget(self.body_label)
 
     def paintEvent(self, event):

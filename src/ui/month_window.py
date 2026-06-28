@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QGridLayout, QTextEdit, QComboBox, QListView,
                              QStyleOptionComboBox, QStylePainter, QMessageBox,
                              QSizePolicy)
-from PyQt6.QtCore import Qt, pyqtSignal, QDate, QTime, QTimer, QRectF, QSize, QEvent
+from PyQt6.QtCore import Qt, pyqtSignal, QDate, QTime, QTimer, QRectF, QSize, QEvent, QPoint
 from PyQt6.QtGui import QPainter, QPainterPath, QColor, QBrush, QLinearGradient, QIcon, QPen, QPalette, QPixmap, QGuiApplication
 from PyQt6.QtSvg import QSvgRenderer
 from qframelesswindow import FramelessMainWindow
@@ -1769,9 +1769,31 @@ class MonthWindow(FramelessMainWindow):
         popup.set_preview_data(qdate, schedules)
 
         cell_rect = self.calendar_table_view.visualRect(index)
-        global_anchor = self.calendar_viewport.mapToGlobal(cell_rect.bottomRight())
-        popup.move(global_anchor.x() + 8, global_anchor.y() + 8)
+        popup.move(self._get_hover_preview_position(popup, cell_rect))
         popup.show()
+
+    def _get_hover_preview_position(self, popup, cell_rect):
+        gap = 8
+        cell_top_left = self.calendar_viewport.mapToGlobal(cell_rect.topLeft())
+        cell_bottom_right = self.calendar_viewport.mapToGlobal(cell_rect.bottomRight())
+        x = cell_bottom_right.x() + gap
+        y = cell_bottom_right.y() + gap
+
+        screen = QGuiApplication.screenAt(cell_bottom_right) or QGuiApplication.primaryScreen()
+        if screen is None:
+            return QPoint(x, y)
+
+        available = screen.availableGeometry()
+        if x + popup.width() > available.right() + 1:
+            x = cell_top_left.x() - gap - popup.width()
+        if y + popup.height() > available.bottom() + 1:
+            y = cell_top_left.y() - gap - popup.height()
+
+        max_x = available.right() - popup.width() + 1
+        max_y = available.bottom() - popup.height() + 1
+        x = max(available.left(), min(x, max_x))
+        y = max(available.top(), min(y, max_y))
+        return QPoint(x, y)
 
     def eventFilter(self, obj, event):
         if obj == getattr(self, "calendar_viewport", None):

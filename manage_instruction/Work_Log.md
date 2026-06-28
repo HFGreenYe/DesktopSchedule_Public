@@ -2117,3 +2117,67 @@ MP-0 ~ MP-5 阶段完成结论：
 - 月界面可以结束当前集中验收，不需要继续无目标地调整间距和尺寸。
 - 建议只补一个小工单处理 hover 预览最大宽度、自动换行和屏幕边界回退；详情框滚动条样式可并入后续统一弹窗/QSS 美化阶段。
 - 本轮不修改业务源码，不提交临时截图或验收脚本。
+
+---
+
+## 2026-06-29 月界面 hover 预览宽度与屏幕边界修复
+
+任务来源：
+
+- 根据月界面 UI 集中验收发现项，修复 hover 只读预览的最大宽度、长文本自动换行和屏幕边界回退。
+- 本轮不修改待办看板和月界面单击日期持久 panel。
+
+开工前状态：
+
+- `git status --short --branch`：`## main...temp/main [ahead 109]`
+- 工作区干净。
+
+实际修改文件：
+
+- `src/ui/popups/month_day_hover_preview.py`
+- `src/ui/month_window.py`
+- `manage_instruction/Final_Formulation.md`
+- `manage_instruction/Work_Log.md`
+
+实现内容：
+
+- `MonthDayHoverPreview`：
+  - 最小宽度设为 `150px`。
+  - 最大宽度设为 `260px`。
+  - 正文标签最大宽度设为 `238px`，配合既有 `wordWrap=True` 让长标题和多条日程自动换行增高。
+- `MonthWindow._show_hover_preview(...)`：
+  - 不再固定使用日期格右下角坐标直接移动。
+  - 新增 `_get_hover_preview_position(...)` 计算预览位置。
+  - 默认仍显示在日期格右下方，保持原交互方向。
+  - 右侧越界时回退到日期格左侧。
+  - 底部越界时回退到日期格上方。
+  - 最后按当前屏幕 `availableGeometry()` 夹紧，避免多屏或任务栏区域越界。
+  - 不调用 `activateWindow()`，不改变 hover 预览只读、鼠标穿透和移出立即隐藏的行为。
+
+验证结果：
+
+- 极端长标题换行：
+  - 合成 `“超长标题” * 30` 的单条日程。
+  - 显示后 popup 为 `253x123`，正文为 `231x89`，正文实际高度等于换行后的 `sizeHint`。
+  - 结果：宽度小于 `260px`，正文无纵向裁切。
+- 屏幕右下角边界：
+  - offscreen 可用区域为 `800x800`。
+  - 将月窗口放到右下角，以日历 viewport 右下角单元格计算长标题 popup 位置。
+  - 结果：popup `253x123`，最终坐标 `(517,647)`，四边均位于可用区域内。
+- `py_compile`：
+  - `month_day_hover_preview.py`
+  - `month_window.py`
+  - `main_window.py`
+  - `main.py`
+  - 结果：通过。
+
+保持不变：
+
+- hover 预览仍最多展示 6 条日程，超过时显示总数提示。
+- 鼠标离开日期网格后仍立即隐藏。
+- 单击日期 panel、共享详情弹窗、右键菜单、添加/picker 和数据库逻辑均未修改。
+
+未完成事项与风险：
+
+- Qt offscreen 已验证尺寸和屏幕夹紧；真实 Windows 多显示器、负坐标副屏仍建议用户手动观察一次。
+- 月添加详情框原生滚动条仍属于后续统一 QSS 美化项，本轮未处理。
