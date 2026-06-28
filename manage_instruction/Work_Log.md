@@ -2181,3 +2181,40 @@ MP-0 ~ MP-5 阶段完成结论：
 
 - Qt offscreen 已验证尺寸和屏幕夹紧；真实 Windows 多显示器、负坐标副屏仍建议用户手动观察一次。
 - 月添加详情框原生滚动条仍属于后续统一 QSS 美化项，本轮未处理。
+
+---
+
+## 2026-06-29 月界面持久 panel 长标题省略
+
+任务目标：
+
+- 修复月界面单击日期持久 panel 中，长日程标题挤占右侧状态列并超出单行可用空间的问题。
+- 本轮只修改持久 panel 日程行，不修改 hover 预览和待办看板。
+
+实际修改文件：
+
+- `src/ui/popups/month_day_panel.py`
+- `manage_instruction/Final_Formulation.md`
+- `manage_instruction/Work_Log.md`
+
+实现内容：
+
+- 新增 `_ElidedTitleLabel`：
+  - 保存完整标题文本。
+  - 根据控件实时宽度使用 `QFontMetrics.elidedText(..., ElideRight, width)` 生成右侧省略文本。
+  - resize 时重新计算，适配滚动条出现或布局宽度变化。
+  - tooltip 保留完整标题，鼠标停留时仍可查看全文。
+  - `sizeHint()` / `minimumSizeHint()` 的宽度返回 0，并使用水平 `Ignored` size policy，让标题只占时间列与状态列之间的剩余空间。
+- 时间列固定 `40px`、状态列固定 `66px` 的既有规则保持不变。
+
+验证结果：
+
+- 合成长中文标题显示为右侧省略文本，断言末尾为省略号通过。
+- 标题实际可用宽度约 `116px`，完整文本保留在 tooltip。
+- 右侧 `高/未完成` 状态标签仍存在，未被长标题挤出。
+- `py_compile`：`month_day_panel.py`、`month_day_hover_preview.py`、`month_window.py`、`main.py` 通过。
+
+保持不变：
+
+- 日程行固定高度、时间、状态、双击打开共享详情、滚动和 panel 尺寸均未修改。
+- 本轮未改数据库、服务层、待办看板、日界面或周界面。

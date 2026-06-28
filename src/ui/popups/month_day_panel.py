@@ -4,10 +4,11 @@ from PyQt6.QtWidgets import (
     QLabel,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
-from PyQt6.QtCore import Qt, QRectF, pyqtSignal
+from PyQt6.QtCore import Qt, QRectF, QSize, pyqtSignal
 from PyQt6.QtGui import QBrush, QColor, QLinearGradient, QPainter, QPen
 
 
@@ -24,6 +25,41 @@ class _MonthScheduleItemFrame(QFrame):
             event.accept()
             return
         super().mouseDoubleClickEvent(event)
+
+
+class _ElidedTitleLabel(QLabel):
+    def __init__(self, text="", parent=None):
+        super().__init__(parent)
+        self._full_text = text
+        self.setToolTip(text)
+        self._update_elided_text()
+
+    def setText(self, text):
+        self._full_text = text or ""
+        self.setToolTip(self._full_text)
+        self._update_elided_text()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_elided_text()
+
+    def sizeHint(self):
+        hint = super().sizeHint()
+        return QSize(0, hint.height())
+
+    def minimumSizeHint(self):
+        hint = super().minimumSizeHint()
+        return QSize(0, hint.height())
+
+    def _update_elided_text(self):
+        available_width = max(self.contentsRect().width(), 0)
+        display_text = self.fontMetrics().elidedText(
+            self._full_text,
+            Qt.TextElideMode.ElideRight,
+            available_width,
+        )
+        if super().text() != display_text:
+            super().setText(display_text)
 
 
 class MonthDayPanel(QWidget):
@@ -219,8 +255,9 @@ class MonthDayPanel(QWidget):
         )
         layout.addWidget(time_label)
 
-        title_label = QLabel(self._format_title_text(schedule))
+        title_label = _ElidedTitleLabel(self._format_title_text(schedule))
         title_label.setMinimumWidth(0)
+        title_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         title_label.setWordWrap(False)
         title_label.setStyleSheet(
             "background: transparent; border: none; color: white; "
