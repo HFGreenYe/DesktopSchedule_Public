@@ -2227,7 +2227,6 @@ class MonthWindow(FramelessMainWindow):
 
     def _show_edit_picker(self, active_picker):
         self._hide_hover_preview()
-        self.close_day_panels()
         if not self.isVisible():
             self.show()
         self.search_box.show()
@@ -2235,6 +2234,7 @@ class MonthWindow(FramelessMainWindow):
         self.inline_add_view.hide()
         for picker in (self.page_time, self.page_alarm, self.page_list):
             picker.setVisible(picker is active_picker)
+        QTimer.singleShot(0, self.restore_open_day_panels)
 
     def _finish_edit_picker(self, mode_attribute):
         setattr(self, mode_attribute, "add")

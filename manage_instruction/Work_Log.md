@@ -2295,3 +2295,44 @@ MP-0 ~ MP-5 阶段完成结论：
 - 明确已完成日程是否默认显示、过滤或单独弱化。
 - 真实 Windows 环境复核共享详情弹窗的位置、重复打开和编辑回流。
 - 项目 Python 3.11 基础解释器路径需要单独修复，避免后续自动验证持续失效。
+
+---
+
+## 2026-06-29 月界面详情编辑时保留日期 panel 与子详情弹窗
+
+问题现象：
+
+- 月界面单击日期打开 `MonthDayPanel`，再双击日程项打开共享 `ScheduleDetailPop`。
+- 在共享详情中双击修改清单时，月界面会进入“修改清单”页，但日期 panel 和共享详情弹窗同时消失。
+- 修改时间、提醒与清单共用同一编辑 picker 入口，因此存在相同问题。
+
+原因定位：
+
+- `MonthWindow.go_to_time_picker_for_edit(...)`、`go_to_alarm_picker_for_edit(...)`、`go_to_list_picker_for_edit(...)` 最终都会调用 `_show_edit_picker(...)`。
+- `_show_edit_picker(...)` 原先无条件调用 `close_day_panels()`。
+- `close_day_panels()` 会关闭 `MonthDayPanel`；而 `MonthDayPanel.closeEvent(...)` 会继续关闭其登记的全部子 `ScheduleDetailPop`。
+- 因此消失是编辑 picker 的显式清理链造成的，不是清单数据加载或保存失败。
+
+实际修改文件：
+
+- `src/ui/month_window.py`
+- `manage_instruction/Work_Log.md`
+
+修改内容：
+
+- 从 `_show_edit_picker(...)` 删除 `close_day_panels()`，使修改时间、提醒和清单时不再销毁日期 panel 及其子详情弹窗。
+- picker 显示状态切换完成后，通过 `QTimer.singleShot(0, restore_open_day_panels)` 恢复 panel 和子详情的可见层级。
+- 月界面新增日程时进入时间 / 提醒 / 清单 picker 的 `go_to_*_picker(...)` 仍保留原有 `close_day_panels()`；本轮只改变“从详情弹窗进入编辑”的路径。
+
+保持不变：
+
+- 不修改清单、时间、提醒的写库和重复日程更新逻辑。
+- 不修改显式关闭日期 panel 时同步关闭所属子详情的规则。
+- 不修改双击日期跳日视图、右键跳转和关闭月窗口等显式清理路径。
+- 不修改日界面、周界面和待办界面的 picker 行为。
+
+验证要求：
+
+- 从月界面日期 panel 的共享详情分别进入修改时间、修改提醒、修改清单，日期 panel 和详情弹窗都应继续显示。
+- 保存或取消 picker 后，原 panel 和详情仍保留；保存后内容按既有刷新链更新。
+- 手动关闭日期 panel 时，其所属详情弹窗仍应同步关闭。
