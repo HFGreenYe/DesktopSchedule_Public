@@ -1,7 +1,7 @@
 # src/ui/schedule_detail_pop.py
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                              QPushButton, QFrame, QGridLayout, QSizePolicy,
-                             QLineEdit, QTextEdit,QComboBox, QListView, QDialog) # 🟢 新增了输入框组件
+                             QLineEdit, QTextEdit, QDialog, QMenu) # 🟢 新增了输入框组件
 from PyQt6.QtCore import Qt, QRectF, QPoint, pyqtSignal, QEvent, QTimer
 from PyQt6.QtGui import QPainter, QPainterPath, QColor, QBrush, QLinearGradient, QIcon, QPen, QPixmap, QImage
 from PyQt6.QtSvg import QSvgRenderer
@@ -339,63 +339,56 @@ class ScheduleDetailPop(QWidget):
         self.lbl_created_info.setToolTip("最后修改时间")
         self.refresh_created_display()
 
-        # 下拉框统一无痕样式
-        combo_style = """
-            QComboBox { background-color: rgba(255, 255, 255, 0.2); border: 1px solid rgba(255, 255, 255, 0.5); color: #ffffff; border-radius: 4px; padding: 0px 4px; font-family: 'Microsoft YaHei'; font-size: 12px; }
-            QComboBox::drop-down { border: none; width: 0px; }
-            QListView { background-color: #ffffff; color: #333333; border: 1px solid #dddddd; outline: 0px; }
-            QListView::item { background-color: #ffffff; color: #333333; padding: 4px 8px; }
-            QListView::item:selected { background-color: #0cc0df; color: #ffffff; }
-            QListView::item:hover { background-color: #f0f0f0; color: #333333; }
-        """
-
-        # --- (4) 紧急性 Label + ComboBox ---
+        # --- (4) 重要性标签；编辑时使用独立菜单，避免内嵌下拉框重排窗口 ---
         self.lbl_priority = QLabel()
-        self.lbl_priority.setStyleSheet("color: rgba(255,255,255,0.9); font-size: 12px; font-family: 'Microsoft YaHei';")
+        self.lbl_priority.setStyleSheet(
+            "color: rgba(255,255,255,0.9); background: transparent; "
+            "border: none; padding: 0px; font-size: 12px; "
+            "font-family: 'Microsoft YaHei';"
+        )
         self.lbl_priority.setCursor(Qt.CursorShape.PointingHandCursor)
         self.lbl_priority.setToolTip("双击修改紧急性")
         self.lbl_priority.installEventFilter(self)
 
-        self.combo_priority = QComboBox()
-        self.combo_priority.addItems(["低重要性", "中重要性", "高重要性"])
-        self.combo_priority.setView(QListView())
-        self.combo_priority.setStyleSheet(combo_style)
-        self.combo_priority.setFixedHeight(20)
-        self.combo_priority.hide()
-        self.combo_priority.activated.connect(self._finish_edit_priority)
+        self.priority_options = ("低重要性", "中重要性", "高重要性")
 
-        pri_container = QWidget()
-        pri_layout = QHBoxLayout(pri_container)
+        self.priority_editor_container = QWidget()
+        self.priority_editor_container.setStyleSheet(
+            "background: transparent; border: none; padding: 0px;"
+        )
+        self.priority_editor_container.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.priority_editor_container.setToolTip("双击修改重要性")
+        self.priority_editor_container.installEventFilter(self)
+        pri_layout = QHBoxLayout(self.priority_editor_container)
         pri_layout.setContentsMargins(0, 0, 0, 0)
         pri_layout.addWidget(self.lbl_priority)
-        pri_layout.addWidget(self.combo_priority)
 
-        # --- (5) 重复 Label + ComboBox ---
+        # --- (5) 重复标签；编辑时使用独立菜单 ---
         self.lbl_repeat = QLabel()
-        self.lbl_repeat.setStyleSheet("color: rgba(255,255,255,0.9); font-size: 12px; font-family: 'Microsoft YaHei';")
+        self.lbl_repeat.setStyleSheet(
+            "color: rgba(255,255,255,0.9); background: transparent; "
+            "border: none; padding: 0px; font-size: 12px; "
+            "font-family: 'Microsoft YaHei';"
+        )
         self.lbl_repeat.setCursor(Qt.CursorShape.PointingHandCursor)
         self.lbl_repeat.setToolTip("双击修改重复规则")
         self.lbl_repeat.installEventFilter(self)
 
-        self.combo_repeat = QComboBox()
-        self.combo_repeat.addItems(["不重复", "每天", "每周", "每月"])
-        rep_view = QListView()
-        rep_view.setMouseTracking(True)
-        self.combo_repeat.setView(rep_view)
-        self.combo_repeat.setStyleSheet(combo_style)
-        self.combo_repeat.setFixedHeight(20)
-        self.combo_repeat.hide()
-        self.combo_repeat.activated.connect(self._finish_edit_repeat)
-        rep_view.entered.connect(lambda idx: self._on_repeat_rule_changed(self.combo_repeat.itemText(idx.row())))
+        self.repeat_options = ("不重复", "每天", "每周", "每月")
 
         self.icon_repeat = QLabel() 
         self.icon_repeat.setFixedSize(16, 16)
 
-        rep_container = QWidget()
-        rep_layout = QHBoxLayout(rep_container)
+        self.repeat_editor_container = QWidget()
+        self.repeat_editor_container.setStyleSheet(
+            "background: transparent; border: none; padding: 0px;"
+        )
+        self.repeat_editor_container.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.repeat_editor_container.setToolTip("双击修改重复规则")
+        self.repeat_editor_container.installEventFilter(self)
+        rep_layout = QHBoxLayout(self.repeat_editor_container)
         rep_layout.setContentsMargins(0, 0, 0, 0)
         rep_layout.addWidget(self.lbl_repeat)
-        rep_layout.addWidget(self.combo_repeat)
 
         self.refresh_priority_display()
         self.refresh_repeat_display()
@@ -405,8 +398,8 @@ class ScheduleDetailPop(QWidget):
         w_alarm = create_info_item("alarm.svg", self.lbl_alarm_info)
         w_list = create_info_item("list.svg", self.lbl_list_info)
         w_created = create_info_item("edit_time.svg", self.lbl_created_info)
-        w_priority = create_info_item("importance.svg", pri_container)
-        w_repeat = create_info_item(self.icon_repeat, rep_container)
+        w_priority = create_info_item("importance.svg", self.priority_editor_container)
+        w_repeat = create_info_item(self.icon_repeat, self.repeat_editor_container)
 
         is_todo = getattr(self.data, 'item_type', 'schedule') == 'todo'
 
@@ -432,61 +425,7 @@ class ScheduleDetailPop(QWidget):
         main_layout.addLayout(grid)
         
         # 1. 将原本单一的文本标签替换为 图标+文字 的组合容器
-        self.repeat_status_widget = QWidget()
-        status_layout = QHBoxLayout(self.repeat_status_widget)
-        status_layout.setContentsMargins(0, 0, 0, 0)
-        status_layout.setSpacing(6)
-
-        # 左侧 SVG 图标
-        self.icon_repeat_status = QLabel()
-        self.icon_repeat_status.setFixedSize(14, 14)
-        self.icon_repeat_status.setScaledContents(True)
-
-        # 右侧 提示文字
-        self.lbl_repeat_status = QLabel()
-        self.lbl_repeat_status.setStyleSheet("color: rgba(255, 255, 255, 0.7); font-size: 11px; font-family: 'Microsoft YaHei';")
-        self.lbl_repeat_status.setWordWrap(True)
-
-        # 让图标和文字都在顶部对齐，防止文字换行时图标居中显得突兀
-        status_layout.addWidget(self.icon_repeat_status, 0, Qt.AlignmentFlag.AlignTop)
-        status_layout.addWidget(self.lbl_repeat_status, 1, Qt.AlignmentFlag.AlignTop)
-
-        self.repeat_status_widget.hide() 
-        main_layout.addWidget(self.repeat_status_widget)
-        
         self.adjustSize()
-
-    def _on_repeat_rule_changed(self, current_text):
-        """处理鼠标悬停下拉框时的实时文字预览"""
-        current_text = current_text.strip()
-        self.repeat_status_widget.show() # 显示新的组合容器
-        
-        # 统一设置文字为灰白色
-        self.lbl_repeat_status.setStyleSheet("color: rgba(255, 255, 255, 0.7); font-size: 11px; font-family: 'Microsoft YaHei';")
-
-        if current_text in ('none', '无', '不重复', ''):
-            if getattr(self.data, 'group_id', None):
-                self.lbl_repeat_status.setText("保存后，此日程将脱离原循环组，变为单次日程。")
-                pix = self._get_icon("warning_red.svg", "#FF4D4F", 14)
-                self.icon_repeat_status.setPixmap(pix)
-            else:
-                self.lbl_repeat_status.setText("当前为单次独立日程。")
-                pix = self._get_icon("warning_yellow.svg", "#FAAD14", 14)
-                self.icon_repeat_status.setPixmap(pix)
-        elif current_text == '每天':
-            self.lbl_repeat_status.setText("保存后，将以今天为基准向未来生成 365 条每日日程。")
-            pix = self._get_icon("warning_yellow.svg", "#FAAD14", 14)
-            self.icon_repeat_status.setPixmap(pix)
-        elif current_text == '每周':
-            self.lbl_repeat_status.setText("保存后，将以今天为基准向未来生成 52 条每周日程。")
-            pix = self._get_icon("warning_yellow.svg", "#FAAD14", 14)
-            self.icon_repeat_status.setPixmap(pix)
-        elif current_text == '每月':
-            self.lbl_repeat_status.setText("保存后，将以今天为基准向未来生成 12 条每月日程。")
-            pix = self._get_icon("warning_yellow.svg", "#FAAD14", 14)
-            self.icon_repeat_status.setPixmap(pix)
-            
-        QTimer.singleShot(0, lambda: self.adjustSize())
 
     def _adjust_desc_height(self):
         """终极精准高度计算：抛弃不稳定的测算，使用绝对宽度"""
@@ -528,18 +467,15 @@ class ScheduleDetailPop(QWidget):
         """刷新优先级展示"""
         p_map = {0: "低重要性", 1: "中重要性", 2: "高重要性"}
         self.lbl_priority.setText(p_map.get(self.data.priority, "低重要性"))
-        self.combo_priority.setCurrentIndex(self.data.priority)
 
     def refresh_repeat_display(self):
         """刷新重复规则展示及图标"""
         rep = self.data.repeat_rule.strip()
         if not rep or rep in ("none", "无"):
             self.lbl_repeat.setText("不重复")
-            self.combo_repeat.setCurrentText("不重复")
             pix = self._get_icon("repeat_off.svg", "#FFFFFF", 16)
         else:
             self.lbl_repeat.setText(rep)
-            self.combo_repeat.setCurrentText(rep)
             pix = self._get_icon("repeat.svg", "#FFFFFF", 16)
         
         if hasattr(self, 'icon_repeat'):
@@ -551,21 +487,22 @@ class ScheduleDetailPop(QWidget):
         self.lbl_created_info.setText(created_str)
 
     def _finish_edit_priority(self, index):
-        """下拉框选中后自动保存"""
+        """菜单选中后自动保存。"""
+        changed = False
         if self.data.priority != index:
             self.data.priority = index
             self.data.created_at = datetime.now() # 更新修改时间
             db_manager.update_schedule_fields(self.data.id, priority=index, created_at=self.data.created_at)
-            self.refresh_priority_display()
             self.refresh_created_display() # 刷新时间UI
+            changed = True
+        self.refresh_priority_display()
+        if changed:
             self.schedule_updated.emit()
-        self.combo_priority.hide()
-        self.lbl_priority.show()
-        QTimer.singleShot(0, lambda: self.adjustSize())
 
     def _finish_edit_repeat(self, index):
-        text = self.combo_repeat.itemText(index) # 获取实际点击的文本
+        text = self.repeat_options[index]
         val = "无" if text == "不重复" else text
+        changed = False
         
         if self.data.repeat_rule != val:
             update_future = False
@@ -577,11 +514,7 @@ class ScheduleDetailPop(QWidget):
                 dialog.exec()
                 
                 if dialog.result_mode == 0:  # 选择了 取消
-                    self.combo_repeat.setCurrentText(self.data.repeat_rule)
-                    self.combo_repeat.hide()
-                    self.lbl_repeat.show()
-                    if hasattr(self, 'lbl_repeat_status'):
-                        self.lbl_repeat_status.hide()
+                    self.refresh_repeat_display()
                     return
                 elif dialog.result_mode == 2:  # 选择了 修改未来
                     update_future = True
@@ -601,14 +534,68 @@ class ScheduleDetailPop(QWidget):
             self.data = Schedule.get_by_id(self.data.id)
             self.refresh_repeat_display()
             self.refresh_created_display() 
+            changed = True
+
+        self.refresh_repeat_display()
+        if changed:
             self.schedule_updated.emit()
-            
-        self.combo_repeat.hide()
-        self.lbl_repeat.show()
-        if hasattr(self, 'repeat_status_widget'):
-            self.repeat_status_widget.hide() # 隐藏整个容器
-            
-        QTimer.singleShot(0, lambda: self.adjustSize())
+
+    @staticmethod
+    def _style_choice_menu(menu):
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #ffffff;
+                color: #333333;
+                border: 1px solid #dcdcdc;
+                border-radius: 5px;
+                padding: 4px;
+                font-family: 'Microsoft YaHei';
+                font-size: 12px;
+            }
+            QMenu::item {
+                min-width: 64px;
+                padding: 5px 12px;
+                border-radius: 3px;
+            }
+            QMenu::item:selected {
+                background-color: #d9f5fa;
+                color: #0aaac7;
+            }
+        """)
+
+    def _show_priority_menu(self):
+        menu = QMenu(self)
+        self._style_choice_menu(menu)
+        for index, text in enumerate(self.priority_options):
+            action = menu.addAction(text)
+            action.setData(index)
+        pos = self.priority_editor_container.mapToGlobal(
+            QPoint(0, self.priority_editor_container.height())
+        )
+        selected = menu.exec(pos)
+        if selected is not None:
+            self._finish_edit_priority(int(selected.data()))
+
+    def _show_repeat_menu(self):
+        menu = QMenu(self)
+        self._style_choice_menu(menu)
+        menu.setToolTipsVisible(True)
+        tooltip_map = {
+            "不重复": "设为单次独立日程；循环组日程会在确认后按所选范围更新。",
+            "每天": "按天重复；保存时沿用现有重复日程更新规则。",
+            "每周": "按周重复；保存时沿用现有重复日程更新规则。",
+            "每月": "按月重复；保存时沿用现有重复日程更新规则。",
+        }
+        for index, text in enumerate(self.repeat_options):
+            action = menu.addAction(text)
+            action.setData(index)
+            action.setToolTip(tooltip_map[text])
+        pos = self.repeat_editor_container.mapToGlobal(
+            QPoint(0, self.repeat_editor_container.height())
+        )
+        selected = menu.exec(pos)
+        if selected is not None:
+            self._finish_edit_repeat(int(selected.data()))
 
     # 事件过滤器 (捕获双击、焦点丢失、回车)
     def eventFilter(self, obj, event):
@@ -624,17 +611,18 @@ class ScheduleDetailPop(QWidget):
                 self.req_edit_list.emit(self.data) 
                 return True
             # 拦截优先级双击
-            elif obj == getattr(self, 'lbl_priority', None):
-                self.lbl_priority.hide()
-                self.combo_priority.show()
-                self.combo_priority.showPopup()
+            elif obj in (
+                getattr(self, 'lbl_priority', None),
+                getattr(self, 'priority_editor_container', None),
+            ):
+                self._show_priority_menu()
                 return True
             # 拦截重复规则双击
-            elif obj == getattr(self, 'lbl_repeat', None):
-                self.lbl_repeat.hide()
-                self.combo_repeat.show()
-                self._on_repeat_rule_changed(self.combo_repeat.currentText())
-                self.combo_repeat.showPopup()
+            elif obj in (
+                getattr(self, 'lbl_repeat', None),
+                getattr(self, 'repeat_editor_container', None),
+            ):
+                self._show_repeat_menu()
                 return True
             elif obj == self.lbl_title:
                 self.lbl_title.hide()
@@ -754,16 +742,6 @@ class ScheduleDetailPop(QWidget):
         if hasattr(self, 'edit_desc') and self.edit_desc.isVisible():
             self.edit_desc.clearFocus()
             
-        # 如果下拉框开着没选，点空白处直接变回 Label
-        if hasattr(self, 'combo_priority') and self.combo_priority.isVisible():
-            self.combo_priority.hide()
-            self.lbl_priority.show()
-        if hasattr(self, 'combo_repeat') and self.combo_repeat.isVisible():
-            self.combo_repeat.hide()
-            self.lbl_repeat.show()
-        if hasattr(self, 'repeat_status_widget'):
-            self.repeat_status_widget.hide()
-
         if event.button() == Qt.MouseButton.LeftButton:
             self.drag_pos = event.globalPosition().toPoint() - self.pos()
             event.accept()

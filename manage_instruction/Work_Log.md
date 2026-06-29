@@ -2336,3 +2336,145 @@ MP-0 ~ MP-5 阶段完成结论：
 - 从月界面日期 panel 的共享详情分别进入修改时间、修改提醒、修改清单，日期 panel 和详情弹窗都应继续显示。
 - 保存或取消 picker 后，原 panel 和详情仍保留；保存后内容按既有刷新链更新。
 - 手动关闭日期 panel 时，其所属详情弹窗仍应同步关闭。
+
+---
+
+## 2026-06-29 共享详情重要性 / 重复编辑即时显示修复
+
+问题现象：
+
+- 从月界面日期 panel 打开共享详情后，双击修改重要性，数据库值已经改变，但当前弹窗仍显示旧重要性。
+- 编辑位置残留一个带边框的控件；关闭并重新打开弹窗后才显示新值。
+- 重复规则使用相同的下拉编辑流程，存在同类风险。
+
+原因定位：
+
+- `_finish_edit_priority(...)` 和 `_finish_edit_repeat(...)` 原先在隐藏编辑用 `QComboBox`、恢复普通 `QLabel` 之前先发出 `schedule_updated`。
+- 月界面收到信号后会同步刷新日期 panel、当前子详情和相关视图，形成同步重入；刷新发生时下拉编辑控件仍处于可见状态。
+- 截图中的边框来自残留的 `QComboBox`，不是普通重要性文本标签。
+- 现有月界面刷新链已经调用 `refresh_priority_display()` / `refresh_repeat_display()`，缺口在编辑控件收尾顺序，而不是缺少刷新方法。
+
+实际修改文件：
+
+- `src/ui/schedule_detail_pop.py`
+- `manage_instruction/Work_Log.md`
+
+修改内容：
+
+- 重要性编辑完成后先执行 `hidePopup()`、隐藏 `combo_priority`、恢复 `lbl_priority`，再发出 `schedule_updated`。
+- 重复规则编辑完成后先关闭下拉 popup、隐藏 `combo_repeat`、恢复 `lbl_repeat`、隐藏重复说明，再发出 `schedule_updated`。
+- 重复规则范围确认选择“取消”时，也统一关闭下拉 popup 和完整说明容器。
+- 仅在值真实变化时发出刷新信号；选择原值时只负责退出编辑态。
+
+保持不变：
+
+- 不修改重要性和重复规则的存储值、写库接口和重复日程更新范围确认逻辑。
+- 不修改月界面 panel 数据刷新、marker cache 或跨视图编辑路由。
+- 该修复位于共享 `ScheduleDetailPop`，因此日 / 周 / 月来源的详情弹窗统一采用正确收尾顺序。
+
+验证要求：
+
+- 修改重要性后，当前详情弹窗立即显示新值，且不残留下拉框边框。
+- 修改重复规则后，当前详情立即显示新规则，重复说明和下拉框正确收起。
+- 日期 panel 中的重要性 / 状态摘要按既有刷新链同步更新。
+
+真实复测结果：
+
+- 用户复测后问题仍存在：当前详情仍显示旧重要性，带边框编辑控件残留，且残留后无法再次双击进入编辑。
+- 因此本节代码调整暂不能判定为修复完成，保持未提交并进入进一步审查。
+- 当前源码静态搜索确认：除 `eventFilter(...)` 处理普通标签双击外，没有其他路径会调用 `combo_priority.show()` / `combo_repeat.show()`；月界面刷新函数只调用显示刷新方法，不会主动显示下拉框。
+- 下一步必须在完全退出并重启应用后复测，同时观察终端是否出现 Python 异常。若干净重启后仍复现，应记录 `_finish_edit_priority(...)` / `_finish_edit_repeat(...)` 进入、退出以及下一轮事件循环的控件可见状态，再决定采用延迟收尾还是改为显式堆栈容器。
+
+第二次审查与修正：
+
+- 用户完全重启应用后仍复现，终端只有 `QWindowsWindow::setGeometry` 尺寸协商 warning，没有 Python traceback。
+- 因此排除旧进程和 Python 信号回调异常，问题进一步收敛为 `QComboBox.activated` 所处的原生 popup 事件回合。
+- `_finish_edit_priority(...)` / `_finish_edit_repeat(...)` 现在只更新数据，并通过 `QTimer.singleShot(0, ...)` 将控件收尾推迟到下一轮 Qt 事件循环。
+- 延迟收尾中统一执行：关闭 combo popup、隐藏 combo、按最新数据刷新普通标签、显示并抬高标签，最后再发 `schedule_updated`。
+- 临时增加终端状态输出，例如：
+  - `[ScheduleDetailPop] priority editor finalized: combo_visible=False, label_visible=True, text=高重要性`
+  - `[ScheduleDetailPop] repeat editor finalized: combo_visible=False, label_visible=True, text=每周`
+- 该输出用于判断延迟收尾后的真实控件状态；用户确认后可移除诊断输出。
+
+第三次审查与修正：
+
+- 用户终端输出确认延迟收尾后的真实状态为 `combo_visible=False, label_visible=True, text=高重要性`，但界面仍存在边框且无法再次双击。
+- 该证据排除了“QComboBox 仍可见”的判断；剩余问题位于恢复后的普通标签样式和鼠标命中入口。
+- 为 `lbl_priority` / `lbl_repeat` 显式设置 `background: transparent; border: none; padding: 0px`，不再依赖继承样式。
+- 将 `priority_editor_container` / `repeat_editor_container` 保存为实例属性，显式清除其背景和边框，并安装同一事件过滤器。
+- 双击文字标签或其稳定外层容器均可进入编辑；进入时重新启用并显示对应 combo。
+- 本轮不修改数据保存、刷新链和月界面 panel 生命周期。
+
+第四次审查与修正：
+
+- 用户提供的完整终端记录显示：重要性和重复规则的完成函数均执行，数据值可正确变化；问题不在写库或刷新方法。
+- 重要性修改后不仅自身不能再次编辑，重复规则也无法点击，说明可能存在覆盖整个底部信息区的原生 popup 输入层。
+- `QComboBox.isVisible() == False` 只代表组合框主体不可见，不能证明其私有 `QListView` popup 容器窗口已经关闭。
+- 新增 `_close_inline_combo(...)`：显式关闭 combo popup、隐藏 `combo.view()`、隐藏其独立 popup window，并让隐藏的 combo 透明于鼠标事件。
+- 再次进入编辑时恢复 combo 的鼠标事件接收能力。
+- 终端诊断扩展为同时输出：
+  - `combo_visible`
+  - `view_visible`
+  - `popup_window_visible`
+  - `active_popup`
+  - `label_visible`
+  - 当前文本
+- 若修正成功，预期所有可见性均为 `False`，`active_popup=None`，普通标签为 `True`。
+
+第五次审查与修正：
+
+- 用户复测输出确认 `combo_visible=False`、`view_visible=False`、`popup_window_visible=False`、`active_popup=None`、`label_visible=True`，但屏幕仍显示旧文字和旧边框，旧位置无法点击。
+- 因此排除组合框主体、下拉 view、私有 popup window 或活动 popup 继续覆盖鼠标的判断。
+- “旧像素仍显示但不可交互”结合持续出现的 `QWindowsWindow::setGeometry` warning，更符合半透明无边框窗口在子控件隐藏 / 布局变化后未完整重绘形成的残影。
+- 回退第四次修正中无效的私有 popup window 隐藏与鼠标透明设置，避免继续干预 Qt 私有控件生命周期。
+- 新增 `_refresh_inline_editor_layout(...)`：
+  - 重新 invalidate / activate 重要性和重复编辑容器布局。
+  - 重新激活详情弹窗主布局。
+  - 重要性切换不再调用无必要的 `adjustSize()`，避免触发额外窗口尺寸协商。
+  - 重复规则因说明容器显隐仍按需 `adjustSize()`。
+  - 强制执行 `updateGeometry()`、`update()`、同步 `repaint()`，并在下一轮事件循环再次 `repaint()`。
+- 目标是清除不可交互的旧控件像素，并让恢复后的真实标签位置与屏幕显示一致。
+
+第六次审查与结构性修正：
+
+- 用户在第五次修正后再次实测，问题仍存在：重要性修改一次后保留不可交互边框，重要性和重复规则都无法再次修改，必须关闭详情弹窗后才能恢复。
+- 这说明继续对内嵌 `QComboBox` 追加隐藏、延迟和重绘处理不能解决该窗口组合下的残影与事件命中问题。
+- 本次不再切换详情布局中的标签 / 下拉框，而是移除重要性和重复规则的内嵌 `QComboBox`：
+  - 详情弹窗布局始终保留普通文字标签，不再因编辑发生控件显隐和尺寸重排。
+  - 双击重要性后弹出独立 `QMenu`，选择后复用原写库与 `schedule_updated` 刷新链。
+  - 双击重复规则后弹出独立 `QMenu`，保留选项悬停说明、重复范围确认和既有写库逻辑。
+  - 菜单关闭后才执行更新，避免原生下拉 popup 的 activated 事件与详情窗口同步刷新重入。
+- 删除前几次诊断用的控件可见性输出、延迟收尾、强制布局重绘和已失效的 combo 清理分支。
+- 本次目标是从结构上消除详情弹窗内部的下拉框残影，并恢复重要性 / 重复规则可连续多次编辑。
+- 自动验证只覆盖导入、语法和无写库 smoke；真实 Windows 交互仍需用户复测后才能判定修复完成。
+
+第六次自动验证结果：
+
+- `src/ui/schedule_detail_pop.py` 通过项目虚拟环境 `py_compile`。
+- 无写库 offscreen smoke 在同一个 `ScheduleDetailPop` 实例中连续执行：
+  - 重要性：中 -> 高 -> 低，普通标签分别即时更新为“高重要性”“低重要性”。
+  - 重复规则：不重复 -> 每天 -> 每周，普通标签分别即时更新为“每天”“每周”。
+  - 每次真实变化均发出 `schedule_updated`。
+  - 实例不再包含 `combo_priority` / `combo_repeat`，不存在旧内嵌下拉框再次残留的路径。
+- 自动验证未写入 `schedule.db`；数据库更新方法和 `Schedule.get_by_id(...)` 均在 smoke 中替换为内存桩。
+- 仍需在真实 Windows 窗口中复测菜单点击、重复多次编辑和月界面刷新后，才能将问题标记为最终关闭。
+
+第七次实测反馈与修正：
+
+- 用户真实复测确认重要性已经可以连续修改；重复规则前几次正常，但反复修改后仍会卡住，无法继续点击。
+- 终端没有 Python traceback，但 `ScheduleDetailPopClassWindow` 的目标高度持续在 `373` 与 `335` 之间切换，并重复出现 `QWindowsWindow::setGeometry` warning。
+- 对比两条菜单路径发现，重复规则额外在菜单项 `hovered` 时显示说明容器，并通过 `QTimer.singleShot(0, adjustSize)` 改变整个半透明顶层窗口高度；菜单关闭时又隐藏说明并再次调整高度。
+- 多次悬停和选择会累积菜单事件与异步窗口几何调整，重要性菜单没有这条链，因此只有重复规则在多次操作后卡住。
+- 本次将重复规则改为与重要性相同的固定几何流程：
+  - 删除详情窗口内部会展开 / 收起的 `repeat_status_widget` 及其异步 `adjustSize()`。
+  - 重复选项说明迁移为 `QMenu` action tooltip，不再改变详情窗口布局。
+  - 重复菜单只负责弹出、选择、关闭，再执行原有重复范围确认和写库刷新。
+- 不修改重复规则存储值、重复组范围确认或数据库更新接口。
+- 真实连续编辑是否完全恢复仍需用户复测后确认。
+
+第七次自动验证结果：
+
+- `src/ui/schedule_detail_pop.py` 通过项目虚拟环境 `py_compile`。
+- 无写库 offscreen 验证连续执行 20 次重复菜单弹出、选项触发和菜单关闭，进程正常完成。
+- 验证过程中数据库更新与重新查询均使用内存桩，不修改 `schedule.db`。
+- 静态检查确认重复菜单路径不再引用 `repeat_status_widget` 或悬停触发的窗口 `adjustSize()`。
