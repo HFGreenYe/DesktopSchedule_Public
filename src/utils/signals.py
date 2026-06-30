@@ -12,6 +12,7 @@ class AppSignals(QObject):
     schedule_deleted = pyqtSignal(int)
     category_changed = pyqtSignal()
     refresh_requested = pyqtSignal(str)
+    axis_board_requested = pyqtSignal(object)
 
 
 global_signals = AppSignals()

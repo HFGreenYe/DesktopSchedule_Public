@@ -1,16 +1,18 @@
 import datetime
 
-from PyQt6.QtCore import QPoint, QRectF, Qt, pyqtSignal
+from PyQt6.QtCore import QPoint, QRectF, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import (
     QBrush,
     QColor,
     QCursor,
     QGuiApplication,
+    QIcon,
     QLinearGradient,
     QPainter,
     QPainterPath,
     QPainterPathStroker,
     QPen,
+    QPixmap,
 )
 from PyQt6.QtWidgets import (
     QFrame,
@@ -23,6 +25,7 @@ from PyQt6.QtWidgets import (
 
 from src.config import AppConfig
 from src.services.schedule_axis_service import ScheduleAxisService
+from src.ui.utils.icon_loader import load_colored_svg_pixmap
 
 
 class _AxisSchedulePreview(QFrame):
@@ -45,6 +48,7 @@ class _AxisSchedulePreview(QFrame):
 
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(0)
         self.title_label = QLabel()
         self.title_label.setWordWrap(True)
         self.title_label.setStyleSheet(
@@ -128,6 +132,7 @@ class _AxisSchedulePreview(QFrame):
 
 
 class _ScheduleAxisCanvas(QWidget):
+    AXIS_COLOR = "#333333"
     hover_requested = pyqtSignal(object, object)
     item_clicked = pyqtSignal(object, object)
 
@@ -153,29 +158,39 @@ class _ScheduleAxisCanvas(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         self.hit_regions.clear()
 
+        canvas_rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        painter.setPen(QPen(QColor(0, 0, 0, 24), 1))
+        painter.setBrush(QColor(255, 255, 255, 248))
+        painter.drawRoundedRect(canvas_rect, 6, 6)
+
         left = 20.0
         right = max(float(self.width() - 20), left + 1)
         axis_y = float(self.height()) / 2.0
         center_x = (left + right) / 2.0
 
-        painter.setPen(QPen(QColor(255, 255, 255, 205), 1.5))
+        axis_color = QColor(self.AXIS_COLOR)
+        painter.setPen(QPen(axis_color, 1.5))
         painter.drawLine(QPoint(round(left), round(axis_y)), QPoint(round(right), round(axis_y)))
         painter.drawLine(QPoint(round(left), round(axis_y)), QPoint(round(left + 6), round(axis_y - 4)))
         painter.drawLine(QPoint(round(left), round(axis_y)), QPoint(round(left + 6), round(axis_y + 4)))
         painter.drawLine(QPoint(round(right), round(axis_y)), QPoint(round(right - 6), round(axis_y - 4)))
         painter.drawLine(QPoint(round(right), round(axis_y)), QPoint(round(right - 6), round(axis_y + 4)))
 
-        painter.setPen(QPen(QColor(255, 255, 255, 125), 1))
+        center_tick_color = QColor(axis_color)
+        center_tick_color.setAlpha(150)
+        painter.setPen(QPen(center_tick_color, 1))
         painter.drawLine(QPoint(round(center_x), round(axis_y - 10)), QPoint(round(center_x), round(axis_y + 10)))
 
         range_text = ScheduleAxisService.format_range(self.range_hours)
-        painter.setPen(QColor(255, 255, 255, 220))
+        painter.setPen(axis_color)
         painter.drawText(QRectF(left, axis_y + 8, 70, 18), Qt.AlignmentFlag.AlignLeft, f"过去 {range_text}")
         painter.drawText(QRectF(center_x - 25, axis_y + 8, 50, 18), Qt.AlignmentFlag.AlignCenter, "现在")
         painter.drawText(QRectF(right - 70, axis_y + 8, 70, 18), Qt.AlignmentFlag.AlignRight, f"未来 {range_text}")
 
         if not self.projections:
-            painter.setPen(QColor(255, 255, 255, 190))
+            empty_color = QColor(axis_color)
+            empty_color.setAlpha(170)
+            painter.setPen(empty_color)
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "暂无带时间的日程")
             return
 
@@ -184,12 +199,18 @@ class _ScheduleAxisCanvas(QWidget):
             self._draw_marker(painter, marker, axis_y)
 
     def _layout_markers(self, left, right, axis_y):
-        lane_offsets = (-30, 30, -58, 58, -82, 82)
-        lanes = [axis_y + offset for offset in lane_offsets]
-        lanes = [y for y in lanes if 18 <= y <= self.height() - 22]
-        if not lanes:
-            lanes = [axis_y - 24]
-        occupied = [[] for _ in lanes]
+        upper_lanes = [axis_y + offset for offset in (-30, -58, -82)]
+        lower_lanes = [axis_y + offset for offset in (30, 58, 82)]
+        upper_lanes = [y for y in upper_lanes if 18 <= y <= self.height() - 22]
+        lower_lanes = [y for y in lower_lanes if 18 <= y <= self.height() - 22]
+        if not upper_lanes:
+            upper_lanes = [max(18.0, axis_y - 24.0)]
+        if not lower_lanes:
+            lower_lanes = [min(float(self.height() - 22), axis_y + 24.0)]
+        occupied_by_status = {
+            False: [[] for _ in upper_lanes],
+            True: [[] for _ in lower_lanes],
+        }
 
         raw_markers = []
         for projection in self.projections:
@@ -205,6 +226,9 @@ class _ScheduleAxisCanvas(QWidget):
 
         markers = []
         for index, (x1, x2, diameter, projection) in enumerate(raw_markers):
+            completed = projection.is_completed
+            lanes = lower_lanes if completed else upper_lanes
+            occupied = occupied_by_status[completed]
             interval_left = x1 - diameter / 2.0 - 5
             interval_right = x2 + diameter / 2.0 + 5
             lane_index = None
@@ -241,16 +265,29 @@ class _ScheduleAxisCanvas(QWidget):
             color = QColor(ScheduleAxisService.FALLBACK_COLOR)
 
         anchor_x = (x1 + x2) / 2.0
-        painter.setPen(QPen(QColor(255, 255, 255, 90), 1, Qt.PenStyle.DotLine))
+        axis_color = QColor(self.AXIS_COLOR)
+        connector_color = QColor(axis_color)
+        connector_color.setAlpha(90)
+        painter.setPen(QPen(connector_color, 1, Qt.PenStyle.DotLine))
         painter.drawLine(QPoint(round(anchor_x), round(axis_y)), QPoint(round(anchor_x), round(y)))
 
-        painter.setPen(QPen(QColor(255, 255, 255, 225), 1))
+        painter.setPen(QPen(axis_color, 1))
         painter.setBrush(QBrush(color))
         path = QPainterPath()
         if projection.is_interval and abs(x2 - x1) >= 3:
-            painter.setPen(QPen(color, max(3.0, diameter / 3.0), Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            line_width = max(3.0, diameter / 3.0)
+            painter.setPen(
+                QPen(
+                    axis_color,
+                    line_width + 2.0,
+                    Qt.PenStyle.SolidLine,
+                    Qt.PenCapStyle.RoundCap,
+                )
+            )
             painter.drawLine(QPoint(round(x1), round(y)), QPoint(round(x2), round(y)))
-            painter.setPen(QPen(QColor(255, 255, 255, 225), 1))
+            painter.setPen(QPen(color, line_width, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            painter.drawLine(QPoint(round(x1), round(y)), QPoint(round(x2), round(y)))
+            painter.setPen(QPen(axis_color, 1))
             painter.drawEllipse(QRectF(x1 - radius / 2, y - radius / 2, radius, radius))
             painter.drawEllipse(QRectF(x2 - radius / 2, y - radius / 2, radius, radius))
             path.moveTo(x1, y)
@@ -305,6 +342,7 @@ class ScheduleAxisBoard(QWidget):
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.resize(380, 300)
+        self.is_pinned = False
         self._drag_offset = None
         self._detail_opener = None
         self._detail_popups = {}
@@ -330,29 +368,57 @@ class ScheduleAxisBoard(QWidget):
         )
         header.addWidget(title)
         header.addStretch()
-        self.range_label = QLabel()
+        self.range_label = QLabel(self)
+        self.range_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
         self.range_label.setStyleSheet(
             "color: rgba(255,255,255,0.78); font-size: 9px; background: transparent;"
         )
-        header.addWidget(self.range_label)
-        close_button = QPushButton("×")
-        close_button.setFixedSize(24, 24)
-        close_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        close_button.setStyleSheet(
-            "QPushButton { color: white; background: transparent; border: none; "
-            "font-size: 17px; font-weight: bold; } "
-            "QPushButton:hover { background: rgba(255,255,255,0.18); border-radius: 12px; }"
+        button_style = (
+            "QPushButton { background: transparent; border: none; border-radius: 4px; } "
+            "QPushButton:hover { background-color: rgba(255, 255, 255, 0.2); }"
         )
-        close_button.clicked.connect(self.close)
-        header.addWidget(close_button)
+
+        self.btn_settings = QPushButton(self)
+        self.btn_settings.setFixedSize(30, 30)
+        self.btn_settings.setIconSize(QSize(16, 16))
+        self.btn_settings.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_settings.setToolTip("显示设置（待实现）")
+        self.btn_settings.setStyleSheet(button_style)
+
+        self.btn_pin = QPushButton(self)
+        self.btn_pin.setFixedSize(30, 30)
+        self.btn_pin.setIconSize(QSize(16, 16))
+        self.btn_pin.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_pin.setToolTip("窗口置顶")
+        self.btn_pin.setStyleSheet(button_style)
+        self.btn_pin.clicked.connect(self._toggle_pin)
+
+        self.btn_close = QPushButton(self)
+        self.btn_close.setFixedSize(30, 30)
+        self.btn_close.setIconSize(QSize(12, 12))
+        self.btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_close.setToolTip("关闭看板")
+        self.btn_close.setStyleSheet(
+            "QPushButton { background: transparent; border: none; "
+            "border-top-right-radius: 12px; } "
+            "QPushButton:hover { background: #ff4d4f; }"
+        )
+        self.btn_close.clicked.connect(self.close)
         layout.addLayout(header)
+
+        self._update_header_icons()
+        self._update_header_button_positions()
 
         self.canvas = _ScheduleAxisCanvas()
         self.canvas.hover_requested.connect(self._show_hover_preview)
         self.canvas.item_clicked.connect(self._show_persistent_preview)
         layout.addWidget(self.canvas, 1)
 
-        legend = QLabel("圆点：单时间  ·  线段：起止时间  ·  大小：重要性  ·  颜色：清单")
+        legend = QLabel(
+            "线上：未完成  ·  线下：已完成  ·  圆点：单时间  ·  线段：起止时间"
+        )
         legend.setAlignment(Qt.AlignmentFlag.AlignCenter)
         legend.setStyleSheet(
             "color: rgba(255,255,255,0.78); font-size: 9px; "
@@ -369,9 +435,55 @@ class ScheduleAxisBoard(QWidget):
         )
         self.canvas.set_data(projections, range_hours)
         self.range_label.setText(f"范围 ±{ScheduleAxisService.format_range(range_hours)}")
+        self.range_label.adjustSize()
+        if hasattr(self, "btn_settings"):
+            self._update_header_button_positions()
 
     def set_detail_opener(self, opener):
         self._detail_opener = opener
+
+    def _load_header_icon(self, icon_name, color):
+        return load_colored_svg_pixmap(
+            f"assets/icons/{icon_name}",
+            color,
+            16,
+            16,
+            self.devicePixelRatioF(),
+        )
+
+    def _update_header_icons(self):
+        settings_icon = self._load_header_icon("set.svg", "#FFFFFF")
+        if not settings_icon.isNull():
+            self.btn_settings.setIcon(QIcon(settings_icon))
+
+        pin_color = "#FFFFFF" if self.is_pinned else "#96FFFFFF"
+        pin_icon = self._load_header_icon("pin.svg", pin_color)
+        if not pin_icon.isNull():
+            self.btn_pin.setIcon(QIcon(pin_icon))
+
+        close_icon = QPixmap("assets/icons/close.png")
+        if not close_icon.isNull():
+            self.btn_close.setIcon(QIcon(close_icon))
+
+    def _toggle_pin(self):
+        self.is_pinned = not self.is_pinned
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, self.is_pinned)
+        self._update_header_icons()
+        self.show()
+        self.raise_()
+
+    def _update_header_button_positions(self):
+        offset = 40
+        for button in (self.btn_close, self.btn_pin, self.btn_settings):
+            button.move(self.width() - offset, 10)
+            button.raise_()
+            offset += 30
+
+        self.range_label.adjustSize()
+        range_x = self.btn_settings.x() - self.range_label.width() - 6
+        range_y = 10 + (30 - self.range_label.height()) // 2
+        self.range_label.move(max(10, range_x), range_y)
+        self.range_label.raise_()
 
     def _show_hover_preview(self, projection, global_pos):
         if projection is None:
@@ -462,3 +574,8 @@ class ScheduleAxisBoard(QWidget):
     def mouseReleaseEvent(self, event):
         self._drag_offset = None
         super().mouseReleaseEvent(event)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "btn_close"):
+            self._update_header_button_positions()

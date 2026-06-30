@@ -716,7 +716,17 @@ class CalendarCellDelegate(QStyledItemDelegate):
         font.setPointSize(6)
         font.setBold(True)
         painter.setFont(font)
-        painter.setPen(QColor("#FFFFFF"))
+        marker_color = QColor(color)
+        is_white_marker = (
+            marker_color.red() == 255
+            and marker_color.green() == 255
+            and marker_color.blue() == 255
+        )
+        painter.setPen(
+            QColor(AppConfig.COLOR_GRADIENT_START)
+            if is_white_marker
+            else QColor("#FFFFFF")
+        )
         text_rect = QRectF(rect.left(), rect.top(), 14, 14)
         painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, count_text)
         painter.restore()
@@ -1738,6 +1748,7 @@ class MonthWindow(FramelessMainWindow):
         panel = MonthDayPanel(qdate, schedules)
         panel.closed.connect(self._remove_day_panel)
         panel.schedule_double_clicked.connect(self.schedule_detail_requested.emit)
+        panel.schedule_status_requested.connect(self._change_schedule_status_from_day_panel)
         panel.move(*self._get_day_panel_position(len(self.open_day_panels), panel))
         panel.show()
         self.open_day_panels.append(panel)
@@ -2327,6 +2338,19 @@ class MonthWindow(FramelessMainWindow):
         self.refresh_open_day_panels()
         self.refresh_month_detail_popups(updated_schedule)
         self.schedule_updated.emit(updated_schedule)
+
+    def _change_schedule_status_from_day_panel(self, schedule, new_status):
+        schedule_id = getattr(schedule, "id", None)
+        if schedule_id is None:
+            return
+
+        if not db_manager.update_schedule_status(schedule_id, new_status):
+            self.show_toast("日程状态更新失败")
+            return
+
+        schedule.status = new_status
+        self.refresh_after_schedule_change(schedule)
+        self.show_toast("日程已完成" if new_status == 1 else "日程已恢复为未完成")
 
     def _complete_schedule_edit(self, schedule):
         self.refresh_after_schedule_change(schedule)

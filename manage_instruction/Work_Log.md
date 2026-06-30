@@ -2478,3 +2478,241 @@ MP-0 ~ MP-5 阶段完成结论：
 - 无写库 offscreen 验证连续执行 20 次重复菜单弹出、选项触发和菜单关闭，进程正常完成。
 - 验证过程中数据库更新与重新查询均使用内存桩，不修改 `schedule.db`。
 - 静态检查确认重复菜单路径不再引用 `repeat_status_widget` 或悬停触发的窗口 `adjustSize()`。
+
+---
+
+## 2026-06-30 坐标显示看板架构收口
+
+任务目标：
+
+- 在继续调整坐标看板视觉和交互前，检查并修正样板实现与 `Final_Formulation.md` 最终架构的偏差。
+- 保留已经可用的对数时间投影、点 / 线段绘制、命中检测和预览，不删除后重写。
+
+开工前 Git 状态：
+
+- `assets/icons/axis.svg` 已存在未提交修改，本轮不修改该文件，不将其视为本轮源码问题。
+- 其余坐标看板相关源码开工前无 diff。
+
+审查结论：
+
+- `ScheduleAxisService` 通过 Repository 获取日程和清单数据，纯投影方法负责过滤、范围计算和带符号 `log(1 + |t|)` 映射，符合 Service / Repository 分层方向。
+- `ScheduleAxisBoard` 位于 `src/ui/popups/`，作为独立辅助看板而非主视图，符合 UI 包规划。
+- 原实现的主要偏差在协调边界：`SharedMoreMenu` 直接导入并创建看板、按当前窗口分别保存实例、扫描 `QApplication.topLevelWidgets()` 查找月面板详情桥接；看板也未进入统一刷新链。
+
+实际修改文件：
+
+- `src/utils/signals.py`
+- `src/ui/components.py`
+- `src/ui/main_window.py`
+- `manage_instruction/Final_Formulation.md`
+- `manage_instruction/Work_Log.md`
+
+修改内容：
+
+- `global_signals` 新增 `axis_board_requested(object)`，携带菜单所在窗口作为首次定位锚点。
+- `SharedMoreMenu._on_show_axis()` 只发送显示请求，不再创建看板、不再持有看板实例、不再扫描顶层窗口或绑定详情回调。
+- `MainWindow` 统一持有唯一 `axis_board` 实例，并负责首次定位、显示 / 隐藏和应用退出时关闭。
+- 新增 `MainWindow.open_schedule_detail_from_axis(...)`，坐标看板不再复用语义错误的 `open_schedule_detail_from_month_panel(...)`。
+- 坐标详情仍复用共享 `ScheduleDetailPop`；时间、提醒、清单编辑继续通过 `_resolve_detail_edit_target(...)` 按当前可见视图承接。
+- 在既有 `MainController / RefreshCoordinator` 注册 `axis_if_visible`；日程更新统一刷新 dashboard、todo、可见周界面和可见坐标看板。
+- 坐标详情内直接修改标题、描述、重要性或重复规则后，复用月界面刷新入口同步 marker / panel，再由现有信号链刷新其他视图和坐标看板。
+- `Final_Formulation.md` 将旧的 `matrix_classification_service.py` 目标更正为当前实际的 `schedule_axis_service.py`，并消除“尚未实现”与“样本已接入”的状态冲突。
+
+保持不变：
+
+- 不修改坐标映射、动态范围、点 / 线段绘制、颜色、尺寸、纵向轨道和命中检测逻辑。
+- 不修改数据库、Repository、日程字段或重复日程写入规则。
+- 不修改开工前已有 diff `assets/icons/axis.svg`。
+
+待验证：
+
+- 从日 / 周 / 月 / 挂起窗口的更多菜单打开时，均应切换同一个坐标看板实例。
+- 在共享详情中修改时间、清单或重要性后，可见看板应立即更新位置、颜色或点大小。
+- 关闭主窗口时，独立坐标看板应同步关闭。
+- 后续仍需确定完成日程展示策略并继续视觉细调。
+
+自动验证结果：
+
+- `src/utils/signals.py`、`src/ui/components.py`、`src/ui/main_window.py` 通过独立 `py_compile`。
+- PyQt offscreen 请求验证通过：任意 `SharedMoreMenu._on_show_axis()` 只发出一次 `axis_board_requested(anchor_window)`，不创建局部看板实例。
+- `MainWindow`、`ScheduleAxisBoard` 和 `SharedMoreMenu` 组合 import 通过。
+- 静态搜索确认 `src/ui/components.py` 已无 `parent_window.axis_board`、`QApplication.topLevelWidgets()` 和月面板详情桥接依赖。
+- `git diff --check` 无 whitespace error，仅有 Windows LF / CRLF 提示。
+
+### 坐标看板右上角控制组补充
+
+开工前状态补充：
+
+- 用户正在试验主界面配色，`src/config.py` 已有未提交修改，本任务不修改该文件。
+- `assets/icons/axis.svg` 仍为前序未提交修改，本任务不修改该文件。
+- `assets/icons/set.svg` 为用户在本任务前准备的未跟踪图标，本任务正式接入坐标看板。
+
+实际修改：
+
+- `src/ui/popups/schedule_axis_board.py`
+- `manage_instruction/Final_Formulation.md`
+- `manage_instruction/Work_Log.md`
+- 接入用户提供的 `assets/icons/set.svg`，文件内容不做改写。
+
+实现内容：
+
+- 参考待办看板，在坐标看板右上角形成“显示设置 / 置顶 / 关闭”按钮组。
+- 显示设置按钮使用 `assets/icons/set.svg`，当前仅提供可点击 UI 壳和 tooltip，不保存或修改显示配置。
+- 置顶按钮复用待办看板行为：切换 `WindowStaysOnTopHint`，重新显示并抬高窗口。
+- 置顶状态通过 pin 图标颜色区分：未置顶为半透明灰白，置顶为纯白。
+- 图标统一复用 `load_colored_svg_pixmap(...)` 进行 DPR 渲染，不在坐标看板内复制新的 SVG 染色实现。
+- 关闭按钮保留原有关闭行为，并与新增按钮统一尺寸和 hover 形态。
+
+待验证：
+
+- 设置、pin、关闭三个按钮在不同 DPI 下不应裁切或挤压范围文字。
+- pin 连续切换后窗口应保持可见，且置顶状态和图标颜色一致。
+- 设置按钮当前点击无业务动作，符合占位边界。
+
+自动验证结果：
+
+- 使用空投影替代 Repository 数据完成 PyQt offscreen 构造，不读取或写入 `schedule.db`。
+- `set.svg` 与 `pin.svg` 均成功生成非空图标。
+- pin 连续点击两次后，`is_pinned` 与 `WindowStaysOnTopHint` 分别正确进入和退出置顶状态。
+- 设置按钮占位点击不产生异常。
+
+真实界面反馈与样式统一：
+
+- 用户对照坐标看板和待办看板后确认，首版按钮组的尺寸、关闭符号和间距仍不一致。
+- 坐标看板右上角按钮组改为严格复用待办看板规格：
+  - 设置键、pin 键、关闭键统一为 `30x30`。
+  - 设置与 pin 图标统一为 `16x16`。
+  - 关闭键不再使用文本“×”，改用待办看板相同的 `assets/icons/close.png`，图标尺寸 `12x12`。
+  - 设置与 pin 使用透明背景、4px 圆角和 `rgba(255,255,255,0.2)` hover。
+  - 关闭键沿用右上角圆角和红色 hover。
+  - 三个按钮之间取消额外 layout 间距，范围文字与按钮组之间保留 6px 间隔。
+- 本次只统一视觉规格，不改变设置占位和 pin 置顶逻辑。
+- PyQt offscreen 验证确认三个按钮均为 `30x30`，设置 / pin 图标为 `16x16`，关闭图标为 `12x12`，且三个图标均成功加载。
+
+第二次真实界面反馈与定位修正：
+
+- 用户指出待办看板按钮组紧贴窗口右上角，而坐标看板首版仍受标题内部 layout 边距约束，整体向左、向下缩进。
+- 原因是首版只复用了按钮尺寸和样式，没有复用待办看板“按钮作为顶层窗口子控件并绝对定位”的方式。
+- 坐标看板三个按钮改为直接以看板窗口为父对象，不再加入标题布局。
+- 完全对齐待办看板定位规则：`y=10`，关闭键右边距 `10px`，pin 与设置键依次每隔 `30px` 向左排列。
+- 新增 resize 定位刷新，后续若调整看板宽度，按钮组仍保持贴合右上角。
+- 标题布局预留右侧 90px，防止范围文字进入按钮命中区域。
+- PyQt offscreen 验证确认：显示后以及宽度变化后，关闭 / pin / 设置按钮始终分别保持右边距 `10 / 40 / 70px`，纵坐标均为 `10px`。
+
+第三次真实界面反馈与范围文字定位修正：
+
+- 用户实测发现“范围 ±N天”仍由标题 layout 管理，而按钮已采用窗口绝对定位，两套布局互不约束，导致范围文字覆盖设置与 pin 图标。
+- 范围文字改为坐标看板的直接子控件，与按钮组采用同一定位坐标系。
+- 范围文字固定在设置键正左侧，保留 6px 间距，并与 `30px` 高按钮组垂直居中。
+- 每次数据范围变化、看板显示或宽度变化都会重新计算范围文字和按钮组位置。
+- 标题布局不再为范围文字和按钮组承担定位，避免 layout 最小宽度把文字挤入绝对定位区域。
+- PyQt offscreen 几何验证确认范围文字右沿与设置键之间保持至少 6px，二者垂直中心误差不超过 1px。
+
+### 坐标看板按完成状态分区
+
+- 新增显示规则：未完成日程只显示在时间轴上方，已完成日程只显示在时间轴下方。
+- `AxisScheduleProjection` 新增只读字段 `is_completed`，由 `ScheduleAxisService` 根据 `status == 1` 统一计算，画布不直接解释数据库状态值。
+- `_ScheduleAxisCanvas` 将轨道拆为上方未完成轨道和下方已完成轨道；同一状态区域内重叠时继续分配不同纵向轨道，不改变横向时间位置。
+- `status == 2` 的隐藏日程仍不进入看板，无时间日程和待办过滤规则不变。
+- 看板底部图例同步标明“线上：未完成 / 线下：已完成”。
+- 本轮不改变对数映射、动态时间范围、清单颜色、重要性尺寸和详情交互。
+- 修正测试输入后完成四条 marker 的 offscreen 轨道验证：两条未完成日程分别位于 `y=90/62`（轴上方），两条已完成日程分别位于 `y=150/178`（轴下方），同侧重叠成功分配到不同轨道。
+
+### 坐标看板跨视图实时刷新与白色画布
+
+刷新链审查：
+
+- 周界面和月界面的 `schedule_updated` 已连接 `MainWindow._on_week_schedule_updated(...)`，会进入包含 `axis_if_visible` 的统一刷新链。
+- 主界面新增、picker 修改等主窗口路径已调用 `_refresh_dashboard_todo_week()`，同样覆盖可见坐标看板。
+- 缺口位于日界面卡片内部操作、完成状态切换和日界面详情直接修改：这些路径只发出 `DashboardView.req_refresh_all`，此前没有连接 `axis_if_visible`。
+
+实际修改：
+
+- `DashboardView.req_refresh_all` 增加到 `MainWindow._refresh_axis_if_visible` 的连接，覆盖日界面卡片删除、状态变化、拖拽排序和共享详情直接修改。
+- `TodoView.req_refresh_all` 同步连接可见坐标看板刷新，避免日程 / 待办共用数据更新路径留下显示差异；待办本身仍不会投影到坐标轴。
+- 周、月已有刷新连接保持不变，不复制第二套刷新逻辑。
+
+视觉修改：
+
+- 坐标画布区域绘制近纯白背景和轻微边框，外层看板标题区仍保留当前主题渐变。
+- 坐标轴、箭头、中心刻度、时间范围文字、连接虚线和空状态文字改用 `AppConfig.COLOR_GRADIENT_START` 主题青色及其透明变体。
+- 圆点和时间段主体继续读取所属清单颜色。
+- 为避免白色或浅色清单 marker 消失，圆点使用主题青色细描边；时间段先绘制略宽的主题青色底线，再叠加清单色主体线。
+
+待验证：
+
+- 看板保持显示时，分别从日、周、月界面修改时间、清单、重要性和完成状态，marker 应即时更新。
+- 白色画布上青色坐标轴、浅色清单 marker 和深色清单 marker 均应清晰可见。
+
+自动验证结果：
+
+- 静态连接检查确认日界面 `req_refresh_all`、周界面 `schedule_updated`、月界面 `schedule_updated` 均可到达包含 `axis_if_visible` 的刷新路径。
+- 画布像素验证得到：背景 `#ffffff`、抗锯齿后的主题青色轴 `#49d0e7`、测试清单红色 marker `#ff0000`。
+- `src/ui/main_window.py` 与 `src/ui/popups/schedule_axis_board.py` 通过独立 `py_compile`。
+
+### 坐标看板下一阶段需求记录
+
+- 本次只记录后续需求，不修改源码。
+- 下一阶段需要完善截止时间（DDL）日程与起止时间段日程的不同表现：截止时间使用单点，时间段使用起止线段，其余边界语义另行审查。
+- 设置按钮后续打开显示设置面板，至少包含：
+  - 显示过去日程。
+  - 显示完成日程。
+  - 显示时间范围：1天、1周、1月、1年，四项互斥。
+  - 清单及其对应颜色设置，默认沿用清单颜色；是否支持看板专用覆盖色待定。
+- 看板后续根据时间范围、日程数量和上下轨道数量自适应宽高，同时受最小尺寸、最大尺寸和屏幕可用区域约束。
+- 设置变化应在现有全局看板实例内重算投影、轨道和尺寸，不重新创建看板。
+- 该需求已经同步写入 `Final_Formulation.md` 的坐标显示阶段，等待后续拆分执行。
+
+## 2026-07-01 坐标轴灰色调整与月日程 panel 完成入口
+
+### 开工状态与范围
+
+- 本次任务开始前工作区已存在坐标看板阶段的未提交修改，涉及 `Final_Formulation.md`、坐标看板 service / signal / UI、`MainWindow`、`SharedMoreMenu`、`axis.svg` 和用户提供的 `set.svg`；另有用户自行调整的 `src/config.py`。
+- 本次没有回退或覆盖上述既有修改。
+- 本次新增修改文件：
+  - `src/ui/popups/schedule_axis_board.py`
+  - `src/ui/popups/month_day_panel.py`
+  - `src/ui/month_window.py`
+  - `manage_instruction/Work_Log.md`
+
+### 坐标看板轴色调整
+
+- `_ScheduleAxisCanvas` 新增固定轴色 `AXIS_COLOR = "#333333"`。
+- 数轴主线、左右箭头、中心刻度、过去 / 现在 / 未来文字、空状态文字、marker 到数轴的连接虚线，以及浅色 marker 的轮廓统一改为该灰色及其透明变体。
+- 日程圆点和时间段主体仍使用所属清单颜色，白色画布和外层主题渐变保持不变。
+
+### 月日程 panel 右键完成状态切换
+
+- `_MonthScheduleItemFrame` 新增右键菜单，只提供日程完成状态切换，不提供置顶、删除等额外功能。
+- 未完成日程显示“完成日程”，选择后写入 `status=1`；已完成日程显示“未完成”，选择后恢复为 `status=0`。
+- “完成日程”使用 `check.svg`，“未完成”使用用户新增的 `uncheck.svg`；图标和文字使用 `#333333`，选中背景使用轻量主题青色。
+- `MonthDayPanel` 只新增 `schedule_status_requested(object, int)` 信号并转发行组件请求，不导入数据库，不直接写状态。
+- `MonthWindow` 接收请求后调用现有 `db_manager.update_schedule_status(schedule_id, new_status)`；成功后更新当前对象状态并复用 `refresh_after_schedule_change(schedule)`。
+- 完成后的统一刷新覆盖月格 marker、打开的同日 panel、对应详情弹窗和 `schedule_updated` 上游协调链，因此可见坐标看板及其他已接入视图也能同步刷新。
+- 更新失败时只显示失败 toast，不伪造完成状态。
+
+### 验证结果与限制
+
+- `check.svg` 存在性检查通过。
+- 使用 Miniconda Python 3.13 和独立临时 pycache 完成三个修改文件的 `py_compile`，语法检查通过；临时 pycache 已清理。
+- 静态搜索确认完整请求链：行组件 `status_change_requested` -> `MonthDayPanel.schedule_status_requested` -> `MonthWindow._change_schedule_status_from_day_panel` -> `update_schedule_status(...)` -> `refresh_after_schedule_change(...)`。
+- `git diff --check` 未发现空白错误，仅有仓库既有 LF / CRLF 提示。
+- 当前项目 `.venv\Scripts\python.exe` 仍指向已经不存在的 `C:\Users\hfgre\AppData\Local\Programs\Python\Python311\python.exe`；系统 Miniconda Python 未安装 PyQt6，因此本窗口无法完成 Qt offscreen 菜单触发和画布像素验证。
+- 需要用户实机复测：
+  - 坐标轴及辅助线是否统一为 `#333333`，清单色 marker 是否仍清晰。
+  - 月界面单击日期 panel 中，未完成日程右键“完成日程”后是否立即变为已完成，并同步更新月格、详情弹窗和可见坐标看板。
+  - 已完成日程右键“未完成”后是否恢复未完成，并触发同一刷新链。
+
+### 月格三角角标数字颜色调整
+
+- 保留三角角标及原有日期日程数量缓存，不改变三角形的状态颜色规则。
+- 用户进一步明确数字仍需可见，只是要接近数字所在日期格的背景色；因此数量文本最终改用月界面渐变起始色 `AppConfig.COLOR_GRADIENT_START`。
+- 进一步按三角形颜色区分：白色三角形的数字使用 `AppConfig.COLOR_GRADIENT_START`，当前主题下为 `#0cc0df`；红、黄、绿、灰等其他三角形继续使用白色数字。
+- 该规则避免白色三角形中的白字消失，同时保留彩色三角形原有的高对比度。
+- 数量统计结构保持不变。
+
+### 月日程 panel 完成状态图标核对
+
+- `assets/icons/check.svg` 用于将未完成日程标记为完成。
+- 用户新增的 `assets/icons/uncheck.svg` 用于将已完成日程恢复为未完成。
+- 两个 SVG 均通过现有 icon loader 染为 `#333333`，不再依赖仓库中缺失的 `undo.svg`。

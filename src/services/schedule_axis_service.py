@@ -12,6 +12,7 @@ class AxisScheduleProjection:
     category_color: str
     category_name: str
     importance: int
+    is_completed: bool
 
 
 class ScheduleAxisService:
@@ -37,7 +38,8 @@ class ScheduleAxisService:
         for schedule in schedules:
             if getattr(schedule, "item_type", "schedule") != "schedule":
                 continue
-            if int(getattr(schedule, "status", 0)) == 2:
+            status = int(getattr(schedule, "status", 0) or 0)
+            if status == 2:
                 continue
 
             start_time = cls._as_datetime(getattr(schedule, "start_time", None))
@@ -70,6 +72,7 @@ class ScheduleAxisService:
                     category_color=category_color,
                     category_name=category_name,
                     importance=importance,
+                    is_completed=status == 1,
                 )
             )
             furthest_hours = max(furthest_hours, abs(start_delta), abs(end_delta))

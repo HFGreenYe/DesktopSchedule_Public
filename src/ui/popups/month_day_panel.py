@@ -3,17 +3,21 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QMenu,
     QScrollArea,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 from PyQt6.QtCore import Qt, QRectF, QSize, pyqtSignal
-from PyQt6.QtGui import QBrush, QColor, QLinearGradient, QPainter, QPen
+from PyQt6.QtGui import QAction, QBrush, QColor, QIcon, QLinearGradient, QPainter, QPen
+
+from ..utils.icon_loader import load_colored_svg_pixmap
 
 
 class _MonthScheduleItemFrame(QFrame):
     double_clicked = pyqtSignal(object)
+    status_change_requested = pyqtSignal(object, int)
 
     def __init__(self, schedule, parent=None):
         super().__init__(parent)
@@ -25,6 +29,55 @@ class _MonthScheduleItemFrame(QFrame):
             event.accept()
             return
         super().mouseDoubleClickEvent(event)
+
+    def contextMenuEvent(self, event):
+        menu = self._build_context_menu()
+        menu.exec(event.globalPos())
+        event.accept()
+
+    def _build_context_menu(self):
+        menu = QMenu(self)
+        menu.setStyleSheet(
+            """
+            QMenu {
+                background-color: rgba(255, 255, 255, 0.96);
+                border: 1px solid rgba(0, 0, 0, 0.10);
+                border-radius: 6px;
+                padding: 4px;
+                color: #333333;
+            }
+            QMenu::item {
+                padding: 6px 18px 6px 8px;
+                border-radius: 4px;
+                font-family: 'Microsoft YaHei';
+                font-size: 12px;
+            }
+            QMenu::item:selected {
+                background-color: rgba(12, 192, 223, 0.14);
+            }
+            QMenu::item:disabled {
+                color: #999999;
+            }
+            """
+        )
+
+        is_completed = int(getattr(self.schedule, "status", 0) or 0) == 1
+        text = "未完成" if is_completed else "完成日程"
+        target_status = 0 if is_completed else 1
+        icon_name = "uncheck.svg" if is_completed else "check.svg"
+        icon_pixmap = load_colored_svg_pixmap(
+            f"assets/icons/{icon_name}",
+            "#333333",
+            16,
+            16,
+            self.devicePixelRatioF(),
+        )
+        action = QAction(QIcon(icon_pixmap), text, menu)
+        action.triggered.connect(
+            lambda: self.status_change_requested.emit(self.schedule, target_status)
+        )
+        menu.addAction(action)
+        return menu
 
 
 class _ElidedTitleLabel(QLabel):
@@ -65,6 +118,7 @@ class _ElidedTitleLabel(QLabel):
 class MonthDayPanel(QWidget):
     closed = pyqtSignal(object)
     schedule_double_clicked = pyqtSignal(object, object)
+    schedule_status_requested = pyqtSignal(object, int)
 
     def __init__(self, qdate, schedules, parent=None):
         super().__init__(parent, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint)
@@ -277,6 +331,7 @@ class MonthDayPanel(QWidget):
         layout.addWidget(meta_label)
 
         item_frame.double_clicked.connect(self._emit_schedule_double_clicked)
+        item_frame.status_change_requested.connect(self.schedule_status_requested.emit)
         return item_frame
 
     def _emit_schedule_double_clicked(self, schedule):

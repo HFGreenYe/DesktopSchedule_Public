@@ -35,6 +35,7 @@ class MainWindow(FramelessMainWindow):
     def __init__(self):
         super().__init__()
         self.main_controller = MainController()
+        self.axis_board = None
         
         self.setFixedWidth(AppConfig.DEFAULT_WIDTH)
         self.setMinimumHeight(600) 
@@ -82,11 +83,13 @@ class MainWindow(FramelessMainWindow):
         self.page_dashboard.context_view_requested.connect(self._handle_dashboard_context_view)
 
         self.page_dashboard.req_refresh_all.connect(self._refresh_week_if_visible)
+        self.page_dashboard.req_refresh_all.connect(self._refresh_axis_if_visible)
 
         self.page_todo = TodoView()
         self.body_stack.addWidget(self.page_todo)
         self.page_todo.req_change_view.connect(self.switch_view)
         self.page_todo.req_refresh_all.connect(self.page_dashboard.refresh_data)
+        self.page_todo.req_refresh_all.connect(self._refresh_axis_if_visible)
         self.page_dashboard.req_refresh_all.connect(self.page_todo.refresh_data)
         self.suspend_window = SuspendWindow()
         self.week_window = WeekWindow()
@@ -169,6 +172,7 @@ class MainWindow(FramelessMainWindow):
         self.page_alarm.suspend_requested.connect(self.switch_to_suspend)
         self.page_list.suspend_requested.connect(self.switch_to_suspend)
         self._register_refresh_targets()
+        global_signals.axis_board_requested.connect(self.toggle_axis_board)
         current_style = self.styleSheet()
         self.setStyleSheet(current_style + StyleManager.get_tooltip_style())
 
@@ -189,10 +193,56 @@ class MainWindow(FramelessMainWindow):
         self.main_controller.register_refresh_target("dashboard", self.page_dashboard.refresh_data)
         self.main_controller.register_refresh_target("todo", self.page_todo.refresh_data)
         self.main_controller.register_refresh_target("week_if_visible", self._refresh_week_if_visible)
+        self.main_controller.register_refresh_target("axis_if_visible", self._refresh_axis_if_visible)
 
     def _refresh_dashboard_todo_week(self):
-        self.main_controller.request_refresh_many(("dashboard", "todo", "week_if_visible"))
+        self.main_controller.request_refresh_many(
+            ("dashboard", "todo", "week_if_visible", "axis_if_visible")
+        )
         global_signals.refresh_requested.emit("dashboard_todo_week")
+
+    def _refresh_axis_if_visible(self):
+        if self.axis_board is not None and self.axis_board.isVisible():
+            self.axis_board.refresh_data()
+
+    def toggle_axis_board(self, anchor_window=None):
+        from PyQt6.QtGui import QGuiApplication
+        from .popups.schedule_axis_board import ScheduleAxisBoard
+
+        if self.axis_board is None:
+            self.axis_board = ScheduleAxisBoard()
+            self.axis_board.set_detail_opener(self.open_schedule_detail_from_axis)
+
+            anchor = anchor_window if anchor_window is not None else self
+            anchor_geometry = anchor.frameGeometry()
+            x = anchor_geometry.right() + 10
+            y = anchor_geometry.top()
+            screen = (
+                QGuiApplication.screenAt(anchor_geometry.center())
+                or QGuiApplication.primaryScreen()
+            )
+            if screen is not None:
+                available = screen.availableGeometry()
+                if x + self.axis_board.width() > available.right() + 1:
+                    x = anchor_geometry.left() - self.axis_board.width() - 10
+                x = max(
+                    available.left(),
+                    min(x, available.right() - self.axis_board.width() + 1),
+                )
+                y = max(
+                    available.top(),
+                    min(y, available.bottom() - self.axis_board.height() + 1),
+                )
+            self.axis_board.move(x, y)
+
+        if self.axis_board.isVisible():
+            self.axis_board.hide()
+            return
+
+        self.axis_board.refresh_data()
+        self.axis_board.show()
+        self.axis_board.raise_()
+        self.axis_board.activateWindow()
 
     def show_calendar_popup(self):
         """在顶栏日期文字下方弹出日历"""
@@ -324,6 +374,32 @@ class MainWindow(FramelessMainWindow):
 
         popup.show()
         return popup
+
+    def open_schedule_detail_from_axis(self, schedule_data):
+        """Open the shared detail popup for the global axis board."""
+        popup = ScheduleDetailPop(schedule_data, source_view="axis")
+        popup.req_edit_time.connect(
+            lambda data: self.go_to_time_picker_for_edit(data, "axis")
+        )
+        popup.req_edit_alarm.connect(
+            lambda data: self.go_to_alarm_picker_for_edit(data, "axis")
+        )
+        popup.req_edit_list.connect(
+            lambda data: self.go_to_list_picker_for_edit(data, "axis")
+        )
+        popup.schedule_updated.connect(
+            lambda popup_ref=popup: self._on_axis_detail_updated(
+                getattr(popup_ref, "data", None)
+            )
+        )
+        popup.show()
+        return popup
+
+    def _on_axis_detail_updated(self, updated_schedule):
+        if updated_schedule is None:
+            self._refresh_dashboard_todo_week()
+            return
+        self.month_window.refresh_after_schedule_change(updated_schedule)
 
     def go_to_time_picker(self, start, end):
         """模式1：从【添加界面】打开时间选择"""
@@ -807,6 +883,11 @@ class MainWindow(FramelessMainWindow):
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(QPen(QColor(0, 0, 0, 26), 1))
         painter.drawPath(path)
+
+    def closeEvent(self, event):
+        if self.axis_board is not None:
+            self.axis_board.close()
+        super().closeEvent(event)
 
     def switch_week_to_suspend(self):
         """周视图 -> 宽版挂起条"""
