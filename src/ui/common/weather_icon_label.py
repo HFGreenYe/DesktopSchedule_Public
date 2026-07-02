@@ -1,6 +1,6 @@
 import math
 
-from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer
+from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QPainter, QPixmap
 from PyQt6.QtWidgets import QGridLayout, QLabel, QWidget
 
@@ -9,6 +9,8 @@ from src.ui.utils.icon_loader import load_colored_svg_pixmap
 
 class WeatherIconLabel(QWidget):
     """Weather icon widget with an isolated loading layer."""
+
+    double_clicked = pyqtSignal()
 
     def __init__(
         self,
@@ -27,6 +29,7 @@ class WeatherIconLabel(QWidget):
         self._loading_base = QPixmap()
         self._alignment = Qt.AlignmentFlag.AlignCenter
         self._active_layer = "weather"
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         self._layout = QGridLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
@@ -35,10 +38,18 @@ class WeatherIconLabel(QWidget):
         self._loading_label = QLabel(self)
         self._loading_label.setFixedSize(icon_size, icon_size)
         self._loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._loading_label.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+            True,
+        )
 
         self._weather_label = QLabel(self)
         self._weather_label.setFixedSize(icon_size, icon_size)
         self._weather_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._weather_label.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+            True,
+        )
 
         self._layout.addWidget(self._loading_label, 0, 0)
         self._layout.addWidget(self._weather_label, 0, 0)
@@ -108,6 +119,13 @@ class WeatherIconLabel(QWidget):
     def text(self):
         active_label = self._loading_label if self._active_layer == "loading" else self._weather_label
         return active_label.text()
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.double_clicked.emit()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
 
     def _load_svg(self, icon_path):
         return load_colored_svg_pixmap(

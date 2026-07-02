@@ -13,6 +13,7 @@ class AppSignals(QObject):
     category_changed = pyqtSignal()
     refresh_requested = pyqtSignal(str)
     axis_board_requested = pyqtSignal(object)
+    primary_window_pin_changed = pyqtSignal(bool)
 
 
 global_signals = AppSignals()

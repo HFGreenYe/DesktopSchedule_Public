@@ -16,6 +16,7 @@ from ..config import AppConfig
 from ..data.database import db_manager
 from ..utils.win_api import apply_24h2_border_fix
 from ..utils.styles import StyleManager
+from ..utils.window_preferences import get_primary_pin_preference
 from .header import ToolTipFilter
 from .components import IOSSwitch, get_colored_icon, SharedMoreMenu
 from .common.action_context_menu import ActionContextMenu
@@ -1183,7 +1184,10 @@ class MonthWindow(FramelessMainWindow):
         super().__init__()
         # 1. 窗口总尺寸缩小到 80%
         self.setFixedSize(720, 480) 
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
+        window_flags = Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window
+        if get_primary_pin_preference():
+            window_flags |= Qt.WindowType.WindowStaysOnTopHint
+        self.setWindowFlags(window_flags)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.titleBar.hide()
 

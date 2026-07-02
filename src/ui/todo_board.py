@@ -11,6 +11,7 @@ from ..data.database import db_manager
 from ..services.category_policy_service import CategoryDeleteAction, CategoryPolicyService
 from ..services.schedule_query_service import ScheduleQueryService
 from ..services.schedule_sort_service import ScheduleSortService
+from ..utils.window_preferences import set_window_pin_state
 from .list_picker import ListPickerView
 from .common.todo_board_add_folder_card import AddFolderCard
 # ==========================================
@@ -160,8 +161,7 @@ class StickyNoteCard(QFrame):
             }}
         """)
         if hasattr(self, 'title_label'):
-            # 置顶使用金色(#FFD700)，未置顶保持纯白
-            self._title_color = "#FFD700" if is_pinned else "white" 
+            self._title_color = "white"
             self._fit_title_label()
 
     def _set_title_style(self, font_size):
@@ -1786,10 +1786,12 @@ class TodoBoardWindow(QWidget):
         self.refresh_data()
 
     def _toggle_pin(self):
-        self.is_pinned = not self.is_pinned
-        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, self.is_pinned)
+        self.set_pinned(not self.is_pinned)
+
+    def set_pinned(self, enabled):
+        self.is_pinned = bool(enabled)
+        set_window_pin_state(self, self.is_pinned)
         self._update_nav_icons()
-        self.show() 
 
     def _sort_by_priority(self):
         """一键按重要性(高->低)及创建时间(早->晚)重新排序"""

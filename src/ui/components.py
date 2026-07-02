@@ -5,6 +5,11 @@ from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen, QCursor
 from datetime import datetime
 from src.ui.todo_board import TodoBoardWindow
 from src.utils.signals import global_signals
+from src.utils.window_preferences import (
+    get_primary_pin_preference,
+    set_primary_pin_preference,
+    set_window_pin_state,
+)
 
 # =================================================================
 class IOSSwitch(QWidget):
@@ -535,7 +540,7 @@ class SharedMoreMenu(QMenu):
                 icon_path="assets/icons/festival.svg",
             )
             add_menu_separator()
-        add_centered_btn("坐标显示", "axis", self._on_show_axis)
+        add_centered_btn("坐标看板", "axis", self._on_show_axis)
         add_centered_btn("待办显示", "todo", self._on_show_todo)
         add_centered_btn("修改字体", "theme", self._on_modify_font, icon_color="#333333")
         add_centered_btn("导出日程", "export", self._on_export_schedule)
@@ -761,22 +766,16 @@ class SharedMoreMenu(QMenu):
         
         # 立即获取当前的置顶状态
         current_flags = self.parent_window.windowFlags()
+        next_pinned = not bool(current_flags & Qt.WindowType.WindowStaysOnTopHint)
         
         # 为了安全，先主动关闭当前菜单，释放系统的控制权
         self.close()
         
         def _do_toggle():
-
-            if current_flags & Qt.WindowType.WindowStaysOnTopHint:
-                new_flags = current_flags ^ Qt.WindowType.WindowStaysOnTopHint
-                print("状态变更：取消置顶")
-            else:
-                new_flags = current_flags | Qt.WindowType.WindowStaysOnTopHint
-                print("状态变更：开启置顶")
-            
-            # 执行变更
-            self.parent_window.setWindowFlags(new_flags)
-            self.parent_window.show()
+            set_primary_pin_preference(next_pinned)
+            set_window_pin_state(self.parent_window, next_pinned)
+            global_signals.primary_window_pin_changed.emit(next_pinned)
+            print(f"状态变更：{'开启' if next_pinned else '取消'}置顶")
             
             # 补上 24H2 的防黑边
             hwnd = int(self.parent_window.winId())
@@ -821,6 +820,7 @@ class SharedMoreMenu(QMenu):
         if board.isVisible():
             board.hide()
         else:
+            board.set_pinned(get_primary_pin_preference())
             board.show()
             board.raise_()
             board.activateWindow()

@@ -1,6 +1,18 @@
 import datetime
 
-from PyQt6.QtCore import QPoint, QRectF, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import (
+    QEasingCurve,
+    QEvent,
+    QPoint,
+    QPointF,
+    QPropertyAnimation,
+    QRect,
+    QRectF,
+    QSize,
+    Qt,
+    QVariantAnimation,
+    pyqtSignal,
+)
 from PyQt6.QtGui import (
     QBrush,
     QColor,
@@ -19,6 +31,8 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSizePolicy,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -26,6 +40,7 @@ from PyQt6.QtWidgets import (
 from src.config import AppConfig
 from src.services.schedule_axis_service import ScheduleAxisService
 from src.ui.utils.icon_loader import load_colored_svg_pixmap
+from src.utils.window_preferences import set_window_pin_state
 
 
 class _AxisSchedulePreview(QFrame):
@@ -160,7 +175,7 @@ class _ScheduleAxisCanvas(QWidget):
 
         canvas_rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
         painter.setPen(QPen(QColor(0, 0, 0, 24), 1))
-        painter.setBrush(QColor(255, 255, 255, 248))
+        painter.setBrush(QColor(255, 255, 255, 190))
         painter.drawRoundedRect(canvas_rect, 6, 6)
 
         left = 20.0
@@ -346,6 +361,14 @@ class ScheduleAxisBoard(QWidget):
         self._drag_offset = None
         self._detail_opener = None
         self._detail_popups = {}
+        self._settings_open = False
+        self._settings_target_open = False
+        self._settings_transitioning = False
+        self._settings_icon_angle = 0.0
+        self._settings_icon_source = QPixmap()
+        self._content_expanded_height = 0
+        self._content_animation = None
+        self._settings_rotation_animation = None
         self.hover_preview = _AxisSchedulePreview(False)
         self.persistent_preview = _AxisSchedulePreview(True)
 
@@ -355,18 +378,19 @@ class ScheduleAxisBoard(QWidget):
 
         panel = QFrame()
         panel.setStyleSheet("background: transparent;")
+        panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setContentsMargins(16, 12, 16, 30)
         layout.setSpacing(6)
 
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
-        title = QLabel("坐标显示")
-        title.setStyleSheet(
+        header.addStrut(24)
+        self.title_label = QLabel("坐标看板", self)
+        self.title_label.setStyleSheet(
             "color: white; font-size: 17px; font-weight: bold; "
             "font-family: 'Microsoft YaHei'; background: transparent;"
         )
-        header.addWidget(title)
         header.addStretch()
         self.range_label = QLabel(self)
         self.range_label.setAlignment(
@@ -382,10 +406,11 @@ class ScheduleAxisBoard(QWidget):
 
         self.btn_settings = QPushButton(self)
         self.btn_settings.setFixedSize(30, 30)
-        self.btn_settings.setIconSize(QSize(16, 16))
+        self.btn_settings.setIconSize(QSize(24, 24))
         self.btn_settings.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_settings.setToolTip("显示设置（待实现）")
+        self.btn_settings.setToolTip("显示设置")
         self.btn_settings.setStyleSheet(button_style)
+        self.btn_settings.clicked.connect(self._toggle_settings_page)
 
         self.btn_pin = QPushButton(self)
         self.btn_pin.setFixedSize(30, 30)
@@ -411,21 +436,56 @@ class ScheduleAxisBoard(QWidget):
         self._update_header_icons()
         self._update_header_button_positions()
 
+        self.content_host = QWidget()
+        self.content_host.setStyleSheet("background: transparent;")
+        self.content_host.installEventFilter(self)
+
+        self.content_stack = QStackedWidget(self.content_host)
+        self.content_stack.setStyleSheet("background: transparent;")
+
+        self.display_page = QWidget()
+        self.display_page.setStyleSheet("background: transparent;")
+        display_layout = QVBoxLayout(self.display_page)
+        display_layout.setContentsMargins(0, 0, 0, 0)
+        display_layout.setSpacing(0)
+
         self.canvas = _ScheduleAxisCanvas()
         self.canvas.hover_requested.connect(self._show_hover_preview)
         self.canvas.item_clicked.connect(self._show_persistent_preview)
-        layout.addWidget(self.canvas, 1)
+        display_layout.addWidget(self.canvas, 1)
 
-        legend = QLabel(
+        self.legend = QLabel(
+            self,
+        )
+        self.legend.setText(
             "线上：未完成  ·  线下：已完成  ·  圆点：单时间  ·  线段：起止时间"
         )
-        legend.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        legend.setStyleSheet(
+        self.legend.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.legend.setStyleSheet(
             "color: rgba(255,255,255,0.78); font-size: 9px; "
             "font-family: 'Microsoft YaHei'; background: transparent;"
         )
-        layout.addWidget(legend)
-        outer.addWidget(panel)
+        self.settings_page = QWidget()
+        self.settings_page.setStyleSheet("background: transparent;")
+        self.settings_placeholder = QLabel("显示设置\n选项内容待实现", self.content_host)
+        self.settings_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.settings_placeholder.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+            True,
+        )
+        self.settings_placeholder.setStyleSheet(
+            "color: rgba(255,255,255,0.88); font-size: 14px; "
+            "font-family: 'Microsoft YaHei'; background: transparent;"
+        )
+        self.settings_placeholder.hide()
+
+        self.content_stack.addWidget(self.display_page)
+        self.content_stack.addWidget(self.settings_page)
+        self.content_stack.setCurrentWidget(self.display_page)
+        layout.addWidget(self.content_host, 1)
+        outer.addWidget(panel, 1)
+
+        self._update_header_button_positions()
 
         self.refresh_data()
 
@@ -454,7 +514,8 @@ class ScheduleAxisBoard(QWidget):
     def _update_header_icons(self):
         settings_icon = self._load_header_icon("set.svg", "#FFFFFF")
         if not settings_icon.isNull():
-            self.btn_settings.setIcon(QIcon(settings_icon))
+            self._settings_icon_source = settings_icon
+            self._set_settings_icon_angle(self._settings_icon_angle)
 
         pin_color = "#FFFFFF" if self.is_pinned else "#96FFFFFF"
         pin_icon = self._load_header_icon("pin.svg", pin_color)
@@ -465,11 +526,106 @@ class ScheduleAxisBoard(QWidget):
         if not close_icon.isNull():
             self.btn_close.setIcon(QIcon(close_icon))
 
+    def _set_settings_icon_angle(self, angle):
+        self._settings_icon_angle = float(angle)
+        if self._settings_icon_source.isNull():
+            return
+
+        canvas_size = 24.0
+        icon_size = 16.0
+        ratio = max(self._settings_icon_source.devicePixelRatio(), 1.0)
+        pixmap = QPixmap(round(canvas_size * ratio), round(canvas_size * ratio))
+        pixmap.setDevicePixelRatio(ratio)
+        pixmap.fill(Qt.GlobalColor.transparent)
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        painter.translate(canvas_size / 2.0, canvas_size / 2.0)
+        painter.rotate(self._settings_icon_angle)
+        painter.drawPixmap(
+            QPointF(-icon_size / 2.0, -icon_size / 2.0),
+            self._settings_icon_source,
+        )
+        painter.end()
+        self.btn_settings.setIcon(QIcon(pixmap))
+
+    def _toggle_settings_page(self):
+        if self._settings_transitioning:
+            return
+
+        self.hover_preview.hide()
+        self._settings_transitioning = True
+        self._settings_target_open = not self._settings_open
+        host_rect = self.content_host.rect()
+        self._content_expanded_height = max(host_rect.height(), 1)
+
+        target_angle = 180.0 if self._settings_target_open else 0.0
+        self._settings_rotation_animation = QVariantAnimation(self)
+        self._settings_rotation_animation.setDuration(360)
+        self._settings_rotation_animation.setStartValue(self._settings_icon_angle)
+        self._settings_rotation_animation.setEndValue(target_angle)
+        self._settings_rotation_animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self._settings_rotation_animation.valueChanged.connect(self._set_settings_icon_angle)
+        self._settings_rotation_animation.start()
+
+        self._content_animation = QPropertyAnimation(
+            self.content_stack,
+            b"geometry",
+            self,
+        )
+        self._content_animation.setDuration(180)
+        self._content_animation.setStartValue(self.content_stack.geometry())
+        self._content_animation.setEndValue(
+            QRect(0, 0, max(host_rect.width(), 1), 0)
+        )
+        self._content_animation.setEasingCurve(QEasingCurve.Type.InCubic)
+        self._content_animation.finished.connect(self._swap_settings_page)
+        self._content_animation.start()
+
+    def _swap_settings_page(self):
+        target_page = self.settings_page if self._settings_target_open else self.display_page
+        self.content_stack.setCurrentWidget(target_page)
+        self.settings_placeholder.setVisible(self._settings_target_open)
+        if self._settings_target_open:
+            self.settings_placeholder.raise_()
+        host_rect = self.content_host.rect()
+        collapsed_rect = QRect(0, 0, max(host_rect.width(), 1), 0)
+        self.content_stack.setGeometry(collapsed_rect)
+
+        self._content_animation = QPropertyAnimation(
+            self.content_stack,
+            b"geometry",
+            self,
+        )
+        self._content_animation.setDuration(180)
+        self._content_animation.setStartValue(collapsed_rect)
+        self._content_animation.setEndValue(host_rect)
+        self._content_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._content_animation.finished.connect(self._finish_settings_transition)
+        self._content_animation.start()
+
+    def _finish_settings_transition(self):
+        self.content_stack.setGeometry(self.content_host.rect())
+        self._settings_open = self._settings_target_open
+        self._settings_transitioning = False
+
+    def eventFilter(self, watched, event):
+        if watched is self.content_host and event.type() == QEvent.Type.Resize:
+            host_rect = self.content_host.rect()
+            if hasattr(self, "settings_placeholder"):
+                self.settings_placeholder.setGeometry(host_rect)
+            if not self._settings_transitioning:
+                self.content_stack.setGeometry(host_rect)
+        return super().eventFilter(watched, event)
+
     def _toggle_pin(self):
-        self.is_pinned = not self.is_pinned
-        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, self.is_pinned)
+        self.set_pinned(not self.is_pinned)
+
+    def set_pinned(self, enabled):
+        self.is_pinned = bool(enabled)
+        set_window_pin_state(self, self.is_pinned)
         self._update_header_icons()
-        self.show()
         self.raise_()
 
     def _update_header_button_positions(self):
@@ -484,6 +640,15 @@ class ScheduleAxisBoard(QWidget):
         range_y = 10 + (30 - self.range_label.height()) // 2
         self.range_label.move(max(10, range_x), range_y)
         self.range_label.raise_()
+
+        if hasattr(self, "title_label"):
+            self.title_label.adjustSize()
+            self.title_label.move(26, 22)
+            self.title_label.raise_()
+
+        if hasattr(self, "legend"):
+            self.legend.setGeometry(26, self.height() - 31, max(0, self.width() - 52), 15)
+            self.legend.raise_()
 
     def _show_hover_preview(self, projection, global_pos):
         if projection is None:

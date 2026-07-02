@@ -301,7 +301,7 @@ class ScheduleCard(QFrame):
                 border_style = "border: 1px solid white;"
             else:
                 border_style = "border: 1px solid rgba(255, 255, 255, 0.4);"
-            bg_color = "background-color: #bebebe;" 
+            bg_color = "background-color: rgba(190, 190, 190, 0.7);"
             border_style = "border: 1px solid rgba(255, 255, 255, 0.4);"
             title_color = "rgba(255, 255, 255, 0.9)" 
             time_color = "#ff4d4f" 

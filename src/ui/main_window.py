@@ -30,17 +30,26 @@ from ..services.reminder_service import ReminderService
 from ..controllers.main_controller import MainController
 from ..controllers.view_router import ViewRouter
 from ..utils.signals import global_signals
+from ..utils.window_preferences import (
+    get_primary_pin_preference,
+    set_primary_pin_preference,
+    set_window_pin_state,
+)
 
 class MainWindow(FramelessMainWindow):
     def __init__(self):
         super().__init__()
         self.main_controller = MainController()
         self.axis_board = None
+        self.weather_board = None
         
         self.setFixedWidth(AppConfig.DEFAULT_WIDTH)
         self.setMinimumHeight(600) 
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window | Qt.WindowType.WindowStaysOnTopHint)
+        main_flags = Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window
+        if get_primary_pin_preference():
+            main_flags |= Qt.WindowType.WindowStaysOnTopHint
+        self.setWindowFlags(main_flags)
         self.titleBar.hide()
 
         self.central_widget = QWidget()
@@ -113,6 +122,15 @@ class MainWindow(FramelessMainWindow):
         self.month_window.view_selected.connect(self.switch_view)
         self.month_window.date_selected.connect(self.jump_to_date_from_month)
         self.month_window.schedule_detail_requested.connect(self.open_schedule_detail_from_month_panel)
+        self.header.lbl_weather_icon.double_clicked.connect(
+            lambda: self.toggle_weather_board(self)
+        )
+        self.week_window.lbl_weather_icon.double_clicked.connect(
+            lambda: self.toggle_weather_board(self.week_window)
+        )
+        self.month_window.lbl_weather_icon.double_clicked.connect(
+            lambda: self.toggle_weather_board(self.month_window)
+        )
         self.suspend_window_week.restore_requested.connect(self.switch_suspend_to_week)
         self.suspend_window_month.restore_requested.connect(self.switch_suspend_to_month)
         hwnd = int(self.winId())
@@ -173,6 +191,7 @@ class MainWindow(FramelessMainWindow):
         self.page_list.suspend_requested.connect(self.switch_to_suspend)
         self._register_refresh_targets()
         global_signals.axis_board_requested.connect(self.toggle_axis_board)
+        global_signals.primary_window_pin_changed.connect(self._apply_primary_window_pin)
         current_style = self.styleSheet()
         self.setStyleSheet(current_style + StyleManager.get_tooltip_style())
 
@@ -239,10 +258,48 @@ class MainWindow(FramelessMainWindow):
             self.axis_board.hide()
             return
 
+        self.axis_board.set_pinned(get_primary_pin_preference())
         self.axis_board.refresh_data()
         self.axis_board.show()
         self.axis_board.raise_()
         self.axis_board.activateWindow()
+
+    def toggle_weather_board(self, anchor_window=None):
+        from PyQt6.QtGui import QGuiApplication
+        from .popups.weather_board import WeatherBoard
+
+        if self.weather_board is None:
+            self.weather_board = WeatherBoard()
+
+        if self.weather_board.isVisible():
+            self.weather_board.hide()
+            return
+
+        self.weather_board.set_pinned(get_primary_pin_preference())
+        anchor = anchor_window if anchor_window is not None else self
+        anchor_geometry = anchor.frameGeometry()
+        x = anchor_geometry.right() + 10
+        y = anchor_geometry.top()
+        screen = (
+            QGuiApplication.screenAt(anchor_geometry.center())
+            or QGuiApplication.primaryScreen()
+        )
+        if screen is not None:
+            available = screen.availableGeometry()
+            if x + self.weather_board.width() > available.right() + 1:
+                x = anchor_geometry.left() - self.weather_board.width() - 10
+            x = max(
+                available.left(),
+                min(x, available.right() - self.weather_board.width() + 1),
+            )
+            y = max(
+                available.top(),
+                min(y, available.bottom() - self.weather_board.height() + 1),
+            )
+        self.weather_board.move(x, y)
+        self.weather_board.show()
+        self.weather_board.raise_()
+        self.weather_board.activateWindow()
 
     def show_calendar_popup(self):
         """在顶栏日期文字下方弹出日历"""
@@ -689,23 +746,25 @@ class MainWindow(FramelessMainWindow):
         self.switch_view(view_name)
 
     def toggle_pin_mode(self):
-        current_flags = self.windowFlags()
+        next_pinned = not bool(
+            self.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
+        )
         def _do_toggle():
-            if current_flags & Qt.WindowType.WindowStaysOnTopHint:
-                new_flags = current_flags ^ Qt.WindowType.WindowStaysOnTopHint
-                print("状态变更：取消置顶")
-            else:
-                new_flags = current_flags | Qt.WindowType.WindowStaysOnTopHint
-                print("状态变更：开启置顶")
-                
-            self.setWindowFlags(new_flags)
-            self.show()
+            set_primary_pin_preference(next_pinned)
+            global_signals.primary_window_pin_changed.emit(next_pinned)
+            print(f"状态变更：{'开启' if next_pinned else '取消'}置顶")
             
             hwnd = int(self.winId())
             apply_24h2_border_fix(hwnd)
             QTimer.singleShot(10, self.header.reopen_menu)
 
         QTimer.singleShot(100, _do_toggle)
+
+    def _apply_primary_window_pin(self, enabled):
+        for window in (self, self.week_window, self.month_window):
+            changed = set_window_pin_state(window, enabled)
+            if changed and window.isVisible():
+                apply_24h2_border_fix(int(window.winId()))
             
     def switch_to_add_page(self):
         current_widget = self.body_stack.currentWidget()
@@ -887,6 +946,8 @@ class MainWindow(FramelessMainWindow):
     def closeEvent(self, event):
         if self.axis_board is not None:
             self.axis_board.close()
+        if self.weather_board is not None:
+            self.weather_board.close()
         super().closeEvent(event)
 
     def switch_week_to_suspend(self):

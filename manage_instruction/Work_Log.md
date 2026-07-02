@@ -458,7 +458,7 @@
 - 用户确认的触发路径二：单击“模式切换”锁定并打开子菜单，随后点击其他应用输入框使本应用失焦；返回后再次点击“模式切换”可触发，且存在相近变体。
 - 以上路径共同特征是：主菜单或锁定子菜单存活期间，应用发生 `ApplicationDeactivate/WindowDeactivate`，随后 popup 状态没有被完整清理。
 - 源码回退确认：`src/ui/components.py` 的工作区 blob 与 `HEAD` blob 均为 `fd36382c733222b7ad279bc51ef88522c2a9df9b`；第一版 z-order 修复未残留任何源码差异。
-- 回退后尝试复跑 `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src/ui/components.py main.py`，但该虚拟环境启动器仍指向已不存在的 `C:\Users\hfgre\AppData\Local\Programs\Python\Python311\python.exe`，本次未能重新执行；源码与已提交且此前通过语法检查的 `HEAD` blob 完全一致。
+- 回退后在 Codex 受限沙箱内尝试复跑 `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src/ui/components.py main.py` 未能启动；后续已确认原因是沙箱无法访问用户目录基础解释器，不是项目虚拟环境失效。源码与已提交且此前通过语法检查的 `HEAD` blob 完全一致。
 - 回退后 `git diff --check`：通过，仅有管理日志的 LF/CRLF 工作区提示。
 - 回退后 diff 范围：仅 `manage_instruction/Work_Log.md`；源码无 diff。
 
@@ -2278,7 +2278,7 @@ MP-0 ~ MP-5 阶段完成结论：
 
 环境限制：
 
-- 项目 `.venv` 的 `pyvenv.cfg` 仍指向已不存在的 `C:\Users\hfgre\AppData\Local\Programs\Python\Python311\python.exe`，因此本轮无法在该环境执行 PyQt offscreen 构造和截图验证。
+- Codex 受限沙箱当时无法访问 `.venv` 记录的用户目录基础解释器，因此未能在沙箱内执行 PyQt offscreen 构造和截图验证；这不是用户项目环境失效。
 - Codex 自带 Python 3.12 可做语法检查，但未安装 PyQt6，不能替代项目运行环境。
 - 需要用户在可正常启动项目的终端中，通过“更多 -> 坐标显示”进行真实 Windows 视觉和交互验收。
 
@@ -2294,7 +2294,7 @@ MP-0 ~ MP-5 阶段完成结论：
 - 根据真实运行效果调整轨道、点 / 线段密度、文字和窗口尺寸。
 - 明确已完成日程是否默认显示、过滤或单独弱化。
 - 真实 Windows 环境复核共享详情弹窗的位置、重复打开和编辑回流。
-- 项目 Python 3.11 基础解释器路径需要单独修复，避免后续自动验证持续失效。
+- 后续自动验证应在获得沙箱外执行权限后直接使用项目 `.venv`，不需要用户修复 Python 3.11 环境。
 
 ---
 
@@ -2697,7 +2697,7 @@ MP-0 ~ MP-5 阶段完成结论：
 - 使用 Miniconda Python 3.13 和独立临时 pycache 完成三个修改文件的 `py_compile`，语法检查通过；临时 pycache 已清理。
 - 静态搜索确认完整请求链：行组件 `status_change_requested` -> `MonthDayPanel.schedule_status_requested` -> `MonthWindow._change_schedule_status_from_day_panel` -> `update_schedule_status(...)` -> `refresh_after_schedule_change(...)`。
 - `git diff --check` 未发现空白错误，仅有仓库既有 LF / CRLF 提示。
-- 当前项目 `.venv\Scripts\python.exe` 仍指向已经不存在的 `C:\Users\hfgre\AppData\Local\Programs\Python\Python311\python.exe`；系统 Miniconda Python 未安装 PyQt6，因此本窗口无法完成 Qt offscreen 菜单触发和画布像素验证。
+- 本轮早期在 Codex 受限沙箱内启动项目 `.venv` 失败，后续已确认这是沙箱无法访问用户目录基础解释器造成的限制，不是项目 `.venv` 损坏；需要 PyQt 验证时应申请沙箱外执行。
 - 需要用户实机复测：
   - 坐标轴及辅助线是否统一为 `#333333`，清单色 marker 是否仍清晰。
   - 月界面单击日期 panel 中，未完成日程右键“完成日程”后是否立即变为已完成，并同步更新月格、详情弹窗和可见坐标看板。
@@ -2716,3 +2716,146 @@ MP-0 ~ MP-5 阶段完成结论：
 - `assets/icons/check.svg` 用于将未完成日程标记为完成。
 - 用户新增的 `assets/icons/uncheck.svg` 用于将已完成日程恢复为未完成。
 - 两个 SVG 均通过现有 icon loader 染为 `#333333`，不再依赖仓库中缺失的 `undo.svg`。
+
+## 2026-07-02 坐标看板画布半透明遮罩
+
+- 工作区开工前干净，当前分支相对 `temp/main` ahead 115。
+- `src/ui/popups/schedule_axis_board.py` 中坐标画布背景由接近纯白的 `QColor(255, 255, 255, 248)` 改为 `QColor(255, 255, 255, 190)`，约为 75% 不透明度。
+- 白色遮罩仍覆盖整个坐标显示框，但允许外层主题渐变轻微透出；画布尺寸、圆角、边框、数轴、marker 和交互逻辑均未改变。
+- `Final_Formulation.md` 同步修正为“半透明白色遮罩 + `#333333` 数轴”，移除已过期的“纯白背景 + 主题青色数轴”描述。
+- 后续 marker 视觉规则记录：DDL 竖条和时间段方块的高度按低 / 中 / 高重要性使用 `3:4:5` 比例；本次只记录，不修改 marker 形态与尺寸。
+
+## 2026-07-02 坐标看板设置页切换动画壳
+
+### 实际修改
+
+- 坐标看板设置键由静态占位按钮改为可切换显示页的按钮，真实设置选项仍未实现。
+- 点击设置键时，齿轮图标使用 `QVariantAnimation` 在 `0°` 与 `180°` 之间旋转，打开和关闭设置页时方向互逆。
+- 齿轮使用固定 `24x24` 透明画布承载 `16x16` 图形，旋转中心固定在图标几何中心，避免旋转过程裁切或按钮布局抖动。
+- 原坐标画布和图例被收纳到 `display_page`；新增透明 `settings_page`，当前只显示“显示设置 / 选项内容待实现”占位文字。
+- 两个页面由 `QStackedWidget` 管理，不创建新窗口，也不改变坐标看板实例所有权。
+- 页面切换采用两段 `QPropertyAnimation`：当前内容由原高度收缩到 `0`，交换页面后再从 `0` 展开到原高度。
+- 看板窗口尺寸、标题区、范围文字、pin 键和关闭键均不参与收缩；切换期间会隐藏 hover 预览，避免只读浮窗残留。
+- 动画执行期间忽略重复点击，完成后才允许下一次切换，避免多个动画同时修改页面几何。
+
+### 文档同步
+
+- `Final_Formulation.md` 已将“设置占位键”更新为“动画切换壳已完成、真实选项未实现”。
+
+### 验证
+
+- `src/ui/popups/schedule_axis_board.py` 通过 Python 语法编译检查。
+- 静态检查确认设置按钮已连接 `_toggle_settings_page()`，收缩、页面交换、展开和状态收口方法均存在。
+- `git diff --check` 未发现空白错误，仅有仓库既有 LF / CRLF 提示。
+- 沙箱外执行 `D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe --version` 返回 `Python 3.11.9`，确认项目 `.venv` 正常，先前失败属于 Codex 沙箱限制。
+- 使用项目 `.venv` 完成 PyQt offscreen 动画验证：设置页打开后 `_settings_open=True`、当前页为设置页、齿轮角度为 `180°`；反向切换后恢复显示页和 `0°`。
+- 动画前后窗口保持 `412x300`，内容区高度保持 `233px`，收缩 / 展开没有改变窗口或最终显示区域尺寸。
+- 自动验证通过后仍建议用户实机观察动画视觉节奏和齿轮图形旋转中心。
+
+### 设置动画实机反馈修正
+
+- 用户实测发现收缩期间“坐标显示”标题会先向下移动再弹回，原因是承载标题的主 `panel` 未以 stretch 方式固定填满窗口，内容高度变化会触发外层布局重新分配。
+- 外层布局改为 `outer.addWidget(panel, 1)`，主 panel 始终填满窗口可用区域；标题保存为 `self.title_label`，便于几何验证并保持顶部位置稳定。
+- 用户实测发现打开设置页后底部图例说明消失，原因是图例此前属于被切换隐藏的 `display_page`。
+- 图例已移出 `QStackedWidget`，并进一步脱离会受页面高度动画影响的布局，改为看板直接子控件，固定在底部位置；内容布局预留对应底部空间。
+- 现在只有坐标画布和设置内容参与收缩 / 展开，标题、图例和右上角按钮均保持可见且位置固定。
+- 使用项目 `.venv` 进行最终 PyQt offscreen 中间帧验证：动画前、中间帧、设置页展开后，标题纵坐标始终为 `22`，图例纵坐标始终为 `269`，图例保持可见，窗口尺寸始终为 `380x300`。
+- 用户真实界面仍观察到标题在部分动画帧发生位移，说明仅固定主 panel 尺寸仍不能完全隔离 Windows 实际布局重排。
+- “坐标显示”标题进一步脱离 `panel` 和 header layout，改为看板直接子控件，固定在 `(26, 22)`；header 仅保留 `24px` 高度占位，确保中间内容不会上移覆盖标题。
+- 标题现在与右上按钮、范围文字和底部图例使用同一顶层坐标系，页面栈高度动画不再能改变其位置。
+- 使用项目 `.venv` 对设置页打开过程按每 `20ms` 采样一次、连续检查 `25` 帧：标题始终位于 `(26, 22)`，图例始终位于 `(26, 269)`，窗口始终为 `380x300`，逐帧固定验证通过。
+
+### 设置内容框收缩方向修正
+
+- 用户实测指出页面栈原先会从上下两侧同时向中间收缩，不符合“从上向下收起”的设计。
+- 原因是布局通过 `maximumHeight` 改变页面高度时，会自动重新分配上下剩余空间，导致页面的顶边和底边同时移动。
+- 新增固定尺寸的 `content_host` 作为中间显示视口，`QStackedWidget` 改为该视口的直接子控件，不再由垂直布局控制动画位置。
+- 收缩与展开改为直接动画 `content_stack.geometry`：顶边始终固定在视口 `y=0`，收缩时只有底边向上移动，切换页面后由顶部向下展开。
+- `content_host` 尺寸变化时通过 event filter 同步页面几何；动画期间暂停自动同步，避免覆盖动画帧。
+- 项目 `.venv` 的 PyQt offscreen 逐帧验证确认：页面栈相对看板的纵坐标始终为 `46`，高度从 `214` 降至接近 `0` 后恢复到 `214`；正反切换最终分别进入设置页和显示页，窗口始终保持 `380x300`。
+
+### 设置占位文字固定层
+
+- 用户实测发现“显示设置 / 选项内容待实现”仍属于设置页布局，会在设置页展开时随页面高度移动，不能直接稳定显示在中间。
+- 占位文字从 `settings_page` 布局中移除，改为 `content_host` 的直接子控件，几何范围始终与固定显示视口一致并使用居中对齐。
+- 打开设置时，坐标画布先收缩到零；页面交换时才显示固定占位文字。关闭设置时，文字保持固定直到页面交换，再隐藏并展开坐标画布。
+- 占位文字不参与 `content_stack.geometry` 动画，并设置鼠标事件穿透，为后续在设置页放置真实交互控件保留空间。
+- 项目 `.venv` 的 PyQt offscreen 逐帧验证获得 `16` 个文字可见动画帧，所有帧均固定在 `(26, 46)`、尺寸均为 `328x214`，与 `content_host` 完全一致；关闭设置后文字正确隐藏。
+
+## 2026-07-02 坐标看板命名统一
+
+- 更多菜单用户可见入口由“坐标显示”改为“坐标看板”。
+- 独立看板左上标题由“坐标显示”改为“坐标看板”，与“待办看板”的命名方式保持一致。
+- 内部 `ScheduleAxisBoard`、`axis_board_requested`、`ScheduleAxisService` 等代码标识保持不变，不为显示文案制造无意义重命名。
+- `Final_Formulation.md` 中面向阶段和功能的旧称同步统一为“坐标看板”；历史日志保留原执行名称。
+- 本次不修改用户正在试验的 `src/config.py` 配色内容。
+
+## 2026-07-02 主窗口置顶偏好同步与过期日程透明度调整
+
+### 开工前状态
+
+- 当前分支相对 `temp/main` ahead 115。
+- 开工前已有 diff：`manage_instruction/Final_Formulation.md`、`manage_instruction/Work_Log.md`、`src/config.py`、`src/ui/components.py`、`src/ui/popups/schedule_axis_board.py`。
+- 本轮保留既有坐标看板与文档改动，不修改用户正在试验的 `src/config.py` 配色。
+
+### 主窗口置顶偏好
+
+- 新增 `src/utils/window_preferences.py`，使用 `QSettings("Wanji", "DesktopSchedule")` 持久化 `window/primary_always_on_top`。
+- 未写入过偏好时默认保持项目原行为，即主窗口置顶。
+- 日界面和待办界面共用 `MainWindow`；周界面、月界面在构造时读取同一偏好。
+- `SharedMoreMenu` 和旧的 `MainWindow.toggle_pin_mode()` 入口现在都会写入同一偏好，并通过 `global_signals.primary_window_pin_changed(bool)` 同步主窗口、周窗口和月窗口。
+- 主窗口偏好下次启动仍会恢复，不再由 `MainWindow` 写死为始终置顶。
+
+### 独立看板置顶规则
+
+- 坐标看板和待办看板新增显式 `set_pinned(enabled)` 接口，现有 pin 按钮仍只改变当前看板实例的临时状态。
+- 两个看板每次从隐藏状态重新打开时，都读取主窗口持久化偏好并重置默认置顶状态。
+- 看板打开后可以独立取消或开启置顶；该临时操作不写入主窗口偏好，也不影响年月日/待办主视图。
+- 看板关闭或隐藏后再次打开，仍以当时的主窗口偏好为准，符合“默认跟随、使用期间可独立调整”的边界。
+
+### 未完成过期日程视觉
+
+- 用户澄清目标是日界面中“未完成且已过期”的日程卡片，不是已完成日程，也不是待办项目。
+- 日界面 `ScheduleCard` 的已完成标题、时间、提醒图标透明度全部恢复原状。
+- 待办界面 `TodoCard` 的已完成标题恢复原状，且不新增过期判断；待办没有日程时间轴语义。
+- 仅将日界面未完成过期日程卡片背景由实色 `#bebebe` 改为 `rgba(190, 190, 190, 0.7)`，即灰色 70% 不透明、30% 透明。
+- 过期判断、文字颜色、边框、排序、数据库字段和完成/未完成切换逻辑均未改变。
+
+### 验证
+
+- `window_preferences.py`、signals、components、main/week/month、两个看板和日界面卡片相关文件均通过 `py_compile`。
+- `QSettings` 往返验证通过：临时切换偏好后可读取新值，并已恢复测试前值。
+- PyQt offscreen 验证通过：`MainWindow`、`WeekWindow`、`MonthWindow` 能同时接收并应用同一置顶状态。
+- PyQt offscreen 验证通过：坐标看板和待办看板可在本次打开期间独立取消置顶，隐藏后再次打开会恢复为主窗口偏好。
+- 最终 diff 核对确认 `src/ui/todo.py` 无本轮差异，`src/ui/dashboard.py` 只保留未完成过期卡片背景透明度调整。
+
+## 2026-07-02 待办看板标题统一与天气看板交互壳
+
+### 待办看板置顶便签标题
+
+- `StickyNoteCard` 置顶状态不再把标题改为金色 `#FFD700`，置顶和普通便签标题统一使用白色。
+- 置顶便签原有的较亮背景、白色边框、排序和右键操作保持不变，仅取消标题颜色差异。
+
+### 天气看板交互壳
+
+- 新增 `src/ui/popups/weather_board.py`，提供独立、可拖动的渐变天气看板壳和关闭键。
+- `WeatherIconLabel` 新增 `double_clicked` 信号；内部 loading/weather 两个标签层设置鼠标事件穿透，确保真实双击由外层天气控件统一接收。
+- 日界面和待办界面共用主 Header 天气图标；周界面和月界面使用各自天气图标，四个入口统一由 `MainWindow` 控制同一个天气看板实例。
+- 双击天气图标时切换天气看板显示/隐藏；关闭键可直接关闭。重新打开时按当前可见主界面定位到窗口右侧，并执行屏幕边界回退。
+- 天气看板每次打开时跟随主窗口置顶偏好；本轮未增加独立 pin 按钮。
+- 主窗口关闭时同步关闭天气看板，未改天气 API 请求、刷新定时器和现有实时天气显示。
+
+### 看板内记录的后续天气规则
+
+- 过去日期统一显示问号天气图标，温度显示 `--°C`。
+- 今天显示当前实时天气和当前温度。
+- 明天及以后在 API 实际提供的预报天数内显示预报天气；超出预报上限后显示问号天气图标。
+- 非今天日期的温度统一显示 `--°C`。
+- 天气看板最终可展示的天数以后以 API 实际返回范围为准，不在本轮写死 14 或 15 天。
+
+### 验证
+
+- 天气控件、天气看板、主窗口、日界面卡片、待办界面和待办看板相关文件通过 `py_compile`。
+- PyQt offscreen 验证通过：日、周、月、待办四个入口均可打开同一天气看板；再次双击可收回，关闭键可关闭。
+- PyQt offscreen 验证通过：待办看板置顶便签标题保持白色。
+- PyQt offscreen 验证通过：仅日界面未完成过期日程使用 `rgba(190, 190, 190, 0.7)` 背景；已完成日程和待办完成态保持原样。

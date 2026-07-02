@@ -200,6 +200,7 @@ class WeekScheduleCard(QFrame):
         menu.exec(self.mapToGlobal(pos))
 
 from .todo import TodoListContainer
+from ..utils.window_preferences import get_primary_pin_preference
 class WeekWindow(FramelessMainWindow):
     """
     680x400 独立周视图窗口 (去线极简版)
@@ -213,7 +214,10 @@ class WeekWindow(FramelessMainWindow):
     def __init__(self):
         super().__init__()
         self.setFixedSize(680, 400) 
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
+        window_flags = Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window
+        if get_primary_pin_preference():
+            window_flags |= Qt.WindowType.WindowStaysOnTopHint
+        self.setWindowFlags(window_flags)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.titleBar.hide()
 
