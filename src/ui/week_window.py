@@ -27,6 +27,7 @@ from .components import CountdownToolTipFilter, get_colored_icon
 from .common.week_day_block import DayBlock
 from .common.action_context_menu import ActionContextMenu
 from .common.weather_icon_label import WeatherIconLabel
+from .utils.window_drag_controller import WindowDragController
 
 class WeekScheduleCard(QFrame):
     """周视图中的单条日程小卡片"""
@@ -38,6 +39,7 @@ class WeekScheduleCard(QFrame):
 
     def __init__(self, schedule_obj, parent=None):
         super().__init__(parent)
+        self.setProperty("windowDragDisabled", True)
         self.data = schedule_obj
         self.schedule_obj = schedule_obj
         
@@ -223,12 +225,14 @@ class WeekWindow(FramelessMainWindow):
 
         self.current_selected_date = QDate.currentDate()
         self.current_monday = self._get_monday(self.current_selected_date)
-        self.drag_pos = None
-        
         # 编辑模式状态位，控制背景渲染！
         self.is_edit_mode = False 
 
         self._setup_ui()
+        self._window_drag_controller = WindowDragController(
+            self,
+            drag_started=self._on_window_drag_started,
+        )
         self._start_clock()
         self.refresh_week_data()
         #self._start_weather_fetch()
@@ -377,15 +381,23 @@ class WeekWindow(FramelessMainWindow):
             vs_layout.addWidget(v_btn, 1)
             
         self.view_selector_container.hide()
-        bottom_action_row = QHBoxLayout()
+        self.bottom_action_container = QWidget()
+        self.bottom_action_container.setFixedHeight(22)
+        bottom_action_row = QHBoxLayout(self.bottom_action_container)
         bottom_action_row.setContentsMargins(0, 0, 0, 0)
         bottom_action_row.setSpacing(0)
+        bottom_action_row.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
         
         bottom_action_row.addWidget(self.search_box)
         bottom_action_row.addWidget(self.view_selector_container)
         bottom_action_row.addStretch() 
         
-        tools_layout.addLayout(bottom_action_row)
+        tools_layout.addWidget(
+            self.bottom_action_container,
+            alignment=Qt.AlignmentFlag.AlignLeft,
+        )
 
         # ==========================================
         # 组装顶层 status_row 
@@ -1084,10 +1096,10 @@ class WeekWindow(FramelessMainWindow):
         # 如果视图选择器正开着，点窗口上半部分任何空白处都会关掉它
         if hasattr(self, 'view_selector_container') and self.view_selector_container.isVisible():
             self.close_view_selector()
-            
-        if event.button() == Qt.MouseButton.LeftButton and event.pos().y() < self.top_container.height():
-            self.drag_pos = event.globalPosition().toPoint() - self.pos()
-            event.accept()
+        super().mousePressEvent(event)
+
+    def _on_window_drag_started(self):
+        self.close_view_selector()
 
     def eventFilter(self, obj, event):
         from PyQt6.QtCore import QEvent 
@@ -1128,14 +1140,6 @@ class WeekWindow(FramelessMainWindow):
                 return True # 拦截完毕，事件不再往下传
                 
         return super().eventFilter(obj, event)
-
-    def mouseMoveEvent(self, event):
-        if self.drag_pos:
-            self.move(event.globalPosition().toPoint() - self.drag_pos)
-            event.accept()
-
-    def mouseReleaseEvent(self, event):
-        self.drag_pos = None
 
     def wheelEvent(self, event):
         """

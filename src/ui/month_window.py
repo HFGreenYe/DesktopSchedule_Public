@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QGridLayout, QTextEdit, QComboBox, QListView,
                              QStyleOptionComboBox, QStylePainter, QMessageBox,
                              QSizePolicy)
-from PyQt6.QtCore import Qt, pyqtSignal, QDate, QTime, QTimer, QRectF, QSize, QEvent, QPoint
+from PyQt6.QtCore import Qt, pyqtSignal, QDate, QTime, QTimer, QRectF, QSize, QEvent, QPoint, QLocale
 from PyQt6.QtGui import QPainter, QPainterPath, QColor, QBrush, QLinearGradient, QIcon, QPen, QPalette, QPixmap, QGuiApplication
 from PyQt6.QtSvg import QSvgRenderer
 from qframelesswindow import FramelessMainWindow
@@ -21,6 +21,7 @@ from .header import ToolTipFilter
 from .components import IOSSwitch, get_colored_icon, SharedMoreMenu
 from .common.action_context_menu import ActionContextMenu
 from .common.weather_icon_label import WeatherIconLabel
+from .utils.window_drag_controller import WindowDragController
 from .time_picker import TimePickerView
 from .alarm_picker import AlarmPickerView
 from .list_picker import CategoryCard, ListPickerView
@@ -77,15 +78,20 @@ class MonthListPickerView(ListPickerView):
         self.input_container.layout().setSpacing(4)
         self.input_new.setFixedHeight(28)
         self.btn_confirm_add.setFixedSize(28, 28)
-        self.btn_confirm_add.setStyleSheet("""
-            QPushButton {
-                background-color: #0cc0df;
+        confirm_hover = StyleManager.mix_colors(
+            AppConfig.COLOR_GRADIENT_START,
+            "#000000",
+            primary_ratio=0.9,
+        )
+        self.btn_confirm_add.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {AppConfig.COLOR_GRADIENT_START};
                 border: 1px solid white;
                 border-radius: 14px;
                 color: white;
                 font-size: 13px;
-            }
-            QPushButton:hover { background-color: #0bb0cf; }
+            }}
+            QPushButton:hover {{ background-color: {confirm_hover}; }}
         """)
 
         footer_layout = self.footer_container.layout()
@@ -107,17 +113,17 @@ class MonthListPickerView(ListPickerView):
             QPushButton:hover { background: rgba(255,255,255,0.15); }
         """)
         self.btn_cancel.setStyleSheet(self.btn_add_new.styleSheet())
-        self.btn_ok.setStyleSheet("""
-            QPushButton {
+        self.btn_ok.setStyleSheet(f"""
+            QPushButton {{
                 background: white;
                 border: none;
                 border-radius: 12px;
-                color: #0cc0df;
+                color: {AppConfig.COLOR_GRADIENT_START};
                 font-size: 10px;
                 font-weight: bold;
                 font-family: 'Microsoft YaHei';
-            }
-            QPushButton:hover { background: #f0f0f0; }
+            }}
+            QPushButton:hover {{ background: #f0f0f0; }}
         """)
 
     def set_title(self, text="选择清单"):
@@ -138,13 +144,15 @@ class MonthListPickerView(ListPickerView):
             if spacer is not None:
                 spacer.changeSize(4, 0)
             card.dot.setFixedSize(6, 6)
-            card.dot.setStyleSheet("background-color: #0cc0df; border-radius: 3px;")
+            card.dot.setStyleSheet(
+                f"background-color: {AppConfig.COLOR_GRADIENT_START}; border-radius: 3px;"
+            )
             card.lbl_name.setStyleSheet(
                 "color: white; font-size: 11px; font-weight: bold; "
                 "font-family: 'Microsoft YaHei';"
             )
             card.lbl_check.setStyleSheet(
-                "color: #0cc0df; font-size: 12px; font-weight: bold;"
+                f"color: {AppConfig.COLOR_GRADIENT_START}; font-size: 12px; font-weight: bold;"
             )
 
 
@@ -187,7 +195,10 @@ class MonthCompactSwitch(IOSSwitch):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         path = QPainterPath()
         path.addRoundedRect(QRectF(self.rect()), 6, 6)
-        painter.fillPath(path, QColor("#0cc0df" if self._checked else "#e0e0e0"))
+        painter.fillPath(
+            path,
+            QColor(AppConfig.COLOR_GRADIENT_START if self._checked else "#e0e0e0"),
+        )
         painter.setBrush(Qt.GlobalColor.white)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawEllipse(
@@ -241,6 +252,13 @@ class MonthTimePickerView(TimePickerView):
 
         self.calendar.setFixedSize(136, 122)
         self.calendar.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.calendar.setLocale(
+            QLocale(QLocale.Language.Chinese, QLocale.Country.China)
+        )
+        self.calendar.setFirstDayOfWeek(Qt.DayOfWeek.Monday)
+        self.calendar.setHorizontalHeaderFormat(
+            QCalendarWidget.HorizontalHeaderFormat.SingleLetterDayNames
+        )
         self.calendar.setStyleSheet(StyleManager.get_calendar_style() + """
             QCalendarWidget QToolButton {
                 font-size: 8px;
@@ -335,16 +353,16 @@ class MonthTimePickerView(TimePickerView):
             }
             QPushButton:hover { background: rgba(255,255,255,0.1); }
         """)
-        self.btn_ok.setStyleSheet("""
-            QPushButton {
+        self.btn_ok.setStyleSheet(f"""
+            QPushButton {{
                 background: white;
                 border: none;
                 border-radius: 12px;
-                color: #0cc0df;
+                color: {AppConfig.COLOR_GRADIENT_START};
                 font-weight: bold;
                 font-size: 11px;
-            }
-            QPushButton:hover { background: #f0f0f0; }
+            }}
+            QPushButton:hover {{ background: #f0f0f0; }}
         """)
 
     def _replace_enable_switch(self):
@@ -525,20 +543,20 @@ class MonthAlarmPickerView(AlarmPickerView):
             button.setFixedHeight(20)
             button.setMinimumWidth(0)
             button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            button.setStyleSheet("""
-                QPushButton {
+            button.setStyleSheet(f"""
+                QPushButton {{
                     background-color: rgba(255, 255, 255, 0.15);
                     border-radius: 4px;
                     color: white;
                     border: 1px solid rgba(255,255,255,0.2);
                     font-size: 8px;
-                }
-                QPushButton:checked {
-                    background-color: #0cc0df;
+                }}
+                QPushButton:checked {{
+                    background-color: {AppConfig.COLOR_GRADIENT_START};
                     border-color: white;
                     color: white;
                     font-weight: bold;
-                }
+                }}
             """)
 
         footer_container = self.btn_cancel.parentWidget()
@@ -561,16 +579,16 @@ class MonthAlarmPickerView(AlarmPickerView):
             }
             QPushButton:hover { background: rgba(255,255,255,0.1); }
         """)
-        self.btn_ok.setStyleSheet("""
-            QPushButton {
+        self.btn_ok.setStyleSheet(f"""
+            QPushButton {{
                 background: white;
                 border: none;
                 border-radius: 12px;
-                color: #0cc0df;
+                color: {AppConfig.COLOR_GRADIENT_START};
                 font-weight: bold;
                 font-size: 11px;
-            }
-            QPushButton:hover { background: #f0f0f0; }
+            }}
+            QPushButton:hover {{ background: #f0f0f0; }}
         """)
 
     def _replace_switch_row(self, old_switch, callback, row_width):
@@ -993,7 +1011,7 @@ class InlineAddViewMonth(QWidget):
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             
         self.btn_cancel.setStyleSheet("QPushButton { background: transparent; border: 1px solid rgba(255,255,255,0.5); border-radius: 12px; color: white; font-size: 11px; }")
-        self.btn_save.setStyleSheet("QPushButton { background: white; border: none; border-radius: 12px; color: #0cc0df; font-weight: bold; font-size: 11px; }")
+        self.btn_save.setStyleSheet(f"QPushButton {{ background: white; border: none; border-radius: 12px; color: {AppConfig.COLOR_GRADIENT_START}; font-weight: bold; font-size: 11px; }}")
         
         self.btn_cancel.clicked.connect(self.canceled.emit)
         self.btn_save.clicked.connect(self._on_save)
@@ -1026,8 +1044,8 @@ class InlineAddViewMonth(QWidget):
             )
 
     def _combo_style(self):
-        return """
-            QComboBox {
+        return f"""
+            QComboBox {{
                 background: rgba(255, 255, 255, 0.08);
                 border: 1px solid rgba(255,255,255,0.25);
                 border-radius: 4px;
@@ -1035,24 +1053,24 @@ class InlineAddViewMonth(QWidget):
                 font-size: 11px;
                 padding-left: 0px;
                 font-family: 'Microsoft YaHei';
-            }
-            QComboBox::drop-down { border: none; width: 0px; }
-            QComboBox::down-arrow { image: none; width: 0px; height: 0px; }
-            QComboBox QAbstractItemView {
+            }}
+            QComboBox::drop-down {{ border: none; width: 0px; }}
+            QComboBox::down-arrow {{ image: none; width: 0px; height: 0px; }}
+            QComboBox QAbstractItemView {{
                 background: white;
                 color: #333333;
                 border: 1px solid #dddddd;
                 outline: none;
-            }
-            QComboBox QAbstractItemView::item {
+            }}
+            QComboBox QAbstractItemView::item {{
                 background: white;
                 color: #333333;
                 padding: 4px 6px;
-            }
-            QComboBox QAbstractItemView::item:selected {
-                background: #0cc0df;
+            }}
+            QComboBox QAbstractItemView::item:selected {{
+                background: {AppConfig.COLOR_GRADIENT_START};
                 color: white;
-            }
+            }}
         """
 
     def _show_pending_toast(self, message):
@@ -1199,7 +1217,6 @@ class MonthWindow(FramelessMainWindow):
         self.open_day_panels = []
         self.hovered_date = None
         self.hover_preview_popup = None
-        self.drag_pos = None
         self.context_menu_date = None
         self.time_picker_mode = "add"
         self.alarm_picker_mode = "add"
@@ -1207,6 +1224,10 @@ class MonthWindow(FramelessMainWindow):
         self.editing_schedule = None
 
         self._setup_ui()
+        self._window_drag_controller = WindowDragController(
+            self,
+            drag_started=self._on_window_drag_started,
+        )
         self._refresh_schedule_marker_cache()
         self._start_clock()
         
@@ -1940,19 +1961,9 @@ class MonthWindow(FramelessMainWindow):
         self._hide_hover_preview()
         super().closeEvent(event)
 
-    # 窗口拖拽逻辑
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton and event.pos().y() < 24:
-            self.drag_pos = event.globalPosition().toPoint() - self.pos()
-            event.accept()
-
-    def mouseMoveEvent(self, event):
-        if self.drag_pos:
-            self.move(event.globalPosition().toPoint() - self.drag_pos)
-            event.accept()
-
-    def mouseReleaseEvent(self, event):
-        self.drag_pos = None
+    def _on_window_drag_started(self):
+        self._hide_hover_preview()
+        self.close_view_selector()
 
     def update_weather_ui(self, data):
         if not data: return
