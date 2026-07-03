@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
 from PyQt6.QtCore import Qt, QSize, QEvent, QObject, pyqtSignal, QTimer, QPoint
 from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QImage, QPen
 from PyQt6.QtSvg import QSvgRenderer
+from ..config import AppConfig
 from ..data.database import db_manager
 
 
@@ -27,10 +28,10 @@ class CenteredComboBox(QComboBox):
         painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, current_text)
 
 class CustomToolTip(QLabel):
-    def __init__(self, text, parent=None, border_color="#0cc0df"):
+    def __init__(self, text, parent=None, border_color=None):
         super().__init__(parent, Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
         self.setText(text)
-        self.border_color = border_color
+        self.border_color = border_color or AppConfig.COLOR_GRADIENT_START
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setStyleSheet("""
@@ -399,7 +400,7 @@ class AddScheduleViewWeek(QWidget):
         btn.setFixedSize(80, 32)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         if is_primary:
-            btn.setStyleSheet("QPushButton { background-color: white; border: none; border-radius: 16px; color: #0cc0df; font-size: 13px; font-weight: bold; font-family: 'Microsoft YaHei'; } QPushButton:hover { background-color: #f2f2f2; }")
+            btn.setStyleSheet(f"QPushButton {{ background-color: white; border: none; border-radius: 16px; color: {AppConfig.COLOR_GRADIENT_START}; font-size: 13px; font-weight: bold; font-family: 'Microsoft YaHei'; }} QPushButton:hover {{ background-color: #f2f2f2; }}")
         else:
             btn.setStyleSheet("QPushButton { background-color: transparent; border: 1px solid rgba(255, 255, 255, 0.7); border-radius: 16px; color: white;font-weight: bold; font-size: 13px; font-family: 'Microsoft YaHei'; } QPushButton:hover { background-color: rgba(255, 255, 255, 0.1); border: 1px solid white; }")
         return btn

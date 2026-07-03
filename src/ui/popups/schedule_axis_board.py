@@ -22,7 +22,6 @@ from PyQt6.QtGui import (
     QLinearGradient,
     QPainter,
     QPainterPath,
-    QPainterPathStroker,
     QPen,
     QPixmap,
 )
@@ -151,19 +150,55 @@ class _ScheduleAxisCanvas(QWidget):
     hover_requested = pyqtSignal(object, object)
     item_clicked = pyqtSignal(object, object)
 
-    POINT_DIAMETERS = {0: 8.0, 1: 12.0, 2: 16.0}
+    MARKER_HEIGHTS = {0: 9.0, 1: 12.0, 2: 15.0}
+    DEADLINE_WIDTH = 2.0
+    LANE_GAP = 1.0
+    AXIS_MARKER_GAP = 6.0
+    MONTH_RANGE_HOURS = 30.0 * 24.0
+    FOCUS_HOURS = 7.0 * 24.0
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMouseTracking(True)
         self.projections = []
-        self.range_hours = ScheduleAxisService.MIN_RANGE_HOURS
+        self.range_hours = self.MONTH_RANGE_HOURS
         self.hit_regions = []
         self._hovered_projection = None
+        self.virtual_axis_width = 960.0
+        self.log_scale = 1.0
+        self.zoom = 1.0
+        self.view_center_x = self.virtual_axis_width / 2.0
+        self.vertical_offset = 0.0
+        self._pan_start = None
+        self._pan_center_start = 0.0
+        self._pan_vertical_start = 0.0
+
+    def configure_month_demo(self, virtual_axis_width, default_viewport_width):
+        self.virtual_axis_width = max(float(virtual_axis_width), 1.0)
+        visible_fraction = max(
+            0.05,
+            min(float(default_viewport_width) / self.virtual_axis_width, 1.0),
+        )
+        self.log_scale = ScheduleAxisService.solve_log_scale(
+            self.MONTH_RANGE_HOURS,
+            self.FOCUS_HOURS,
+            visible_fraction,
+        )
+        self.range_hours = self.MONTH_RANGE_HOURS
+        self.zoom = 1.0
+        self.view_center_x = self.virtual_axis_width / 2.0
+        self.vertical_offset = 0.0
+        self.update()
 
     def set_data(self, projections, range_hours):
-        self.projections = list(projections)
-        self.range_hours = range_hours
+        del range_hours
+        self.projections = [
+            projection
+            for projection in projections
+            if projection.end_delta_hours >= -self.MONTH_RANGE_HOURS
+            and projection.start_delta_hours <= self.MONTH_RANGE_HOURS
+        ]
+        self.range_hours = self.MONTH_RANGE_HOURS
         self._hovered_projection = None
         self.hit_regions.clear()
         self.update()
@@ -173,15 +208,15 @@ class _ScheduleAxisCanvas(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         self.hit_regions.clear()
 
-        canvas_rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        painter.setPen(QPen(QColor(0, 0, 0, 24), 1))
+        canvas_rect = QRectF(self.rect()).adjusted(1.0, 1.0, -1.0, -1.0)
+        painter.setPen(QPen(QColor("#ffffff"), 2.0))
         painter.setBrush(QColor(255, 255, 255, 190))
         painter.drawRoundedRect(canvas_rect, 6, 6)
 
         left = 20.0
         right = max(float(self.width() - 20), left + 1)
-        axis_y = float(self.height()) / 2.0
-        center_x = (left + right) / 2.0
+        axis_y = float(self.height()) * 0.7 + self.vertical_offset
+        origin_x = self._virtual_to_screen(self.virtual_axis_width / 2.0, left, right)
 
         axis_color = QColor(self.AXIS_COLOR)
         painter.setPen(QPen(axis_color, 1.5))
@@ -191,16 +226,34 @@ class _ScheduleAxisCanvas(QWidget):
         painter.drawLine(QPoint(round(right), round(axis_y)), QPoint(round(right - 6), round(axis_y - 4)))
         painter.drawLine(QPoint(round(right), round(axis_y)), QPoint(round(right - 6), round(axis_y + 4)))
 
-        center_tick_color = QColor(axis_color)
-        center_tick_color.setAlpha(150)
-        painter.setPen(QPen(center_tick_color, 1))
-        painter.drawLine(QPoint(round(center_x), round(axis_y - 10)), QPoint(round(center_x), round(axis_y + 10)))
+        if left <= origin_x <= right:
+            center_tick_color = QColor(axis_color)
+            center_tick_color.setAlpha(150)
+            painter.setPen(QPen(center_tick_color, 1))
+            painter.drawLine(
+                QPoint(round(origin_x), round(axis_y - 10)),
+                QPoint(round(origin_x), round(axis_y + 10)),
+            )
+            painter.setPen(axis_color)
+            painter.drawText(
+                QRectF(origin_x - 25, axis_y + 8, 50, 18),
+                Qt.AlignmentFlag.AlignCenter,
+                "现在",
+            )
 
-        range_text = ScheduleAxisService.format_range(self.range_hours)
+        left_delta = self._screen_to_delta(left, left, right)
+        right_delta = self._screen_to_delta(right, left, right)
         painter.setPen(axis_color)
-        painter.drawText(QRectF(left, axis_y + 8, 70, 18), Qt.AlignmentFlag.AlignLeft, f"过去 {range_text}")
-        painter.drawText(QRectF(center_x - 25, axis_y + 8, 50, 18), Qt.AlignmentFlag.AlignCenter, "现在")
-        painter.drawText(QRectF(right - 70, axis_y + 8, 70, 18), Qt.AlignmentFlag.AlignRight, f"未来 {range_text}")
+        painter.drawText(
+            QRectF(left, axis_y + 8, 92, 18),
+            Qt.AlignmentFlag.AlignLeft,
+            self._format_edge_delta(left_delta),
+        )
+        painter.drawText(
+            QRectF(right - 92, axis_y + 8, 92, 18),
+            Qt.AlignmentFlag.AlignRight,
+            self._format_edge_delta(right_delta),
+        )
 
         if not self.projections:
             empty_color = QColor(axis_color)
@@ -210,42 +263,52 @@ class _ScheduleAxisCanvas(QWidget):
             return
 
         markers = self._layout_markers(left, right, axis_y)
+        hovered_marker = None
         for marker in markers:
-            self._draw_marker(painter, marker, axis_y)
+            self._draw_marker(painter, marker)
+            if marker["projection"] is self._hovered_projection:
+                hovered_marker = marker
+        if hovered_marker is not None:
+            self._draw_hover_time_guides(
+                painter,
+                hovered_marker,
+                axis_y,
+                left,
+                right,
+            )
 
     def _layout_markers(self, left, right, axis_y):
-        upper_lanes = [axis_y + offset for offset in (-30, -58, -82)]
-        lower_lanes = [axis_y + offset for offset in (30, 58, 82)]
-        upper_lanes = [y for y in upper_lanes if 18 <= y <= self.height() - 22]
-        lower_lanes = [y for y in lower_lanes if 18 <= y <= self.height() - 22]
-        if not upper_lanes:
-            upper_lanes = [max(18.0, axis_y - 24.0)]
-        if not lower_lanes:
-            lower_lanes = [min(float(self.height() - 22), axis_y + 24.0)]
-        occupied_by_status = {
-            False: [[] for _ in upper_lanes],
-            True: [[] for _ in lower_lanes],
-        }
+        occupied_by_status = {False: [], True: []}
+        lane_heights_by_status = {False: [], True: []}
 
         raw_markers = []
         for projection in self.projections:
-            x1 = ScheduleAxisService.map_delta_to_x(
-                projection.start_delta_hours, self.range_hours, left, right
+            virtual_x1 = ScheduleAxisService.map_delta_to_x(
+                projection.start_delta_hours,
+                self.range_hours,
+                0.0,
+                self.virtual_axis_width,
+                self.log_scale,
             )
-            x2 = ScheduleAxisService.map_delta_to_x(
-                projection.end_delta_hours, self.range_hours, left, right
+            virtual_x2 = ScheduleAxisService.map_delta_to_x(
+                projection.end_delta_hours,
+                self.range_hours,
+                0.0,
+                self.virtual_axis_width,
+                self.log_scale,
             )
-            diameter = self.POINT_DIAMETERS[projection.importance]
-            raw_markers.append((min(x1, x2), max(x1, x2), diameter, projection))
+            x1 = self._virtual_to_screen(virtual_x1, left, right)
+            x2 = self._virtual_to_screen(virtual_x2, left, right)
+            height = self.MARKER_HEIGHTS[projection.importance]
+            raw_markers.append((min(x1, x2), max(x1, x2), height, projection))
         raw_markers.sort(key=lambda item: (item[0], item[1]))
 
         markers = []
-        for index, (x1, x2, diameter, projection) in enumerate(raw_markers):
+        for x1, x2, height, projection in raw_markers:
             completed = projection.is_completed
-            lanes = lower_lanes if completed else upper_lanes
             occupied = occupied_by_status[completed]
-            interval_left = x1 - diameter / 2.0 - 5
-            interval_right = x2 + diameter / 2.0 + 5
+            interval_left = x1 - 7.0
+            interval_right = x2 + 7.0
             lane_index = None
             for candidate, intervals in enumerate(occupied):
                 if all(
@@ -255,68 +318,209 @@ class _ScheduleAxisCanvas(QWidget):
                     lane_index = candidate
                     break
             if lane_index is None:
-                lane_index = index % len(lanes)
+                lane_index = len(occupied)
+                occupied.append([])
+                lane_heights_by_status[completed].append(0.0)
             occupied[lane_index].append((interval_left, interval_right))
+            lane_heights_by_status[completed][lane_index] = max(
+                lane_heights_by_status[completed][lane_index],
+                height,
+            )
             markers.append(
                 {
                     "x1": x1,
                     "x2": x2,
-                    "y": lanes[lane_index],
-                    "diameter": diameter,
+                    "lane_index": lane_index,
+                    "height": height,
                     "projection": projection,
                 }
             )
+
+        lane_centers_by_status = {}
+        for completed, lane_heights in lane_heights_by_status.items():
+            cursor = axis_y + self.AXIS_MARKER_GAP if completed else axis_y - self.AXIS_MARKER_GAP
+            centers = []
+            for lane_height in lane_heights:
+                if completed:
+                    center = cursor + lane_height / 2.0
+                    cursor += lane_height + self.LANE_GAP
+                else:
+                    center = cursor - lane_height / 2.0
+                    cursor -= lane_height + self.LANE_GAP
+                centers.append(center)
+            lane_centers_by_status[completed] = centers
+
+        for marker in markers:
+            completed = marker["projection"].is_completed
+            marker["y"] = lane_centers_by_status[completed][marker["lane_index"]]
         return markers
 
-    def _draw_marker(self, painter, marker, axis_y):
+    def _draw_marker(self, painter, marker):
         x1 = marker["x1"]
         x2 = marker["x2"]
         y = marker["y"]
-        diameter = marker["diameter"]
-        radius = diameter / 2.0
+        marker_height = marker["height"]
         projection = marker["projection"]
         color = QColor(projection.category_color)
         if not color.isValid():
             color = QColor(ScheduleAxisService.FALLBACK_COLOR)
 
-        anchor_x = (x1 + x2) / 2.0
-        axis_color = QColor(self.AXIS_COLOR)
-        connector_color = QColor(axis_color)
-        connector_color.setAlpha(90)
-        painter.setPen(QPen(connector_color, 1, Qt.PenStyle.DotLine))
-        painter.drawLine(QPoint(round(anchor_x), round(axis_y)), QPoint(round(anchor_x), round(y)))
-
-        painter.setPen(QPen(axis_color, 1))
-        painter.setBrush(QBrush(color))
-        path = QPainterPath()
-        if projection.is_interval and abs(x2 - x1) >= 3:
-            line_width = max(3.0, diameter / 3.0)
+        if projection.is_interval:
+            marker_rect = QRectF(
+                x1,
+                y - marker_height / 2.0,
+                max(self.DEADLINE_WIDTH, x2 - x1),
+                marker_height,
+            )
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(color))
+            painter.drawRect(marker_rect)
+        else:
+            marker_rect = QRectF(
+                x1 - self.DEADLINE_WIDTH / 2.0,
+                y - marker_height / 2.0,
+                self.DEADLINE_WIDTH,
+                marker_height,
+            )
+            painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.setPen(
                 QPen(
-                    axis_color,
-                    line_width + 2.0,
+                    color,
+                    self.DEADLINE_WIDTH,
                     Qt.PenStyle.SolidLine,
-                    Qt.PenCapStyle.RoundCap,
+                    Qt.PenCapStyle.FlatCap,
                 )
             )
-            painter.drawLine(QPoint(round(x1), round(y)), QPoint(round(x2), round(y)))
-            painter.setPen(QPen(color, line_width, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-            painter.drawLine(QPoint(round(x1), round(y)), QPoint(round(x2), round(y)))
-            painter.setPen(QPen(axis_color, 1))
-            painter.drawEllipse(QRectF(x1 - radius / 2, y - radius / 2, radius, radius))
-            painter.drawEllipse(QRectF(x2 - radius / 2, y - radius / 2, radius, radius))
-            path.moveTo(x1, y)
-            path.lineTo(x2, y)
-            stroker = QPainterPathStroker()
-            stroker.setWidth(max(12.0, diameter))
-            hit_path = stroker.createStroke(path)
-        else:
-            point_rect = QRectF(x1 - radius, y - radius, diameter, diameter)
-            painter.drawEllipse(point_rect)
-            hit_path = QPainterPath()
-            hit_path.addEllipse(point_rect.adjusted(-3, -3, 3, 3))
+            painter.drawLine(
+                QPoint(round(x1), round(marker_rect.top())),
+                QPoint(round(x1), round(marker_rect.bottom())),
+            )
+
+        hit_path = QPainterPath()
+        hit_path.addRect(marker_rect.adjusted(-4, -4, 4, 4))
 
         self.hit_regions.append((hit_path, projection))
+
+    def _draw_hover_time_guides(self, painter, marker, axis_y, left, right):
+        projection = marker["projection"]
+        marker_height = marker["height"]
+        marker_y = marker["y"]
+        marker_edge_y = (
+            marker_y - marker_height / 2.0
+            if projection.is_completed
+            else marker_y + marker_height / 2.0
+        )
+        guide_xs = [marker["x1"]]
+        if projection.is_interval:
+            guide_xs.append(marker["x2"])
+
+        guide_color = QColor(self.AXIS_COLOR)
+        guide_color.setAlpha(150)
+        painter.save()
+        painter.setPen(QPen(guide_color, 1.0, Qt.PenStyle.DashLine))
+        for guide_x in guide_xs:
+            painter.drawLine(
+                QPointF(guide_x, marker_edge_y),
+                QPointF(guide_x, axis_y),
+            )
+
+        schedule = projection.schedule
+        if projection.is_interval:
+            labels = [
+                self._format_marker_time(getattr(schedule, "start_time", None)),
+                self._format_marker_time(getattr(schedule, "end_time", None)),
+            ]
+        else:
+            labels = [
+                self._format_marker_time(
+                    getattr(schedule, "start_time", None)
+                    or getattr(schedule, "end_time", None)
+                )
+            ]
+        self._draw_time_labels(
+            painter,
+            guide_xs,
+            labels,
+            axis_y,
+            projection.is_completed,
+            left,
+            right,
+        )
+        painter.restore()
+
+    def _draw_time_labels(
+        self,
+        painter,
+        guide_xs,
+        labels,
+        axis_y,
+        completed,
+        left,
+        right,
+    ):
+        font = painter.font()
+        font.setPointSize(8)
+        painter.setFont(font)
+        metrics = painter.fontMetrics()
+        label_y = axis_y + 5.0 if completed else axis_y - metrics.height() - 5.0
+        label_rects = []
+        for guide_x, label in zip(guide_xs, labels):
+            text_width = metrics.horizontalAdvance(label)
+            label_left = max(left, min(guide_x - text_width / 2.0, right - text_width))
+            label_rects.append(QRectF(label_left, label_y, text_width, metrics.height()))
+
+        if len(label_rects) == 2 and label_rects[0].adjusted(-2, 0, 2, 0).intersects(label_rects[1]):
+            label_rects[0].moveRight(max(left, guide_xs[0] - 3.0))
+            label_rects[1].moveLeft(min(right - label_rects[1].width(), guide_xs[1] + 3.0))
+
+        painter.setPen(QColor(self.AXIS_COLOR))
+        for label_rect, label in zip(label_rects, labels):
+            painter.drawText(label_rect, Qt.AlignmentFlag.AlignCenter, label)
+
+    @staticmethod
+    def _format_marker_time(value):
+        if isinstance(value, datetime.datetime):
+            return value.strftime("%m-%d %H:%M")
+        if isinstance(value, datetime.date):
+            return value.strftime("%m-%d")
+        return "未设置"
+
+    def _virtual_to_screen(self, virtual_x, left, right):
+        screen_center = (float(left) + float(right)) / 2.0
+        return screen_center + (float(virtual_x) - self.view_center_x) * self.zoom
+
+    def _screen_to_virtual(self, screen_x, left, right):
+        screen_center = (float(left) + float(right)) / 2.0
+        return self.view_center_x + (float(screen_x) - screen_center) / self.zoom
+
+    def _screen_to_delta(self, screen_x, left, right):
+        virtual_x = self._screen_to_virtual(screen_x, left, right)
+        return ScheduleAxisService.map_x_to_delta(
+            virtual_x,
+            self.range_hours,
+            0.0,
+            self.virtual_axis_width,
+            self.log_scale,
+        )
+
+    @staticmethod
+    def _format_edge_delta(delta_hours):
+        direction = "过去" if delta_hours < 0 else "未来"
+        hours = abs(delta_hours)
+        if hours >= 24.0:
+            return f"{direction} {max(1, round(hours / 24.0))}天"
+        return f"{direction} {max(1, round(hours))}小时"
+
+    def _clamp_view_center(self, left, right):
+        viewport_width = max(float(right) - float(left), 1.0)
+        half_visible = viewport_width / (2.0 * self.zoom)
+        if half_visible * 2.0 >= self.virtual_axis_width:
+            self.view_center_x = self.virtual_axis_width / 2.0
+            return
+        self.view_center_x = max(
+            half_visible,
+            min(self.virtual_axis_width - half_visible, self.view_center_x),
+        )
 
     def _projection_at(self, pos):
         for path, projection in reversed(self.hit_regions):
@@ -325,20 +529,36 @@ class _ScheduleAxisCanvas(QWidget):
         return None
 
     def mouseMoveEvent(self, event):
+        if self._pan_start is not None and event.buttons() & Qt.MouseButton.LeftButton:
+            delta = event.position() - self._pan_start
+            left = 20.0
+            right = max(float(self.width() - 20), left + 1.0)
+            self.view_center_x = self._pan_center_start - delta.x() / self.zoom
+            self.vertical_offset = self._pan_vertical_start + delta.y()
+            self._clamp_view_center(left, right)
+            self._hovered_projection = None
+            self.hover_requested.emit(None, event.globalPosition().toPoint())
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            self.update()
+            event.accept()
+            return
+
         projection = self._projection_at(event.position())
         if projection is not self._hovered_projection:
             self._hovered_projection = projection
             self.hover_requested.emit(projection, event.globalPosition().toPoint())
+            self.update()
         elif projection is not None:
             self.hover_requested.emit(projection, event.globalPosition().toPoint())
         self.setCursor(
-            Qt.CursorShape.PointingHandCursor if projection is not None else Qt.CursorShape.ArrowCursor
+            Qt.CursorShape.PointingHandCursor if projection is not None else Qt.CursorShape.OpenHandCursor
         )
         super().mouseMoveEvent(event)
 
     def leaveEvent(self, event):
         self._hovered_projection = None
         self.hover_requested.emit(None, QCursor.pos())
+        self.update()
         super().leaveEvent(event)
 
     def mousePressEvent(self, event):
@@ -348,7 +568,42 @@ class _ScheduleAxisCanvas(QWidget):
                 self.item_clicked.emit(projection, event.globalPosition().toPoint())
                 event.accept()
                 return
+            self._pan_start = event.position()
+            self._pan_center_start = self.view_center_x
+            self._pan_vertical_start = self.vertical_offset
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+            return
         super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self._pan_start is not None:
+            self._pan_start = None
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def wheelEvent(self, event):
+        left = 20.0
+        right = max(float(self.width() - 20), left + 1.0)
+        cursor_x = event.position().x()
+        virtual_under_cursor = self._screen_to_virtual(cursor_x, left, right)
+        factor = 1.18 if event.angleDelta().y() > 0 else 1.0 / 1.18
+        minimum_zoom = min(1.0, max((right - left) / self.virtual_axis_width, 0.1))
+        new_zoom = max(minimum_zoom, min(8.0, self.zoom * factor))
+        screen_center = (left + right) / 2.0
+        self.zoom = new_zoom
+        self.view_center_x = virtual_under_cursor - (cursor_x - screen_center) / self.zoom
+        self._clamp_view_center(left, right)
+        self.update()
+        event.accept()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        left = 20.0
+        right = max(float(self.width() - 20), left + 1.0)
+        self._clamp_view_center(left, right)
 
 
 class ScheduleAxisBoard(QWidget):
@@ -356,7 +611,22 @@ class ScheduleAxisBoard(QWidget):
         super().__init__(parent)
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.resize(380, 300)
+        self.setMouseTracking(True)
+        self._resize_edges = ()
+        self._resize_origin = None
+        self._resize_geometry = None
+        self._resize_margin = 12
+        self._resize_event_widgets = set()
+        screen = QGuiApplication.primaryScreen()
+        available_width = screen.availableGeometry().width() if screen is not None else 1920
+        self._month_virtual_axis_width = max(480, round(available_width * 0.5))
+        self._month_default_axis_viewport_width = max(360, round(available_width * 0.375))
+        default_board_width = min(
+            available_width - 40,
+            self._month_default_axis_viewport_width + 92,
+        )
+        self.setMinimumSize(420, 260)
+        self.resize(max(420, default_board_width), 300)
         self.is_pinned = False
         self._drag_offset = None
         self._detail_opener = None
@@ -380,7 +650,7 @@ class ScheduleAxisBoard(QWidget):
         panel.setStyleSheet("background: transparent;")
         panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(16, 12, 16, 30)
+        layout.setContentsMargins(16, 12, 16, 16)
         layout.setSpacing(6)
 
         header = QHBoxLayout()
@@ -394,11 +664,12 @@ class ScheduleAxisBoard(QWidget):
         header.addStretch()
         self.range_label = QLabel(self)
         self.range_label.setAlignment(
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         )
         self.range_label.setStyleSheet(
             "color: rgba(255,255,255,0.78); font-size: 9px; background: transparent;"
         )
+        self._annotation_text = ""
         button_style = (
             "QPushButton { background: transparent; border: none; border-radius: 4px; } "
             "QPushButton:hover { background-color: rgba(255, 255, 255, 0.2); }"
@@ -450,21 +721,15 @@ class ScheduleAxisBoard(QWidget):
         display_layout.setSpacing(0)
 
         self.canvas = _ScheduleAxisCanvas()
+        self.canvas.configure_month_demo(
+            self._month_virtual_axis_width,
+            self._month_default_axis_viewport_width,
+        )
         self.canvas.hover_requested.connect(self._show_hover_preview)
         self.canvas.item_clicked.connect(self._show_persistent_preview)
         display_layout.addWidget(self.canvas, 1)
 
-        self.legend = QLabel(
-            self,
-        )
-        self.legend.setText(
-            "线上：未完成  ·  线下：已完成  ·  圆点：单时间  ·  线段：起止时间"
-        )
-        self.legend.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.legend.setStyleSheet(
-            "color: rgba(255,255,255,0.78); font-size: 9px; "
-            "font-family: 'Microsoft YaHei'; background: transparent;"
-        )
+        self.legend = self.range_label
         self.settings_page = QWidget()
         self.settings_page.setStyleSheet("background: transparent;")
         self.settings_placeholder = QLabel("显示设置\n选项内容待实现", self.content_host)
@@ -488,14 +753,17 @@ class ScheduleAxisBoard(QWidget):
         self._update_header_button_positions()
 
         self.refresh_data()
+        self._install_resize_event_filters()
 
     def refresh_data(self):
-        projections, range_hours = ScheduleAxisService.load_current_projection(
+        projections, _range_hours = ScheduleAxisService.load_current_projection(
             datetime.datetime.now()
         )
-        self.canvas.set_data(projections, range_hours)
-        self.range_label.setText(f"范围 ±{ScheduleAxisService.format_range(range_hours)}")
-        self.range_label.adjustSize()
+        self.canvas.set_data(projections, _range_hours)
+        self._annotation_text = (
+            "线上：未完成 · 线下：已完成 · 竖线：DDL/单时间 · "
+            "横条：时间段 · 拖动平移/滚轮缩放 · 范围 ±1个月"
+        )
         if hasattr(self, "btn_settings"):
             self._update_header_button_positions()
 
@@ -617,6 +885,42 @@ class ScheduleAxisBoard(QWidget):
                 self.settings_placeholder.setGeometry(host_rect)
             if not self._settings_transitioning:
                 self.content_stack.setGeometry(host_rect)
+
+        if watched in self._resize_event_widgets:
+            if event.type() == QEvent.Type.Leave:
+                watched.unsetCursor()
+            if event.type() == QEvent.Type.MouseMove and not event.buttons():
+                board_pos = watched.mapTo(self, event.position().toPoint())
+                self._apply_resize_cursor(watched, self._resize_edges_at(board_pos))
+            if (
+                event.type() == QEvent.Type.MouseButtonPress
+                and event.button() == Qt.MouseButton.LeftButton
+            ):
+                board_pos = watched.mapTo(self, event.position().toPoint())
+                resize_edges = self._resize_edges_at(board_pos)
+                if resize_edges:
+                    self._start_resize(
+                        resize_edges,
+                        event.globalPosition().toPoint(),
+                    )
+                    event.accept()
+                    return True
+            if (
+                event.type() == QEvent.Type.MouseMove
+                and self._resize_edges
+                and event.buttons() & Qt.MouseButton.LeftButton
+            ):
+                self._perform_resize(event.globalPosition().toPoint())
+                event.accept()
+                return True
+            if (
+                event.type() == QEvent.Type.MouseButtonRelease
+                and event.button() == Qt.MouseButton.LeftButton
+                and self._resize_edges
+            ):
+                self._finish_resize()
+                event.accept()
+                return True
         return super().eventFilter(watched, event)
 
     def _toggle_pin(self):
@@ -635,20 +939,31 @@ class ScheduleAxisBoard(QWidget):
             button.raise_()
             offset += 30
 
-        self.range_label.adjustSize()
-        range_x = self.btn_settings.x() - self.range_label.width() - 6
-        range_y = 10 + (30 - self.range_label.height()) // 2
-        self.range_label.move(max(10, range_x), range_y)
-        self.range_label.raise_()
-
         if hasattr(self, "title_label"):
             self.title_label.adjustSize()
-            self.title_label.move(26, 22)
+            self.title_label.move(26, 18)
             self.title_label.raise_()
 
-        if hasattr(self, "legend"):
-            self.legend.setGeometry(26, self.height() - 31, max(0, self.width() - 52), 15)
-            self.legend.raise_()
+        if hasattr(self, "range_label"):
+            annotation_left = self.title_label.geometry().right() + 12
+            annotation_right = self.btn_settings.x() - 6
+            annotation_width = max(0, annotation_right - annotation_left)
+            annotation_height = max(18, self.range_label.fontMetrics().height())
+            annotation_y = self.title_label.geometry().bottom() - annotation_height + 1
+            elided_text = self.range_label.fontMetrics().elidedText(
+                self._annotation_text,
+                Qt.TextElideMode.ElideRight,
+                annotation_width,
+            )
+            self.range_label.setText(elided_text)
+            self.range_label.setGeometry(
+                annotation_left,
+                annotation_y,
+                annotation_width,
+                annotation_height,
+            )
+            self.range_label.setVisible(annotation_width > 12)
+            self.range_label.raise_()
 
     def _show_hover_preview(self, projection, global_pos):
         if projection is None:
@@ -722,7 +1037,60 @@ class ScheduleAxisBoard(QWidget):
         painter.setPen(QPen(QColor(0, 0, 0, 26), 1))
         painter.drawPath(path)
 
+    def _install_resize_event_filters(self):
+        self._resize_event_widgets.clear()
+        for widget in self.findChildren(QWidget):
+            widget.setMouseTracking(True)
+            widget.installEventFilter(self)
+            self._resize_event_widgets.add(widget)
+
+    def _start_resize(self, edges, global_pos):
+        self._drag_offset = None
+        if self._start_system_resize(edges):
+            self._finish_resize()
+            return
+        self._begin_resize(edges, global_pos)
+
+    def _start_system_resize(self, edges):
+        window = self.windowHandle()
+        if window is None:
+            return False
+        edge_map = {
+            "left": Qt.Edge.LeftEdge,
+            "right": Qt.Edge.RightEdge,
+            "top": Qt.Edge.TopEdge,
+            "bottom": Qt.Edge.BottomEdge,
+        }
+        qt_edges = None
+        for edge in edges:
+            qt_edge = edge_map[edge]
+            qt_edges = qt_edge if qt_edges is None else qt_edges | qt_edge
+        if qt_edges is None:
+            return False
+        try:
+            return bool(window.startSystemResize(qt_edges))
+        except (AttributeError, RuntimeError, TypeError):
+            return False
+
+    def _begin_resize(self, edges, global_pos):
+        self._drag_offset = None
+        self._resize_edges = tuple(edges)
+        self._resize_origin = global_pos
+        self._resize_geometry = self.geometry()
+
+    def _finish_resize(self):
+        self._resize_edges = ()
+        self._resize_origin = None
+        self._resize_geometry = None
+
     def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            edges = self._resize_edges_at(event.position().toPoint())
+            if edges:
+                self._start_resize(edges, event.globalPosition().toPoint())
+                event.accept()
+                return
+
         if event.button() == Qt.MouseButton.LeftButton and event.position().y() <= 52:
             self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             event.accept()
@@ -730,15 +1098,85 @@ class ScheduleAxisBoard(QWidget):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
+        if self._resize_edges and event.buttons() & Qt.MouseButton.LeftButton:
+            self._perform_resize(event.globalPosition().toPoint())
+            event.accept()
+            return
         if self._drag_offset is not None and event.buttons() & Qt.MouseButton.LeftButton:
             self.move(event.globalPosition().toPoint() - self._drag_offset)
             event.accept()
             return
+        if not event.buttons():
+            self._update_resize_cursor(event.position().toPoint())
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
         self._drag_offset = None
+        self._finish_resize()
+        self._update_resize_cursor(event.position().toPoint())
         super().mouseReleaseEvent(event)
+
+    def leaveEvent(self, event):
+        if not self._resize_edges:
+            self.unsetCursor()
+        super().leaveEvent(event)
+
+    def _resize_edges_at(self, pos):
+        margin = self._resize_margin
+        edges = []
+        if pos.x() <= margin:
+            edges.append("left")
+        elif pos.x() >= self.width() - margin:
+            edges.append("right")
+        if pos.y() <= margin:
+            edges.append("top")
+        elif pos.y() >= self.height() - margin:
+            edges.append("bottom")
+        return tuple(edges)
+
+    def _update_resize_cursor(self, pos):
+        self._apply_resize_cursor(self, self._resize_edges_at(pos))
+
+    @staticmethod
+    def _apply_resize_cursor(widget, edges):
+        edges = set(edges)
+        if edges in ({"left", "top"}, {"right", "bottom"}):
+            widget.setCursor(Qt.CursorShape.SizeFDiagCursor)
+        elif edges in ({"right", "top"}, {"left", "bottom"}):
+            widget.setCursor(Qt.CursorShape.SizeBDiagCursor)
+        elif "left" in edges or "right" in edges:
+            widget.setCursor(Qt.CursorShape.SizeHorCursor)
+        elif "top" in edges or "bottom" in edges:
+            widget.setCursor(Qt.CursorShape.SizeVerCursor)
+        else:
+            widget.unsetCursor()
+
+    def _perform_resize(self, global_pos):
+        if self._resize_origin is None or self._resize_geometry is None:
+            return
+        delta = global_pos - self._resize_origin
+        rect = QRect(self._resize_geometry)
+        edges = set(self._resize_edges)
+        if "left" in edges:
+            rect.setLeft(rect.left() + delta.x())
+        if "right" in edges:
+            rect.setRight(rect.right() + delta.x())
+        if "top" in edges:
+            rect.setTop(rect.top() + delta.y())
+        if "bottom" in edges:
+            rect.setBottom(rect.bottom() + delta.y())
+
+        if rect.width() < self.minimumWidth():
+            if "left" in edges:
+                rect.setLeft(rect.right() - self.minimumWidth() + 1)
+            else:
+                rect.setRight(rect.left() + self.minimumWidth() - 1)
+        if rect.height() < self.minimumHeight():
+            if "top" in edges:
+                rect.setTop(rect.bottom() - self.minimumHeight() + 1)
+            else:
+                rect.setBottom(rect.top() + self.minimumHeight() - 1)
+        self.setGeometry(rect)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

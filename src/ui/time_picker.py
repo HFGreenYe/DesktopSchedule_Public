@@ -7,6 +7,7 @@ from PyQt6.QtCore import Qt, QDate, QTime, pyqtSignal, QPropertyAnimation, QEasi
 from PyQt6.QtGui import QColor, QPainter, QPainterPath, QBrush, QPen, QIcon, QPixmap
 from PyQt6.QtSvg import QSvgRenderer
 from datetime import datetime, timedelta
+from ..config import AppConfig
 from ..utils.styles import StyleManager
 from .components import IOSSwitch, NumberScroller
 
@@ -52,7 +53,7 @@ class TimePickerView(QWidget):
 
         # 2. 标题栏
         header_container = QWidget()
-        header_container.setFixedHeight(60)
+        header_container.setFixedHeight(70)
         header_layout = QHBoxLayout(header_container)
         header_layout.setContentsMargins(30, 10, 30, 0)
         self.lbl_title = QLabel("设置时间")
@@ -110,15 +111,20 @@ class TimePickerView(QWidget):
         self.calendar.setMinimumDate(QDate.currentDate())
         self.content_layout.addWidget(self.calendar)
 
-        # 替换自带箭头，并动态渲染成青色
+        # 箭头接近主题主色，混入少量白色保持原有轻微提亮效果。
+        arrow_color = StyleManager.mix_colors(
+            AppConfig.COLOR_GRADIENT_START,
+            "#ffffff",
+            primary_ratio=0.98,
+        )
         prev_btn = self.calendar.findChild(QToolButton, "qt_calendar_prevmonth")
         if prev_btn:
-            prev_btn.setIcon(self._get_colored_icon("assets/icons/cal_left.svg", "#11c1df"))
+            prev_btn.setIcon(self._get_colored_icon("assets/icons/cal_left.svg", arrow_color))
             prev_btn.setIconSize(QSize(18, 18))
 
         next_btn = self.calendar.findChild(QToolButton, "qt_calendar_nextmonth")
         if next_btn:
-            next_btn.setIcon(self._get_colored_icon("assets/icons/cal_right.svg", "#11c1df"))
+            next_btn.setIcon(self._get_colored_icon("assets/icons/cal_right.svg", arrow_color))
             next_btn.setIconSize(QSize(18, 18))
 
         # 6. 开关行
@@ -238,12 +244,12 @@ class TimePickerView(QWidget):
             QPushButton:hover { background-color: rgba(255,255,255,0.1); }
         """)
         
-        self.btn_ok.setStyleSheet("""
-            QPushButton {
+        self.btn_ok.setStyleSheet(f"""
+            QPushButton {{
                 background-color: white; border: none;
-                border-radius: 20px; color: #0cc0df; font-weight: bold; font-size: 14px;
-            }
-            QPushButton:hover { background-color: #f0f0f0; }
+                border-radius: 20px; color: {AppConfig.COLOR_GRADIENT_START}; font-weight: bold; font-size: 14px;
+            }}
+            QPushButton:hover {{ background-color: #f0f0f0; }}
         """)
         
         btn_layout.addWidget(self.btn_cancel)

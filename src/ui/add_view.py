@@ -6,13 +6,15 @@ from PyQt6.QtCore import Qt, QSize, QEvent, QObject, pyqtSignal, QTimer, QRectF,
 from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QImage, QPen
 from PyQt6.QtSvg import QSvgRenderer
 from ..data.database import db_manager
+from ..config import AppConfig
+from ..utils.styles import StyleManager
 
 
 class CustomToolTip(QLabel):
-    def __init__(self, text, parent=None, border_color="#0cc0df"):
+    def __init__(self, text, parent=None, border_color=None):
         super().__init__(parent, Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
         self.setText(text)
-        self.border_color = border_color
+        self.border_color = border_color or AppConfig.COLOR_GRADIENT_START
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setStyleSheet("""
@@ -145,13 +147,10 @@ class AddScheduleView(QWidget):
         
         self.txt_details = QTextEdit()
         self.txt_details.setPlaceholderText("添加描述 (150字以内)...")
-        self.txt_details.setFixedHeight(80) 
+        self.txt_details.setFixedHeight(100)
         self.txt_details.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.txt_details.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.txt_details.setStyleSheet("""
-            QTextEdit { background-color: rgba(12, 192, 223, 0.9); border: 1px solid rgba(255, 255, 255, 0.6); border-radius: 8px; color: white; font-size: 14px; font-family: 'Microsoft YaHei'; padding: 8px; }
-            QTextEdit:focus { border: 1px solid rgba(255, 255, 255, 0.9); background-color: rgba(12, 192, 223, 0.9); }
-        """)
+        self.txt_details.setStyleSheet(StyleManager.get_detail_editor_style())
         
         self.details_bottom_widget = QWidget()
         details_btn_layout = QHBoxLayout(self.details_bottom_widget)
@@ -360,7 +359,7 @@ class AddScheduleView(QWidget):
         btn.setFixedSize(72, 30)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         if is_primary:
-            btn.setStyleSheet("QPushButton { background-color: white; border: none; border-radius: 15px; color: #0cc0df; font-size: 13px; font-weight: bold; font-family: 'Microsoft YaHei'; } QPushButton:hover { background-color: #f2f2f2; }")
+            btn.setStyleSheet(f"QPushButton {{ background-color: white; border: none; border-radius: 15px; color: {AppConfig.COLOR_GRADIENT_START}; font-size: 13px; font-weight: bold; font-family: 'Microsoft YaHei'; }} QPushButton:hover {{ background-color: #f2f2f2; }}")
         else:
             btn.setStyleSheet("QPushButton { background-color: transparent; border: 1px solid rgba(255, 255, 255, 0.7); border-radius: 15px; color: white;font-weight: bold; font-size: 13px; font-family: 'Microsoft YaHei'; } QPushButton:hover { background-color: rgba(255, 255, 255, 0.1); border: 1px solid white; }")
         return btn

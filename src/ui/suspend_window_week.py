@@ -6,6 +6,7 @@ from qframelesswindow import FramelessWindow
 
 from ..config import AppConfig
 from ..utils.win_api import apply_24h2_border_fix
+from ..utils.signals import global_signals
 from ..utils.styles import StyleManager
 
 class SuspendWindowWeek(FramelessWindow):
@@ -14,7 +15,8 @@ class SuspendWindowWeek(FramelessWindow):
     def __init__(self):
         super().__init__()
         # 高度定为 30px，宽度和周界面保持一致 680px
-        self.setFixedSize(680, 30) 
+        self.setFixedSize(680, 30)
+        self._source_gradient_height = 125
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
@@ -25,6 +27,11 @@ class SuspendWindowWeek(FramelessWindow):
         
         self.win_id = int(self.winId())
         apply_24h2_border_fix(self.win_id)
+        global_signals.skin_changed.connect(self.update)
+
+    def set_source_gradient_height(self, height):
+        self._source_gradient_height = max(self.height(), int(height))
+        self.update()
 
     def _init_ui(self):
         # === 中间：还原按钮 (保持绝对居中定位) ===
@@ -89,9 +96,9 @@ class SuspendWindowWeek(FramelessWindow):
         path = QPainterPath()
         rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
         path.addRoundedRect(rect, 5.0, 5.0)
-        gradient = QLinearGradient(0, 0, 0, self.height())
-        gradient.setColorAt(0.0, QColor(AppConfig.SUSPEND_GRADIENT_START))
-        gradient.setColorAt(1.0, QColor(AppConfig.SUSPEND_GRADIENT_END))
+        gradient = QLinearGradient(0, 0, 0, self._source_gradient_height)
+        gradient.setColorAt(0.0, QColor(AppConfig.COLOR_GRADIENT_START))
+        gradient.setColorAt(1.0, QColor(AppConfig.COLOR_GRADIENT_END))
         painter.fillPath(path, QBrush(gradient))
 
     # 拖拽逻辑

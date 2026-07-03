@@ -3,6 +3,7 @@ from PyQt6.QtWidgets import QWidget, QListWidget, QListWidgetItem, QScroller, QF
 from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, pyqtProperty, QTimer,QPoint, QEvent, QObject, QRect
 from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen, QCursor
 from datetime import datetime
+from ..config import AppConfig
 from src.ui.todo_board import TodoBoardWindow
 from src.utils.signals import global_signals
 from src.utils.window_preferences import (
@@ -56,7 +57,7 @@ class IOSSwitch(QWidget):
         path = QPainterPath()
         path.addRoundedRect(0, 0, self.width(), self.height(), 14, 14)
         if self._checked:
-            bg_color = QColor("#0cc0df") 
+            bg_color = QColor(AppConfig.COLOR_GRADIENT_START)
         else:
             bg_color = QColor("#e0e0e0") 
         p.fillPath(path, bg_color)

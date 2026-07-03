@@ -4,16 +4,17 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QMenu, QMessageBox)
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QTimer, QSize
 from PyQt6.QtGui import QColor, QAction, QCursor, QPainter, QPen, QIcon
+from ..config import AppConfig
 from ..data.database import db_manager
 from ..services.category_policy_service import CategoryDeleteAction, CategoryPolicyService
 from ..utils.styles import StyleManager
 
 # 复用气泡提示
 class CustomToolTip(QLabel):
-    def __init__(self, text, parent=None, border_color="#0cc0df"):
+    def __init__(self, text, parent=None, border_color=None):
         super().__init__(parent, Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
         self.setText(text)
-        self.border_color = border_color
+        self.border_color = border_color or AppConfig.COLOR_GRADIENT_START
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setStyleSheet("""
@@ -56,7 +57,9 @@ class CategoryCard(QFrame):
         
         self.dot = QLabel()
         self.dot.setFixedSize(8, 8)
-        self.dot.setStyleSheet("background-color: #0cc0df; border-radius: 4px;")
+        self.dot.setStyleSheet(
+            f"background-color: {AppConfig.COLOR_GRADIENT_START}; border-radius: 4px;"
+        )
         
         # UI 渲染：包括三位数编号
         display_text = f"#{self.cat_id:03d}  {self.cat_name}"
@@ -196,15 +199,20 @@ class ListPickerView(QWidget):
         self.btn_confirm_add = QPushButton("✔")
         self.btn_confirm_add.setFixedSize(40, 40)
         self.btn_confirm_add.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_confirm_add.setStyleSheet("""
-            QPushButton {
-                background-color: #0cc0df; 
+        confirm_hover = StyleManager.mix_colors(
+            AppConfig.COLOR_GRADIENT_START,
+            "#000000",
+            primary_ratio=0.9,
+        )
+        self.btn_confirm_add.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {AppConfig.COLOR_GRADIENT_START};
                 border: 1px solid white; 
                 border-radius: 20px; 
                 color: white; 
                 font-size: 16px; 
-            }
-            QPushButton:hover { background-color: #0bb0cf; }
+            }}
+            QPushButton:hover {{ background-color: {confirm_hover}; }}
         """)
         
         input_layout.addWidget(self.input_new)
@@ -246,17 +254,17 @@ class ListPickerView(QWidget):
             }
         """
         
-        primary_style = """
-            QPushButton { 
+        primary_style = f"""
+            QPushButton {{
                 background: white; 
                 border: none; 
                 border-radius: 20px; 
-                color: #0cc0df; 
+                color: {AppConfig.COLOR_GRADIENT_START};
                 font-weight: bold; 
                 font-family: 'Microsoft YaHei';
                 font-size: 13px;
-            }
-            QPushButton:hover { background: #f0f0f0; }
+            }}
+            QPushButton:hover {{ background: #f0f0f0; }}
         """
         
         self.btn_add_new = QPushButton("+ 新建")
@@ -400,7 +408,7 @@ class ListPickerView(QWidget):
         self.confirm_requested.emit(self.selected_cat_id)
 
     def _show_tooltip(self, text, is_error=False):
-        color = "#ff4d4f" if is_error else "#0cc0df"
+        color = "#ff4d4f" if is_error else AppConfig.COLOR_GRADIENT_START
         tooltip = CustomToolTip(text, self, border_color=color)
         global_pos = self.mapToGlobal(QPoint(0, 0))
         x = global_pos.x() + (self.width() - tooltip.sizeHint().width()) // 2

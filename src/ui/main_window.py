@@ -917,6 +917,7 @@ class MainWindow(FramelessMainWindow):
 
     def switch_to_suspend(self):
         pos = self.pos()
+        self.suspend_window.set_source_gradient_height(self.height())
         self.suspend_window.move(pos)
         self.hide()
         self.suspend_window.show()
@@ -952,6 +953,12 @@ class MainWindow(FramelessMainWindow):
 
     def switch_week_to_suspend(self):
         """周视图 -> 宽版挂起条"""
+        source_height = (
+            self.week_window.height()
+            if self.week_window.is_edit_mode
+            else self.week_window.top_container.height()
+        )
+        self.suspend_window_week.set_source_gradient_height(source_height)
         self.week_window.hide()
         pos = self.week_window.pos()
         self.suspend_window_week.move(pos.x(), pos.y())
@@ -966,6 +973,7 @@ class MainWindow(FramelessMainWindow):
 
     def switch_month_to_suspend(self):
         """月视图 -> 月视图专属挂起条"""
+        self.suspend_window_month.set_source_gradient_height(self.month_window.height())
         self.month_window.hide()
         pos = self.month_window.pos()
         self.suspend_window_month.move(pos.x(), pos.y())

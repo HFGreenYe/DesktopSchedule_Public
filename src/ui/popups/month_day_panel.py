@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QRectF, QSize, pyqtSignal
 from PyQt6.QtGui import QAction, QBrush, QColor, QIcon, QLinearGradient, QPainter, QPen
 
+from ...config import AppConfig
 from ..utils.icon_loader import load_colored_svg_pixmap
 
 
@@ -229,8 +230,8 @@ class MonthDayPanel(QWidget):
         rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
 
         gradient = QLinearGradient(rect.topLeft(), rect.bottomLeft())
-        gradient.setColorAt(0.0, QColor("#0cc0df"))
-        gradient.setColorAt(1.0, QColor("#71dce8"))
+        gradient.setColorAt(0.0, QColor(AppConfig.COLOR_GRADIENT_START))
+        gradient.setColorAt(1.0, QColor(AppConfig.COLOR_GRADIENT_END))
 
         painter.setPen(QPen(QColor(255, 255, 255, 110), 1))
         painter.setBrush(QBrush(gradient))

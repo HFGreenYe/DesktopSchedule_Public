@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QPoint
 from PyQt6.QtGui import QColor, QPainter, QPen
 from datetime import datetime, timedelta
+from ..config import AppConfig
 from .components import NumberScroller, IOSSwitch 
 from .components import get_colored_icon
 
@@ -187,9 +188,9 @@ class AlarmPickerViewWeek(QWidget):
             btn.setCheckable(True)
             btn.setFixedHeight(28)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setStyleSheet("""
-                QPushButton { background-color: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.3); border-radius: 14px; color: rgba(255,255,255,0.8); font-size: 11px; }
-                QPushButton:checked { background-color: #0cc0df; border: none; color: white; font-weight: bold; }
+            btn.setStyleSheet(f"""
+                QPushButton {{ background-color: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.3); border-radius: 14px; color: rgba(255,255,255,0.8); font-size: 11px; }}
+                QPushButton:checked {{ background-color: {AppConfig.COLOR_GRADIENT_START}; border: none; color: white; font-weight: bold; }}
             """)
             self.alarm_group.addButton(btn, val)
             h_alarm_btns.addWidget(btn)
@@ -214,7 +215,7 @@ class AlarmPickerViewWeek(QWidget):
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             
         self.btn_cancel.setStyleSheet("QPushButton { background: transparent; border: 1px solid rgba(255,255,255,0.6); border-radius: 16px; color: white; } QPushButton:hover { background: rgba(255,255,255,0.1); }")
-        self.btn_ok.setStyleSheet("QPushButton { background: white; border: none; border-radius: 16px; color: #0cc0df; font-weight: bold; } QPushButton:hover { background: #f0f0f0; }")
+        self.btn_ok.setStyleSheet(f"QPushButton {{ background: white; border: none; border-radius: 16px; color: {AppConfig.COLOR_GRADIENT_START}; font-weight: bold; }} QPushButton:hover {{ background: #f0f0f0; }}")
         
         f_layout.addStretch()
         f_layout.addWidget(self.btn_cancel)

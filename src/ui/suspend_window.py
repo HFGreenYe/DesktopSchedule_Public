@@ -15,6 +15,7 @@ class SuspendWindow(FramelessWindow):
     def __init__(self):
         super().__init__()
         self.setFixedSize(AppConfig.DEFAULT_WIDTH, 30)
+        self._source_gradient_height = 600
         
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -28,6 +29,10 @@ class SuspendWindow(FramelessWindow):
         apply_24h2_border_fix(self.win_id)
         
         global_signals.skin_changed.connect(self.update)
+
+    def set_source_gradient_height(self, height):
+        self._source_gradient_height = max(self.height(), int(height))
+        self.update()
 
     def _init_ui(self):
         # === A. 中间：还原按钮 (Absolute Center) ===
@@ -93,9 +98,9 @@ class SuspendWindow(FramelessWindow):
         rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
         path.addRoundedRect(rect, 5.0, 5.0)
 
-        gradient = QLinearGradient(0, 0, 0, self.height())
-        gradient.setColorAt(0.0, QColor(AppConfig.SUSPEND_GRADIENT_START))
-        gradient.setColorAt(1.0, QColor(AppConfig.SUSPEND_GRADIENT_END))
+        gradient = QLinearGradient(0, 0, 0, self._source_gradient_height)
+        gradient.setColorAt(0.0, QColor(AppConfig.COLOR_GRADIENT_START))
+        gradient.setColorAt(1.0, QColor(AppConfig.COLOR_GRADIENT_END))
         painter.fillPath(path, QBrush(gradient))
 
     # 拖拽逻辑保持不变
@@ -111,5 +116,3 @@ class SuspendWindow(FramelessWindow):
 
     def mouseReleaseEvent(self, event):
         self.drag_pos = None
-
-    

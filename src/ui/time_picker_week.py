@@ -5,6 +5,7 @@ from PyQt6.QtCore import Qt, QDate, QTime, pyqtSignal, QSize
 from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor
 from PyQt6.QtSvg import QSvgRenderer
 from datetime import datetime, timedelta
+from ..config import AppConfig
 from ..utils.styles import StyleManager
 from .components import IOSSwitch, NumberScroller
 
@@ -59,14 +60,19 @@ class TimePickerViewWeek(QWidget):
         self.calendar.setMinimumDate(QDate.currentDate())
         
         # 替换日历切换图标
+        arrow_color = StyleManager.mix_colors(
+            AppConfig.COLOR_GRADIENT_START,
+            "#ffffff",
+            primary_ratio=0.98,
+        )
         prev_btn = self.calendar.findChild(QToolButton, "qt_calendar_prevmonth")
         if prev_btn:
-            prev_btn.setIcon(self._get_colored_icon("assets/icons/cal_left.svg", "#11c1df"))
+            prev_btn.setIcon(self._get_colored_icon("assets/icons/cal_left.svg", arrow_color))
             prev_btn.setIconSize(QSize(18, 18))
 
         next_btn = self.calendar.findChild(QToolButton, "qt_calendar_nextmonth")
         if next_btn:
-            next_btn.setIcon(self._get_colored_icon("assets/icons/cal_right.svg", "#11c1df"))
+            next_btn.setIcon(self._get_colored_icon("assets/icons/cal_right.svg", arrow_color))
             next_btn.setIconSize(QSize(18, 18))
 
         left_vbox.addWidget(self.calendar)
@@ -133,7 +139,7 @@ class TimePickerViewWeek(QWidget):
             btn.setFixedSize(70, 32)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_cancel.setStyleSheet("QPushButton { background: transparent; border: 1px solid rgba(255,255,255,0.6); border-radius: 16px; color: white; }")
-        self.btn_ok.setStyleSheet("QPushButton { background: white; border: none; border-radius: 16px; color: #0cc0df; font-weight: bold; }")
+        self.btn_ok.setStyleSheet(f"QPushButton {{ background: white; border: none; border-radius: 16px; color: {AppConfig.COLOR_GRADIENT_START}; font-weight: bold; }}")
         
         btn_row.addStretch()
         btn_row.addWidget(self.btn_cancel)

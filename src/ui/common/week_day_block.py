@@ -1,8 +1,11 @@
 from PyQt6.QtWidgets import QVBoxLayout, QLabel, QFrame
 from PyQt6.QtCore import Qt, pyqtSignal, QDate
+from PyQt6.QtGui import QColor
 from zhdate import ZhDate
 from datetime import datetime, timedelta
 
+from ...config import AppConfig
+from ...utils.styles import StyleManager
 from ..header import ToolTipFilter
 
 
@@ -90,7 +93,18 @@ class DayBlock(QFrame):
         self.lbl_lunar.setStyleSheet(f"color: {text_color}; font-size: 9px; font-family: 'Microsoft YaHei'; background: transparent;")
 
         if self.is_selected:
-            self.setStyleSheet("DayBlock { background-color: rgba(0, 100, 100, 0.4); border-radius: 4px; }")
+            selected_color = QColor(
+                StyleManager.mix_colors(
+                    AppConfig.COLOR_GRADIENT_START,
+                    "#000000",
+                    primary_ratio=0.7,
+                )
+            )
+            self.setStyleSheet(
+                "DayBlock { "
+                f"background-color: rgba({selected_color.red()}, {selected_color.green()}, {selected_color.blue()}, 0.4); "
+                "border-radius: 4px; }"
+            )
         else:
             self.setStyleSheet("DayBlock { background-color: transparent; border-radius: 4px; } DayBlock:hover { background-color: rgba(255, 255, 255, 0.15); }")
 

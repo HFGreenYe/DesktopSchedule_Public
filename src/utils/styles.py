@@ -1,7 +1,57 @@
 # src/utils/styles.py
 from ..config import AppConfig
+from PyQt6.QtGui import QColor
 
 class StyleManager:
+    @staticmethod
+    def mix_colors(primary, secondary="#ffffff", primary_ratio=0.5):
+        primary_color = QColor(primary)
+        secondary_color = QColor(secondary)
+        if not primary_color.isValid():
+            primary_color = QColor("#0cc0df")
+        if not secondary_color.isValid():
+            secondary_color = QColor("#ffffff")
+
+        ratio = max(0.0, min(float(primary_ratio), 1.0))
+        inverse = 1.0 - ratio
+        return QColor(
+            round(primary_color.red() * ratio + secondary_color.red() * inverse),
+            round(primary_color.green() * ratio + secondary_color.green() * inverse),
+            round(primary_color.blue() * ratio + secondary_color.blue() * inverse),
+        ).name()
+
+    @staticmethod
+    def derive_surface_rgba(base_color=None, dark_factor=115, alpha=0.9):
+        color = QColor(base_color or AppConfig.COLOR_GRADIENT_START)
+        if not color.isValid():
+            color = QColor("#0cc0df")
+        color = color.darker(max(100, int(dark_factor)))
+        alpha = max(0.0, min(float(alpha), 1.0))
+        return f"rgba({color.red()}, {color.green()}, {color.blue()}, {alpha:.2f})"
+
+    @classmethod
+    def get_detail_editor_style(cls):
+        background = cls.derive_surface_rgba(
+            AppConfig.COLOR_GRADIENT_START,
+            dark_factor=115,
+            alpha=0.9,
+        )
+        return f"""
+            QTextEdit {{
+                background-color: {background};
+                border: 1px solid rgba(255, 255, 255, 0.6);
+                border-radius: 8px;
+                color: white;
+                font-size: 14px;
+                font-family: 'Microsoft YaHei';
+                padding: 8px;
+            }}
+            QTextEdit:focus {{
+                border: 1px solid rgba(255, 255, 255, 0.9);
+                background-color: {background};
+            }}
+        """
+
     @staticmethod
     def get_main_window_style():
         return f"""
@@ -240,7 +290,7 @@ class StyleManager:
                 color: #333333;
                 
                 /* 🖼️ 边框：青色细边框，呼应主题 */
-                border: 1px solid #0cc0df;
+                border: 1px solid __THEME_PRIMARY__;
                 
                 /* ✨ 圆角和内边距 */
                 border-radius: 2px;
@@ -250,14 +300,19 @@ class StyleManager:
                 font-family: "Microsoft YaHei UI";
                 font-size: 12px;
             }
-        """
+        """.replace("__THEME_PRIMARY__", AppConfig.COLOR_GRADIENT_START)
     
-    @staticmethod
-    def get_calendar_style():
+    @classmethod
+    def get_calendar_style(cls):
         """QCalendarWidget 深度美化"""
+        weekday_background = cls.mix_colors(
+            AppConfig.COLOR_GRADIENT_START,
+            "#ffffff",
+            primary_ratio=0.2,
+        )
         return """
             QCalendarWidget QWidget { 
-                alternate-background-color: #e3fcf9; 
+                alternate-background-color: __WEEKDAY_BACKGROUND__;
                 background-color: white;
             }
             /* 导航条 (顶部 年/月) */
@@ -285,17 +340,23 @@ class StyleManager:
             QCalendarWidget QAbstractItemView:enabled {
                 color: #333;
                 background-color: white;
-                selection-background-color: #0cc0df; /* 选中青色 */
+                selection-background-color: __THEME_PRIMARY__;
                 selection-color: white;
                 border: none;
                 outline: 0;
             }
             /* 星期标题 (周一、周二...) */
             QCalendarWidget QTableHeaderView::section {
-                background-color: white;
+                background-color: __WEEKDAY_BACKGROUND__;
                 color: #999;
                 padding: 4px;
                 border: none;
                 font-weight: bold;
             }
-        """
+        """.replace(
+            "__THEME_PRIMARY__",
+            AppConfig.COLOR_GRADIENT_START,
+        ).replace(
+            "__WEEKDAY_BACKGROUND__",
+            weekday_background,
+        )

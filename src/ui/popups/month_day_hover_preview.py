@@ -2,6 +2,8 @@ from PyQt6.QtWidgets import QFrame, QVBoxLayout, QLabel
 from PyQt6.QtCore import Qt, QRectF
 from PyQt6.QtGui import QPainter, QColor, QPen, QBrush
 
+from ...config import AppConfig
+
 
 class MonthDayHoverPreview(QFrame):
     def __init__(self, parent=None):
@@ -31,7 +33,9 @@ class MonthDayHoverPreview(QFrame):
         self._layout.setSpacing(4)
 
         self.date_label = QLabel()
-        self.date_label.setStyleSheet("color: #0cc0df; font-size: 12px; font-weight: bold;")
+        self.date_label.setStyleSheet(
+            f"color: {AppConfig.COLOR_GRADIENT_START}; font-size: 12px; font-weight: bold;"
+        )
         self._layout.addWidget(self.date_label)
 
         self.body_label = QLabel()

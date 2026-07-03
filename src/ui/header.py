@@ -33,7 +33,7 @@ class CustomToolTip(QLabel):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing) 
         painter.setBrush(QColor("#ffffff"))       
-        painter.setPen(QPen(QColor("#0cc0df"), 1)) 
+        painter.setPen(QPen(QColor(AppConfig.COLOR_GRADIENT_START), 1))
         rect = self.rect().adjusted(0, 0, -1, -1)
         painter.drawRoundedRect(rect, 4, 4) 
         super().paintEvent(event)

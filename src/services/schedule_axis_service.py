@@ -82,7 +82,14 @@ class ScheduleAxisService:
         return projections, range_hours
 
     @classmethod
-    def map_delta_to_x(cls, delta_hours, range_hours, left, right):
+    def map_delta_to_x(
+        cls,
+        delta_hours,
+        range_hours,
+        left,
+        right,
+        log_scale=1.0,
+    ):
         range_hours = max(float(range_hours), cls.MIN_RANGE_HOURS)
         delta_hours = max(-range_hours, min(float(delta_hours), range_hours))
         center = (float(left) + float(right)) / 2.0
@@ -90,9 +97,60 @@ class ScheduleAxisService:
         if delta_hours == 0 or half_width == 0:
             return center
 
-        normalized = math.log1p(abs(delta_hours)) / math.log1p(range_hours)
+        log_scale = max(float(log_scale), 1e-12)
+        normalized = math.log1p(log_scale * abs(delta_hours)) / math.log1p(
+            log_scale * range_hours
+        )
         direction = -1.0 if delta_hours < 0 else 1.0
         return center + direction * normalized * half_width
+
+    @classmethod
+    def map_x_to_delta(
+        cls,
+        x,
+        range_hours,
+        left,
+        right,
+        log_scale=1.0,
+    ):
+        range_hours = max(float(range_hours), cls.MIN_RANGE_HOURS)
+        center = (float(left) + float(right)) / 2.0
+        half_width = max((float(right) - float(left)) / 2.0, 0.0)
+        if half_width == 0:
+            return 0.0
+
+        normalized = max(-1.0, min(1.0, (float(x) - center) / half_width))
+        direction = -1.0 if normalized < 0 else 1.0
+        magnitude = abs(normalized)
+        log_scale = max(float(log_scale), 1e-12)
+        delta = math.expm1(
+            magnitude * math.log1p(log_scale * range_hours)
+        ) / log_scale
+        return direction * delta
+
+    @classmethod
+    def solve_log_scale(cls, range_hours, focus_hours, target_fraction):
+        range_hours = max(float(range_hours), cls.MIN_RANGE_HOURS)
+        focus_hours = max(0.0, min(float(focus_hours), range_hours))
+        target_fraction = max(0.0, min(float(target_fraction), 1.0))
+        linear_fraction = focus_hours / range_hours
+        if focus_hours == 0 or target_fraction <= linear_fraction:
+            return 1e-12
+        if target_fraction >= 1.0:
+            return 1e12
+
+        low = 1e-12
+        high = 1e12
+        for _ in range(96):
+            middle = math.sqrt(low * high)
+            fraction = math.log1p(middle * focus_hours) / math.log1p(
+                middle * range_hours
+            )
+            if fraction < target_fraction:
+                low = middle
+            else:
+                high = middle
+        return math.sqrt(low * high)
 
     @staticmethod
     def format_range(range_hours):
