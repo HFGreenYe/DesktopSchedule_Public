@@ -9,6 +9,7 @@ from PyQt6.QtCore import (
     QRect,
     QRectF,
     QSize,
+    QTimer,
     Qt,
     QVariantAnimation,
     pyqtSignal,
@@ -26,11 +27,17 @@ from PyQt6.QtGui import (
     QPixmap,
 )
 from PyQt6.QtWidgets import (
+    QButtonGroup,
+    QColorDialog,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QRadioButton,
+    QScrollArea,
     QSizePolicy,
+    QSpinBox,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -629,6 +636,345 @@ class _ScheduleAxisCanvas(QWidget):
         self._clamp_view_center(left, right)
 
 
+class _AxisCategoryRow(QWidget):
+    def __init__(self, category, parent=None):
+        super().__init__(parent)
+        self.category_id = category.category_id
+        self.color_value = category.color
+        self.setFixedHeight(22)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(5)
+
+        self.name_label = QLabel(category.name)
+        self.name_label.setToolTip(category.name)
+        self.name_label.setStyleSheet(
+            "color: #333333; font-size: 10px; background: transparent;"
+        )
+        layout.addWidget(self.name_label, 1)
+
+        self.color_button = QPushButton()
+        self.color_button.setFixedSize(15, 15)
+        self.color_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.color_button.setToolTip("选择清单颜色")
+        self.color_button.clicked.connect(self._choose_color)
+        layout.addWidget(self.color_button)
+
+        self.alpha_spin = QSpinBox()
+        self.alpha_spin.setRange(0, 100)
+        self.alpha_spin.setValue(100)
+        self.alpha_spin.setSuffix("%")
+        self.alpha_spin.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
+        self.alpha_spin.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.alpha_spin.setFixedSize(42, 18)
+        self.alpha_spin.setToolTip("透明度")
+        self.alpha_spin.setStyleSheet(
+            "QSpinBox { color: #333333; background: rgba(255,255,255,0.7); "
+            "border: 1px solid rgba(0,0,0,0.18); border-radius: 3px; "
+            "font-size: 9px; padding: 0px 2px; }"
+        )
+        layout.addWidget(self.alpha_spin)
+        self._apply_color_button_style()
+
+    def _apply_color_button_style(self):
+        color = QColor(self.color_value)
+        if not color.isValid():
+            color = QColor(ScheduleAxisService.FALLBACK_COLOR)
+        self.color_value = color.name()
+        self.color_button.setStyleSheet(
+            "QPushButton { "
+            f"background-color: {self.color_value}; "
+            "border: 1px solid rgba(0,0,0,0.35); border-radius: 2px; "
+            "} QPushButton:hover { border: 1px solid #333333; }"
+        )
+
+    def _choose_color(self):
+        selected = QColorDialog.getColor(
+            QColor(self.color_value),
+            self,
+            "选择清单颜色",
+        )
+        if selected.isValid():
+            self.color_value = selected.name()
+            self._apply_color_button_style()
+
+
+class _AxisCategoryGrid(QWidget):
+    ROW_HEIGHT = 25
+    COLUMN_WIDTH = 154
+
+    def __init__(self, categories, parent=None):
+        super().__init__(parent)
+        self.rows = [_AxisCategoryRow(category, self) for category in categories]
+        self.column_lines = []
+        self._rows_per_column = 0
+        self.grid = QGridLayout(self)
+        self.grid.setContentsMargins(0, 0, 0, 0)
+        self.grid.setHorizontalSpacing(8)
+        self.grid.setVerticalSpacing(3)
+        self.setFixedSize(1, 1)
+
+    def set_viewport_extent(self, width, height):
+        height = max(int(height), self.ROW_HEIGHT)
+        rows_per_column = max(1, height // self.ROW_HEIGHT)
+        if rows_per_column != self._rows_per_column:
+            self._rows_per_column = rows_per_column
+            for row_widget in self.rows:
+                self.grid.removeWidget(row_widget)
+            for line in self.column_lines:
+                self.grid.removeWidget(line)
+                line.deleteLater()
+            self.column_lines.clear()
+
+            column_count = max(
+                1,
+                (len(self.rows) + rows_per_column - 1) // rows_per_column,
+            )
+            for column in range(column_count):
+                line = QFrame(self)
+                line.setFixedWidth(2)
+                line.setSizePolicy(
+                    QSizePolicy.Policy.Fixed,
+                    QSizePolicy.Policy.Expanding,
+                )
+                line.setStyleSheet(
+                    f"background-color: {AppConfig.COLOR_GRADIENT_START}; "
+                    "border: none; border-radius: 1px;"
+                )
+                self.column_lines.append(line)
+                self.grid.addWidget(
+                    line,
+                    0,
+                    column * 2,
+                    rows_per_column,
+                    1,
+                )
+            for index, row_widget in enumerate(self.rows):
+                row = index % rows_per_column
+                column = index // rows_per_column
+                row_widget.setFixedWidth(self.COLUMN_WIDTH)
+                self.grid.addWidget(row_widget, row, column * 2 + 1)
+
+        column_count = max(
+            1,
+            (len(self.rows) + rows_per_column - 1) // rows_per_column,
+        )
+        content_width = max(int(width), column_count * (self.COLUMN_WIDTH + 8))
+        self.setFixedSize(content_width, height)
+
+
+class _AxisColorPanel(QWidget):
+    def __init__(self, categories, heading_style, parent=None):
+        super().__init__(parent)
+        self.category_count = len(categories)
+        estimated_columns = max(1, (self.category_count + 5) // 6)
+        self.setFixedWidth(min(336, max(164, estimated_columns * 164)))
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(3)
+
+        title = QLabel("颜色")
+        title.setStyleSheet(heading_style)
+        layout.addWidget(title)
+
+        self.scroll = QScrollArea()
+        self.scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll.setWidgetResizable(False)
+        self.scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self.scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.scroll.setStyleSheet(
+            "QScrollArea { background: transparent; border: none; } "
+            "QScrollBar:horizontal { height: 7px; background: transparent; } "
+            "QScrollBar::handle:horizontal { background: rgba(0,0,0,0.2); "
+            "border-radius: 3px; min-width: 20px; }"
+        )
+        self.category_grid = _AxisCategoryGrid(categories)
+        self.scroll.setWidget(self.category_grid)
+        layout.addWidget(self.scroll, 1)
+        self._schedule_grid_sync()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._schedule_grid_sync()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._schedule_grid_sync()
+
+    def _schedule_grid_sync(self):
+        QTimer.singleShot(0, self._sync_grid_extent)
+
+    def _sync_grid_extent(self):
+        viewport = self.scroll.viewport()
+        self.category_grid.set_viewport_extent(
+            viewport.width(),
+            viewport.height(),
+        )
+
+
+class _AxisSettingsPanel(QWidget):
+    def __init__(self, categories, parent=None):
+        super().__init__(parent)
+        self.state = {
+            "direction": "both",
+            "range": "month",
+        }
+        self._button_groups = []
+        accent = AppConfig.COLOR_GRADIENT_START
+        heading_style = (
+            "color: #333333; font-size: 11px; font-weight: bold; "
+            "background: transparent;"
+        )
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(12, 8, 12, 10)
+        outer.setSpacing(4)
+
+        title = QLabel("显示设置")
+        title.setStyleSheet(
+            "color: #222222; font-size: 15px; font-weight: bold; "
+            "background: transparent;"
+        )
+        outer.addWidget(title)
+
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(12)
+
+        range_panel = QWidget()
+        range_panel.setFixedWidth(132)
+        range_layout = QVBoxLayout(range_panel)
+        range_layout.setContentsMargins(0, 0, 0, 0)
+        range_layout.setSpacing(1)
+
+        range_title = QLabel("范围")
+        range_title.setStyleSheet(heading_style)
+        range_layout.addWidget(range_title)
+        range_layout.addWidget(
+            self._build_option_group(
+                "direction",
+                (
+                    ("future", "未来"),
+                    ("both", "未来&&过去"),
+                    ("past", "过去"),
+                ),
+                "both",
+                accent,
+            )
+        )
+
+        time_title = QLabel("时间")
+        time_title.setStyleSheet(heading_style)
+        range_layout.addWidget(time_title)
+        range_layout.addWidget(
+            self._build_option_group(
+                "range",
+                (
+                    ("day", "一天"),
+                    ("week", "一周"),
+                    ("two_weeks", "两周"),
+                    ("month", "一月"),
+                    ("year", "一年"),
+                ),
+                "month",
+                accent,
+            )
+        )
+        range_layout.addStretch()
+        body.addWidget(range_panel)
+
+        self.color_panel = _AxisColorPanel(categories, heading_style)
+        body.addWidget(self.color_panel)
+
+        self.preview_frame = QFrame()
+        self.preview_frame.setObjectName("AxisSettingsPreview")
+        self.preview_frame.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+        self.preview_frame.setStyleSheet(
+            "QFrame#AxisSettingsPreview { background-color: #ffffff; "
+            "border: 1px solid #d8d8d8; border-radius: 5px; }"
+        )
+        preview_layout = QVBoxLayout(self.preview_frame)
+        preview_label = QLabel("效果预览")
+        preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        preview_label.setStyleSheet(
+            "color: #999999; font-size: 11px; background: transparent;"
+        )
+        preview_layout.addWidget(preview_label)
+        body.addWidget(self.preview_frame, 1)
+
+        outer.addLayout(body, 1)
+
+    def _build_option_group(self, state_key, options, selected, accent):
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        group_line = QFrame()
+        group_line.setFixedWidth(2)
+        group_line.setStyleSheet(
+            f"background-color: {accent}; border: none; border-radius: 1px;"
+        )
+        layout.addWidget(group_line)
+
+        option_layout = QVBoxLayout()
+        option_layout.setContentsMargins(0, 0, 0, 0)
+        option_layout.setSpacing(0)
+        group = QButtonGroup(self)
+        group.setExclusive(True)
+        self._button_groups.append(group)
+
+        radio_style = f"""
+            QRadioButton {{
+                color: #333333;
+                background: transparent;
+                font-size: 10px;
+                spacing: 5px;
+            }}
+            QRadioButton::indicator {{
+                width: 9px;
+                height: 9px;
+                border: 1px solid #777777;
+                border-radius: 5px;
+                background: transparent;
+            }}
+            QRadioButton::indicator:checked {{
+                border: 1px solid {accent};
+                background-color: {accent};
+            }}
+        """
+        for value, label in options:
+            radio = QRadioButton(label)
+            radio.setFixedHeight(17)
+            radio.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+            radio.setStyleSheet(radio_style)
+            radio.setChecked(value == selected)
+            radio.toggled.connect(
+                lambda checked, key=state_key, option=value: self._set_option(
+                    key,
+                    option,
+                    checked,
+                )
+            )
+            group.addButton(radio)
+            option_layout.addWidget(radio)
+        layout.addLayout(option_layout, 1)
+        return container
+
+    def _set_option(self, key, value, checked):
+        if checked:
+            self.state[key] = value
+
+
 class ScheduleAxisBoard(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -763,17 +1109,11 @@ class ScheduleAxisBoard(QWidget):
         )
         settings_layout = QVBoxLayout(self.settings_page)
         settings_layout.setContentsMargins(0, 0, 0, 0)
-        self.settings_placeholder = QLabel("显示设置\n选项内容待实现")
-        self.settings_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.settings_placeholder.setAttribute(
-            Qt.WidgetAttribute.WA_TransparentForMouseEvents,
-            True,
+        self.settings_panel = _AxisSettingsPanel(
+            ScheduleAxisService.load_category_options(),
+            self.settings_page,
         )
-        self.settings_placeholder.setStyleSheet(
-            "color: #333333; font-size: 14px; "
-            "font-family: 'Microsoft YaHei'; background: transparent;"
-        )
-        settings_layout.addWidget(self.settings_placeholder)
+        settings_layout.addWidget(self.settings_panel)
         self.settings_page.hide()
 
         self.content_stack.addWidget(self.display_page)

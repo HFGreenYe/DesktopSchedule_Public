@@ -15,10 +15,31 @@ class AxisScheduleProjection:
     is_completed: bool
 
 
+@dataclass(frozen=True)
+class AxisCategoryOption:
+    category_id: int
+    name: str
+    color: str
+
+
 class ScheduleAxisService:
     MIN_RANGE_HOURS = 24.0
     MAX_RANGE_HOURS = 365.0 * 24.0
     FALLBACK_COLOR = "#ffffff"
+
+    @classmethod
+    def load_category_options(cls):
+        from src.repositories.category_repository import CategoryRepository
+
+        categories = CategoryRepository().get_active_categories("schedule")
+        return [
+            AxisCategoryOption(
+                category_id=category.id,
+                name=category.name,
+                color=getattr(category, "color", None) or cls.FALLBACK_COLOR,
+            )
+            for category in categories
+        ]
 
     @classmethod
     def load_current_projection(cls, now=None):
