@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
     QSpinBox,
     QLabel,
     QLineEdit,
+    QTableView,
 )
 from PyQt6.QtCore import (
     Qt,
@@ -119,11 +120,19 @@ class CalendarPop(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         self.calendar = HighlightCalendarWidget(self)
+        self.calendar.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.calendar.setFirstDayOfWeek(Qt.DayOfWeek.Monday)
         self.calendar.setGridVisible(False) 
         self.calendar.setVerticalHeaderFormat(QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader)
         layout.addWidget(self.calendar)
         self.calendar.clicked.connect(self._on_date_clicked)
+
+        calendar_view = self.calendar.findChild(
+            QTableView,
+            "qt_calendar_calendarview",
+        )
+        if calendar_view is not None:
+            calendar_view.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
         # 应用初始主题
         self._apply_theme()
