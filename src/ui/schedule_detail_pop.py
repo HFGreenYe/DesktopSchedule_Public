@@ -7,6 +7,8 @@ from PyQt6.QtGui import QPainter, QPainterPath, QColor, QBrush, QLinearGradient,
 from PyQt6.QtSvg import QSvgRenderer
 from ..data.database import db_manager, Schedule
 from ..utils.win_api import apply_24h2_border_fix
+from ..utils.styles import StyleManager
+from ..utils.window_preferences import set_window_pin_state
 from ..config import AppConfig 
 import os
 from datetime import datetime
@@ -118,7 +120,11 @@ class ScheduleDetailPop(QWidget):
             self.c_desc_bg = "#FFFFFF"
             self.c_desc_border = "#FFFFFF"
         else:
-            self.c_desc_bg = "#11c1df"
+            self.c_desc_bg = StyleManager.derive_surface_rgba(
+                AppConfig.COLOR_GRADIENT_START,
+                dark_factor=115,
+                alpha=0.9,
+            )
             self.c_desc_border = "rgba(255, 255, 255, 0.6)"
 
         self.setFixedWidth(320)
@@ -705,19 +711,21 @@ class ScheduleDetailPop(QWidget):
         QTimer.singleShot(0, lambda: self.adjustSize())
 
     def _toggle_pin(self):
-        self.is_pinned = not self.is_pinned
-        flags = self.windowFlags()
+        self.set_pinned(not self.is_pinned)
+
+    def set_pinned(self, enabled):
+        self.is_pinned = bool(enabled)
+        set_window_pin_state(self, self.is_pinned)
         if self.is_pinned:
-            self.setWindowFlags(flags | Qt.WindowType.WindowStaysOnTopHint)
             pin_icon = self._get_icon("pin.svg", QColor(255, 255, 255, 255), 16)
         else:
-            self.setWindowFlags(flags & ~Qt.WindowType.WindowStaysOnTopHint)
             pin_icon = self._get_icon("pin.svg", QColor(255, 255, 255, 150), 16)
-            
-        if not pin_icon.isNull(): 
+
+        if not pin_icon.isNull():
             self.btn_pin.setIcon(QIcon(pin_icon))
-            
-        self.show()
+
+        if self.isVisible():
+            self.raise_()
         apply_24h2_border_fix(int(self.winId()))
 
     def closeEvent(self, event):

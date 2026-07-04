@@ -1,9 +1,36 @@
 # src/ui/calendar_pop.py
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QCalendarWidget, QToolButton, QSpinBox, QLabel, QLineEdit
-from PyQt6.QtCore import Qt, pyqtSignal, QDate, QRect, QSize, QEvent, QPoint
+from PyQt6.QtWidgets import (
+    QWidget,
+    QVBoxLayout,
+    QCalendarWidget,
+    QToolButton,
+    QSpinBox,
+    QLabel,
+    QLineEdit,
+)
+from PyQt6.QtCore import (
+    Qt,
+    pyqtSignal,
+    QDate,
+    QRect,
+    QSize,
+    QEvent,
+    QPoint,
+)
 from PyQt6.QtGui import QPainter, QColor, QBrush, QPen, QIcon, QTextCharFormat
 import datetime
 from ..data.database import db_manager
+from ..config import AppConfig
+from ..utils.styles import StyleManager
+
+
+def _calendar_accent_color():
+    return StyleManager.mix_colors(
+        AppConfig.COLOR_GRADIENT_START,
+        "#ffffff",
+        0.98,
+    )
+
 
 class HighlightCalendarWidget(QCalendarWidget):
     """自定义日历控件：负责在有日程的日期下方画三色小圆点"""
@@ -57,7 +84,7 @@ class HighlightCalendarWidget(QCalendarWidget):
             elif status == "grey":
                 color = QColor("#999999")          
             else:
-                color = QColor("#11c1df")          
+                color = QColor(_calendar_accent_color())
                 
             painter.save()
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -146,9 +173,11 @@ class CalendarPop(QWidget):
         else:
             bg_color, text_color, disable_color = "#ffffff", "#333333", "#cccccc"
 
+        calendar_accent = _calendar_accent_color()
+
         self.calendar.setStyleSheet(f"""
             QCalendarWidget QWidget {{ alternate-background-color: {bg_color};color: {text_color}; }}
-            QCalendarWidget QWidget#qt_calendar_navigationbar {{ background-color: #11c1df; }}
+            QCalendarWidget QWidget#qt_calendar_navigationbar {{ background-color: {calendar_accent}; }}
             
             QCalendarWidget QToolButton {{
                 color: white; background-color: transparent; border: none; 
@@ -158,7 +187,7 @@ class CalendarPop(QWidget):
             QCalendarWidget QToolButton:hover {{ background-color: rgba(0, 0, 0, 0.15); }}
             QCalendarWidget QToolButton:pressed {{ background-color: rgba(0, 0, 0, 0.3); }}
             
-            QCalendarWidget QMenu {{ background-color: {bg_color}; color: {text_color}; border: 1px solid #11c1df; }}
+            QCalendarWidget QMenu {{ background-color: {bg_color}; color: {text_color}; border: 1px solid {calendar_accent}; }}
             
             /* 让箭头与文字紧凑聚拢 */
             QCalendarWidget QSpinBox {{ 
@@ -187,7 +216,7 @@ class CalendarPop(QWidget):
             
             QCalendarWidget QAbstractItemView:enabled {{
                 background-color: {bg_color}; 
-                selection-background-color: #11c1df; selection-color: white; 
+                selection-background-color: {calendar_accent}; selection-color: white;
                 font-family: 'Microsoft YaHei'; font-size: 13px; outline: 0px;
             }}
             QCalendarWidget QAbstractItemView:disabled {{ color: {disable_color}; }}
@@ -219,6 +248,9 @@ class CalendarPop(QWidget):
             if event.type() == QEvent.Type.MouseButtonDblClick and event.button() == Qt.MouseButton.LeftButton:
                 self._toggle_theme()  # 触发主题切换
                 return True
+            elif event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+                self.drag_pos = event.globalPosition().toPoint() - self.pos()
+                return True
             elif event.type() == QEvent.Type.MouseMove and self.drag_pos is not None:
                 self.move(event.globalPosition().toPoint() - self.drag_pos)
                 return True
@@ -236,7 +268,7 @@ class CalendarPop(QWidget):
         painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 8, 8)
 
     def show_at(self, pos, current_date=None):
-        self._update_today_highlight()
+        self._apply_theme()
         self.calendar.update_schedule_dates() 
         if current_date:
             self.calendar.setSelectedDate(QDate(current_date.year, current_date.month, current_date.day))

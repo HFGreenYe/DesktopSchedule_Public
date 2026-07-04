@@ -146,7 +146,6 @@ class _AxisSchedulePreview(QFrame):
 
 
 class _ScheduleAxisCanvas(QWidget):
-    AXIS_COLOR = "#333333"
     hover_requested = pyqtSignal(object, object)
     item_clicked = pyqtSignal(object, object)
 
@@ -218,7 +217,7 @@ class _ScheduleAxisCanvas(QWidget):
         axis_y = float(self.height()) * 0.7 + self.vertical_offset
         origin_x = self._virtual_to_screen(self.virtual_axis_width / 2.0, left, right)
 
-        axis_color = QColor(self.AXIS_COLOR)
+        axis_color = QColor(AppConfig.COLOR_GRADIENT_START)
         painter.setPen(QPen(axis_color, 1.5))
         painter.drawLine(QPoint(round(left), round(axis_y)), QPoint(round(right), round(axis_y)))
         painter.drawLine(QPoint(round(left), round(axis_y)), QPoint(round(left + 6), round(axis_y - 4)))
@@ -264,8 +263,12 @@ class _ScheduleAxisCanvas(QWidget):
 
         markers = self._layout_markers(left, right, axis_y)
         hovered_marker = None
+        painter.save()
+        painter.setClipRect(
+            QRectF(left, canvas_rect.top(), right - left, canvas_rect.height())
+        )
         for marker in markers:
-            self._draw_marker(painter, marker)
+            self._draw_marker(painter, marker, left, right)
             if marker["projection"] is self._hovered_projection:
                 hovered_marker = marker
         if hovered_marker is not None:
@@ -276,6 +279,7 @@ class _ScheduleAxisCanvas(QWidget):
                 left,
                 right,
             )
+        painter.restore()
 
     def _layout_markers(self, left, right, axis_y):
         occupied_by_status = {False: [], True: []}
@@ -299,8 +303,16 @@ class _ScheduleAxisCanvas(QWidget):
             )
             x1 = self._virtual_to_screen(virtual_x1, left, right)
             x2 = self._virtual_to_screen(virtual_x2, left, right)
+            x1, x2 = min(x1, x2), max(x1, x2)
+            if projection.is_interval:
+                if x2 < left or x1 > right:
+                    continue
+                x1 = max(left, x1)
+                x2 = min(right, x2)
+            elif not left <= x1 <= right:
+                continue
             height = self.MARKER_HEIGHTS[projection.importance]
-            raw_markers.append((min(x1, x2), max(x1, x2), height, projection))
+            raw_markers.append((x1, x2, height, projection))
         raw_markers.sort(key=lambda item: (item[0], item[1]))
 
         markers = []
@@ -355,7 +367,7 @@ class _ScheduleAxisCanvas(QWidget):
             marker["y"] = lane_centers_by_status[completed][marker["lane_index"]]
         return markers
 
-    def _draw_marker(self, painter, marker):
+    def _draw_marker(self, painter, marker, left, right):
         x1 = marker["x1"]
         x2 = marker["x2"]
         y = marker["y"]
@@ -397,7 +409,10 @@ class _ScheduleAxisCanvas(QWidget):
             )
 
         hit_path = QPainterPath()
-        hit_path.addRect(marker_rect.adjusted(-4, -4, 4, 4))
+        hit_rect = marker_rect.adjusted(-4, -4, 4, 4)
+        hit_rect.setLeft(max(left, hit_rect.left()))
+        hit_rect.setRight(min(right, hit_rect.right()))
+        hit_path.addRect(hit_rect)
 
         self.hit_regions.append((hit_path, projection))
 
@@ -414,7 +429,7 @@ class _ScheduleAxisCanvas(QWidget):
         if projection.is_interval:
             guide_xs.append(marker["x2"])
 
-        guide_color = QColor(self.AXIS_COLOR)
+        guide_color = QColor(AppConfig.COLOR_GRADIENT_START)
         guide_color.setAlpha(150)
         painter.save()
         painter.setPen(QPen(guide_color, 1.0, Qt.PenStyle.DashLine))
@@ -473,7 +488,7 @@ class _ScheduleAxisCanvas(QWidget):
             label_rects[0].moveRight(max(left, guide_xs[0] - 3.0))
             label_rects[1].moveLeft(min(right - label_rects[1].width(), guide_xs[1] + 3.0))
 
-        painter.setPen(QColor(self.AXIS_COLOR))
+        painter.setPen(QColor(AppConfig.COLOR_GRADIENT_START))
         for label_rect, label in zip(label_rects, labels):
             painter.drawText(label_rect, Qt.AlignmentFlag.AlignCenter, label)
 

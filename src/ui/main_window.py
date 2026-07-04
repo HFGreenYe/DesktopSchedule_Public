@@ -113,7 +113,14 @@ class MainWindow(FramelessMainWindow):
         self.week_window.restore_requested.connect(self.restore_from_week_view)
         self.week_window.view_selected.connect(self.switch_view)
         self.week_window.request_schedule_detail.connect(
-            lambda data: self.page_dashboard._show_detail_popup(data, source_view="week")
+            lambda data: self.page_dashboard._show_detail_popup(
+                data,
+                source_view="week",
+                initial_pinned=bool(
+                    self.week_window.windowFlags()
+                    & Qt.WindowType.WindowStaysOnTopHint
+                ),
+            )
         )
         self.week_window.day_double_clicked.connect(self.jump_to_date)
         self.week_window.suspend_requested.connect(self.switch_week_to_suspend)
@@ -435,6 +442,7 @@ class MainWindow(FramelessMainWindow):
     def open_schedule_detail_from_axis(self, schedule_data):
         """Open the shared detail popup for the global axis board."""
         popup = ScheduleDetailPop(schedule_data, source_view="axis")
+        popup.set_pinned(bool(self.axis_board and self.axis_board.is_pinned))
         popup.req_edit_time.connect(
             lambda data: self.go_to_time_picker_for_edit(data, "axis")
         )

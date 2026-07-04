@@ -609,7 +609,12 @@ class DashboardView(QWidget):
                 self.list_layout.insertWidget(index, card)
 
     # 弹出并管理详情面板
-    def _show_detail_popup(self, schedule_data, source_view="dashboard"):
+    def _show_detail_popup(
+        self,
+        schedule_data,
+        source_view="dashboard",
+        initial_pinned=None,
+    ):
         for p in self.open_popups:
             if p.data.id == schedule_data.id:
                 p.show()
@@ -619,6 +624,11 @@ class DashboardView(QWidget):
         
         # 把参数传给弹窗实例
         pop = ScheduleDetailPop(schedule_data, source_view=source_view)
+        if initial_pinned is None:
+            initial_pinned = bool(
+                self.window().windowFlags() & Qt.WindowType.WindowStaysOnTopHint
+            )
+        pop.set_pinned(initial_pinned)
         pop.schedule_updated.connect(self.refresh_data)
         pop.schedule_updated.connect(self.req_refresh_all.emit) 
         

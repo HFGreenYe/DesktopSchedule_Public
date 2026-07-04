@@ -95,8 +95,6 @@ class TimePickerView(QWidget):
                 font-size: 16px;
                 font-weight: bold;
                 font-family: 'Microsoft YaHei';
-                text-align: left;
-                padding-left: 15px;
             }
             QPushButton:hover { background-color: rgba(255, 255, 255, 0.28); }
         """)
@@ -344,7 +342,7 @@ class TimePickerView(QWidget):
 
     def _update_date_label(self):
         text = self.current_date.toString("yyyy年MM月dd日")
-        self.btn_date.setText(f"  {text}")
+        self.btn_date.setText(text)
 
     def _on_switch_toggled(self, checked):
         if checked:
