@@ -11,6 +11,7 @@ from src.utils.window_preferences import (
     set_primary_pin_preference,
     set_window_pin_state,
 )
+from src.utils.startup_manager import is_startup_enabled, set_startup_enabled
 
 # =================================================================
 class IOSSwitch(QWidget):
@@ -540,7 +541,13 @@ class SharedMoreMenu(QMenu):
                 lambda checked: None,
                 icon_path="assets/icons/festival.svg",
             )
-            add_menu_separator()
+        self.chk_startup = add_checkable_option(
+            " 开机自启",
+            is_startup_enabled(),
+            self._on_startup_toggled,
+            icon_path="assets/icons/Turn_on.svg",
+        )
+        add_menu_separator()
         add_centered_btn("坐标看板", "axis", self._on_show_axis)
         add_centered_btn("待办显示", "todo", self._on_show_todo)
         add_centered_btn("修改字体", "theme", self._on_modify_font, icon_color="#333333")
@@ -731,6 +738,11 @@ class SharedMoreMenu(QMenu):
         self.chk_pin.setChecked(is_pinned)
         self.chk_pin.blockSignals(False)
 
+        startup_enabled = is_startup_enabled()
+        self.chk_startup.blockSignals(True)
+        self.chk_startup.setChecked(startup_enabled)
+        self.chk_startup.blockSignals(False)
+
         # 锚定按钮左下角弹出
         pos = self.anchor_button.mapToGlobal(self.anchor_button.rect().bottomLeft())
         pos.setY(pos.y() + 6)
@@ -787,6 +799,16 @@ class SharedMoreMenu(QMenu):
 
         # 稍微延迟 10ms 执行窗口重建，确保前面的 self.close() 已经彻底生效
         QTimer.singleShot(10, _do_toggle)
+
+    def _on_startup_toggled(self, checked):
+        try:
+            set_startup_enabled(checked)
+        except OSError as exc:
+            print(f"开机自启设置失败：{exc}")
+        actual = is_startup_enabled()
+        self.chk_startup.blockSignals(True)
+        self.chk_startup.setChecked(actual)
+        self.chk_startup.blockSignals(False)
         
     def _on_export_schedule(self):
         print(f"[{self.parent_window.__class__.__name__}] 点击了导出日程")

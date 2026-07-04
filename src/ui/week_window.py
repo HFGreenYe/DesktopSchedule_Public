@@ -1,9 +1,11 @@
 # src/ui/week_window.py
 #import requests
+import time
+
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                              QPushButton, QFrame, QToolButton, QLineEdit, QSizePolicy, QStackedWidget, QScrollArea)
 from PyQt6.QtCore import Qt, pyqtSignal, QDate, QTime, QTimer, QRectF, QSize
-from PyQt6.QtGui import QPainter, QPainterPath, QColor, QBrush, QLinearGradient, QIcon, QPixmap
+from PyQt6.QtGui import QPainter, QPainterPath, QColor, QBrush, QLinearGradient, QIcon, QPixmap, QCursor
 from PyQt6.QtSvg import QSvgRenderer
 from qframelesswindow import FramelessMainWindow
 from zhdate import ZhDate
@@ -36,6 +38,8 @@ class WeekScheduleCard(QFrame):
     req_status = pyqtSignal(int, int) # id, status
     req_pin = pyqtSignal(int, bool)   # id, is_pinned
     req_delete = pyqtSignal(int)      # id
+    drag_started = pyqtSignal(object)
+    drag_finished = pyqtSignal(object, object)
 
     def __init__(self, schedule_obj, parent=None):
         super().__init__(parent)
@@ -159,7 +163,9 @@ class WeekScheduleCard(QFrame):
             self.lbl_time.hide()
             if hasattr(self, 'icon_pin'): self.icon_pin.hide()
             
-            drag.exec(Qt.DropAction.MoveAction)
+            self.drag_started.emit(self)
+            drag_result = drag.exec(Qt.DropAction.MoveAction)
+            self.drag_finished.emit(self, drag_result)
             
             # 恢复样式和组件
             self.setStyleSheet(original_style)
@@ -225,6 +231,13 @@ class WeekWindow(FramelessMainWindow):
 
         self.current_selected_date = QDate.currentDate()
         self.current_monday = self._get_monday(self.current_selected_date)
+        self._active_drag_card = None
+        self._drag_edge_direction = 0
+        self._drag_edge_entered_at = 0.0
+        self._drag_last_turn_at = 0.0
+        self._drag_edge_timer = QTimer(self)
+        self._drag_edge_timer.setInterval(60)
+        self._drag_edge_timer.timeout.connect(self._check_drag_week_edge)
         # 编辑模式状态位，控制背景渲染！
         self.is_edit_mode = False 
 
@@ -990,6 +1003,12 @@ class WeekWindow(FramelessMainWindow):
     def load_week_schedules_from_db(self):
         """直接从数据库读取本周所有数据，并渲染到 7 个面板"""
         has_any_schedule = False
+        active_drag_card = self._active_drag_card
+        active_drag_id = (
+            getattr(getattr(active_drag_card, "data", None), "id", None)
+            if active_drag_card is not None
+            else None
+        )
         
         # 1. 精准清理旧卡片
         for panel in self.bottom_panels:
@@ -999,7 +1018,13 @@ class WeekWindow(FramelessMainWindow):
                 if item.widget() and isinstance(item.widget(), WeekScheduleCard):
                     widget = item.widget()
                     layout.removeWidget(widget)
-                    widget.deleteLater()
+                    if widget is active_drag_card:
+                        widget.setParent(self.page_week_board)
+                        widget.move(-10000, -10000)
+                        widget.show()
+                    else:
+                        widget.deleteLater()
+            panel.current_drag_widget = active_drag_card
 
         # 2. 遍历本周 7 天，向数据库查询
         for day_index in range(7):
@@ -1014,11 +1039,15 @@ class WeekWindow(FramelessMainWindow):
                 valid_schedules = ScheduleSortService.sort_for_week_view(valid_schedules)
                 
                 for sched_obj in valid_schedules:
+                    if active_drag_id is not None and sched_obj.id == active_drag_id:
+                        continue
                     card = WeekScheduleCard(sched_obj)
                     card.clicked.connect(self.request_schedule_detail.emit)
                     card.req_status.connect(self._handle_schedule_status_change)
                     card.req_pin.connect(self._handle_schedule_pin_change)
                     card.req_delete.connect(self._handle_schedule_delete)
+                    card.drag_started.connect(self._begin_card_drag)
+                    card.drag_finished.connect(self._finish_card_drag)
                     panel_layout.insertWidget(panel_layout.count() - 1, card)
 
         self.update_placeholder_visibility(has_any_schedule)
@@ -1075,6 +1104,81 @@ class WeekWindow(FramelessMainWindow):
 
     def _go_next_week(self):
         self.current_monday = self.current_monday.addDays(7)
+        self.refresh_week_data()
+
+    def _begin_card_drag(self, card):
+        self._active_drag_card = card
+        self._drag_edge_direction = 0
+        self._drag_edge_entered_at = 0.0
+        self._drag_last_turn_at = 0.0
+        for panel in self.bottom_panels:
+            panel.current_drag_widget = card
+        self._drag_edge_timer.start()
+
+    def _finish_card_drag(self, card, result):
+        if card is not self._active_drag_card:
+            return
+        if result != Qt.DropAction.MoveAction:
+            QTimer.singleShot(0, lambda: self._cancel_card_drag(card))
+            return
+        QTimer.singleShot(250, lambda: self._cancel_card_drag(card))
+
+    def _cancel_card_drag(self, card):
+        if card is not self._active_drag_card:
+            return
+        self._clear_card_drag_state(delete_card=True)
+        self.refresh_week_data()
+
+    def _clear_card_drag_state(self, delete_card=False):
+        card = self._active_drag_card
+        self._active_drag_card = None
+        self._drag_edge_timer.stop()
+        self._drag_edge_direction = 0
+        self._drag_edge_entered_at = 0.0
+        self._drag_last_turn_at = 0.0
+        for panel in self.bottom_panels:
+            panel.current_drag_widget = None
+        if delete_card and card is not None:
+            card.hide()
+            card.deleteLater()
+
+    def _check_drag_week_edge(self):
+        if self._active_drag_card is None:
+            self._drag_edge_timer.stop()
+            return
+
+        local_pos = self.mapFromGlobal(QCursor.pos())
+        if local_pos.y() < -30 or local_pos.y() > self.height() + 30:
+            direction = 0
+        elif local_pos.x() <= 28:
+            direction = -1
+        elif local_pos.x() >= self.width() - 28:
+            direction = 1
+        else:
+            direction = 0
+
+        now = time.monotonic()
+        if direction != self._drag_edge_direction:
+            self._drag_edge_direction = direction
+            self._drag_edge_entered_at = now if direction else 0.0
+            return
+        if direction == 0:
+            return
+        if now - self._drag_edge_entered_at < 0.45:
+            return
+        if self._drag_last_turn_at and now - self._drag_last_turn_at < 0.7:
+            return
+
+        self._drag_last_turn_at = now
+        self._drag_edge_entered_at = now
+        self._turn_week_during_drag(direction)
+
+    def _turn_week_during_drag(self, direction):
+        if self._active_drag_card is None or direction not in (-1, 1):
+            return
+        days = direction * 7
+        self.current_monday = self.current_monday.addDays(days)
+        self.current_selected_date = self.current_selected_date.addDays(days)
         self.refresh_week_data()
 
     def _on_day_clicked(self, qdate):
@@ -1259,6 +1363,7 @@ class WeekWindow(FramelessMainWindow):
                 
         dragged_item = next((s for s in schedules if s.id == dragged_id), None)
         if not dragged_item: 
+            self._clear_card_drag_state(delete_card=True)
             self.refresh_week_data()
             return
 
@@ -1270,6 +1375,7 @@ class WeekWindow(FramelessMainWindow):
         today = datetime.now().date()
         if target_date < today:
             self.show_toast("无法将日程移动到过去的日期！")
+            self._clear_card_drag_state(delete_card=True)
             self.refresh_week_data() # 刷新看板，让被错误拖拽的卡片弹回原位
             return
         original_date = dragged_item.start_time.date() if dragged_item.start_time else (dragged_item.end_time.date() if dragged_item.end_time else None)
@@ -1321,6 +1427,7 @@ class WeekWindow(FramelessMainWindow):
             new_order = datetime.now().timestamp()
             
         db_manager.update_schedule_fields(dragged_item.id, sort_order=new_order)
-        
+
+        self._clear_card_drag_state()
         self.refresh_week_data()
         self.schedule_updated.emit(None) # 同步让主界面也刷新

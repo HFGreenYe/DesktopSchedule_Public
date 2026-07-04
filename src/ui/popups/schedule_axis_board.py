@@ -1,17 +1,13 @@
 import datetime
 
 from PyQt6.QtCore import (
-    QEasingCurve,
     QEvent,
     QPoint,
     QPointF,
-    QPropertyAnimation,
     QRect,
     QRectF,
     QSize,
-    QTimer,
     Qt,
-    QVariantAnimation,
     pyqtSignal,
 )
 from PyQt6.QtGui import (
@@ -28,14 +24,11 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtWidgets import (
     QButtonGroup,
-    QColorDialog,
     QFrame,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
     QRadioButton,
-    QScrollArea,
     QSizePolicy,
     QSpinBox,
     QStackedWidget,
@@ -45,6 +38,7 @@ from PyQt6.QtWidgets import (
 
 from src.config import AppConfig
 from src.services.schedule_axis_service import ScheduleAxisService
+from src.ui.common.themed_color_dialog import ThemedColorDialog
 from src.ui.utils.icon_loader import load_colored_svg_pixmap
 from src.utils.window_preferences import set_window_pin_state
 
@@ -636,6 +630,35 @@ class _ScheduleAxisCanvas(QWidget):
         self._clamp_view_center(left, right)
 
 
+class _ElidedLabel(QLabel):
+    def __init__(self, text, parent=None):
+        super().__init__(parent)
+        self._full_text = str(text)
+        self.setToolTip(self._full_text)
+        self.setMinimumWidth(0)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Preferred,
+        )
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.setText(
+            self.fontMetrics().elidedText(
+                self._full_text,
+                Qt.TextElideMode.ElideRight,
+                max(self.width() - 2, 0),
+            )
+        )
+
+
+class _AxisVisualOption:
+    def __init__(self, option_id, name, color):
+        self.category_id = option_id
+        self.name = name
+        self.color = color
+
+
 class _AxisCategoryRow(QWidget):
     def __init__(self, category, parent=None):
         super().__init__(parent)
@@ -647,8 +670,7 @@ class _AxisCategoryRow(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(5)
 
-        self.name_label = QLabel(category.name)
-        self.name_label.setToolTip(category.name)
+        self.name_label = _ElidedLabel(category.name)
         self.name_label.setStyleSheet(
             "color: #333333; font-size: 10px; background: transparent;"
         )
@@ -677,6 +699,9 @@ class _AxisCategoryRow(QWidget):
         layout.addWidget(self.alpha_spin)
         self._apply_color_button_style()
 
+    def set_compact_spacing(self, spacing):
+        self.layout().setSpacing(max(2, int(spacing)))
+
     def _apply_color_button_style(self):
         color = QColor(self.color_value)
         if not color.isValid():
@@ -690,10 +715,11 @@ class _AxisCategoryRow(QWidget):
         )
 
     def _choose_color(self):
-        selected = QColorDialog.getColor(
+        selected = ThemedColorDialog.get_color(
             QColor(self.color_value),
-            self,
             "选择清单颜色",
+            AppConfig.COLOR_GRADIENT_START,
+            self,
         )
         if selected.isValid():
             self.color_value = selected.name()
@@ -701,238 +727,283 @@ class _AxisCategoryRow(QWidget):
 
 
 class _AxisCategoryGrid(QWidget):
-    ROW_HEIGHT = 25
-    COLUMN_WIDTH = 154
+    ROW_HEIGHT = 22
+    ROW_GAP = 3
+    LINE_WIDTH = 2
 
     def __init__(self, categories, parent=None):
         super().__init__(parent)
         self.rows = [_AxisCategoryRow(category, self) for category in categories]
         self.column_lines = []
-        self._rows_per_column = 0
-        self.grid = QGridLayout(self)
-        self.grid.setContentsMargins(0, 0, 0, 0)
-        self.grid.setHorizontalSpacing(8)
-        self.grid.setVerticalSpacing(3)
-        self.setFixedSize(1, 1)
-
-    def set_viewport_extent(self, width, height):
-        height = max(int(height), self.ROW_HEIGHT)
-        rows_per_column = max(1, height // self.ROW_HEIGHT)
-        if rows_per_column != self._rows_per_column:
-            self._rows_per_column = rows_per_column
-            for row_widget in self.rows:
-                self.grid.removeWidget(row_widget)
-            for line in self.column_lines:
-                self.grid.removeWidget(line)
-                line.deleteLater()
-            self.column_lines.clear()
-
-            column_count = max(
-                1,
-                (len(self.rows) + rows_per_column - 1) // rows_per_column,
-            )
-            for column in range(column_count):
-                line = QFrame(self)
-                line.setFixedWidth(2)
-                line.setSizePolicy(
-                    QSizePolicy.Policy.Fixed,
-                    QSizePolicy.Policy.Expanding,
-                )
-                line.setStyleSheet(
-                    f"background-color: {AppConfig.COLOR_GRADIENT_START}; "
-                    "border: none; border-radius: 1px;"
-                )
-                self.column_lines.append(line)
-                self.grid.addWidget(
-                    line,
-                    0,
-                    column * 2,
-                    rows_per_column,
-                    1,
-                )
-            for index, row_widget in enumerate(self.rows):
-                row = index % rows_per_column
-                column = index // rows_per_column
-                row_widget.setFixedWidth(self.COLUMN_WIDTH)
-                self.grid.addWidget(row_widget, row, column * 2 + 1)
-
-        column_count = max(
-            1,
-            (len(self.rows) + rows_per_column - 1) // rows_per_column,
+        self.overflow_label = QLabel("…", self)
+        self.overflow_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.overflow_label.setStyleSheet(
+            "color: #555555; font-size: 15px; font-weight: bold; "
+            "background: transparent;"
         )
-        content_width = max(int(width), column_count * (self.COLUMN_WIDTH + 8))
-        self.setFixedSize(content_width, height)
+        self.overflow_label.hide()
+        self.empty_label = QLabel("暂无清单", self)
+        self.empty_label.setStyleSheet(
+            "color: #777777; font-size: 10px; background: transparent;"
+        )
+        self.empty_label.hide()
+        self._rows_per_column = 1
+        self._visible_columns = 1
+        self._overflowed = False
+
+    @classmethod
+    def rows_per_column(cls, height):
+        pitch = cls.ROW_HEIGHT + cls.ROW_GAP
+        return max(1, (max(int(height), cls.ROW_HEIGHT) + cls.ROW_GAP) // pitch)
+
+    def needed_columns(self, height):
+        rows_per_column = self.rows_per_column(height)
+        return max(1, (len(self.rows) + rows_per_column - 1) // rows_per_column)
+
+    def _ensure_lines(self, count):
+        while len(self.column_lines) < count:
+            line = QFrame(self)
+            line.setStyleSheet(
+                f"background-color: {AppConfig.COLOR_GRADIENT_START}; "
+                "border: none; border-radius: 1px;"
+            )
+            self.column_lines.append(line)
+
+    def reflow(
+        self,
+        width,
+        height,
+        visible_columns,
+        column_width,
+        column_gap,
+        line_gap,
+    ):
+        width = max(1, int(width))
+        height = max(self.ROW_HEIGHT, int(height))
+        visible_columns = max(1, int(visible_columns))
+        column_width = max(1, int(column_width))
+        column_gap = max(0, int(column_gap))
+        line_gap = max(2, int(line_gap))
+        rows_per_column = self.rows_per_column(height)
+        capacity = visible_columns * rows_per_column
+        overflowed = len(self.rows) > capacity
+        visible_row_count = min(
+            len(self.rows),
+            max(0, capacity - (1 if overflowed else 0)),
+        )
+
+        self._rows_per_column = rows_per_column
+        self._visible_columns = visible_columns
+        self._overflowed = overflowed
+        self.setGeometry(0, 0, width, height)
+        self._ensure_lines(visible_columns)
+
+        for index, row_widget in enumerate(self.rows):
+            if index >= visible_row_count:
+                row_widget.hide()
+                continue
+            column = index // rows_per_column
+            row = index % rows_per_column
+            column_x = column * (column_width + column_gap)
+            row_x = column_x + self.LINE_WIDTH + line_gap
+            row_width = max(1, column_width - self.LINE_WIDTH - line_gap)
+            row_widget.set_compact_spacing(max(2, line_gap - 1))
+            row_widget.setGeometry(
+                row_x,
+                row * (self.ROW_HEIGHT + self.ROW_GAP),
+                row_width,
+                self.ROW_HEIGHT,
+            )
+            row_widget.show()
+
+        if overflowed:
+            overflow_index = visible_row_count
+            column = overflow_index // rows_per_column
+            row = overflow_index % rows_per_column
+            column_x = column * (column_width + column_gap)
+            self.overflow_label.setGeometry(
+                column_x + self.LINE_WIDTH + line_gap,
+                row * (self.ROW_HEIGHT + self.ROW_GAP),
+                max(1, column_width - self.LINE_WIDTH - line_gap),
+                self.ROW_HEIGHT,
+            )
+            self.overflow_label.setToolTip(
+                f"还有 {len(self.rows) - visible_row_count} 个清单未显示"
+            )
+            self.overflow_label.show()
+        else:
+            self.overflow_label.hide()
+
+        if not self.rows:
+            self.empty_label.setGeometry(
+                self.LINE_WIDTH + line_gap,
+                0,
+                max(1, column_width - self.LINE_WIDTH - line_gap),
+                self.ROW_HEIGHT,
+            )
+            self.empty_label.show()
+        else:
+            self.empty_label.hide()
+
+        counts = [0] * visible_columns
+        for index in range(visible_row_count):
+            counts[index // rows_per_column] += 1
+        if overflowed:
+            counts[visible_row_count // rows_per_column] += 1
+        if not self.rows:
+            counts[0] = 1
+
+        for index, line in enumerate(self.column_lines):
+            if index >= visible_columns:
+                line.hide()
+                continue
+            item_count = counts[index]
+            if item_count <= 0:
+                line.hide()
+                continue
+            line_height = (
+                item_count * self.ROW_HEIGHT
+                + max(item_count - 1, 0) * self.ROW_GAP
+            )
+            line.setGeometry(
+                index * (column_width + column_gap),
+                0,
+                self.LINE_WIDTH,
+                line_height,
+            )
+            line.show()
 
 
 class _AxisColorPanel(QWidget):
+    TITLE_HEIGHT = 17
+    TITLE_GAP = 3
+
     def __init__(self, categories, heading_style, parent=None):
         super().__init__(parent)
         self.category_count = len(categories)
-        estimated_columns = max(1, (self.category_count + 5) // 6)
-        self.setFixedWidth(min(336, max(164, estimated_columns * 164)))
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(3)
-
-        title = QLabel("颜色")
-        title.setStyleSheet(heading_style)
-        layout.addWidget(title)
-
-        self.scroll = QScrollArea()
-        self.scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self.scroll.setWidgetResizable(False)
-        self.scroll.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        axis_options = (
+            _AxisVisualOption("axis", "轴体", AppConfig.COLOR_GRADIENT_START),
+            _AxisVisualOption("font", "字体", "#333333"),
         )
-        self.scroll.setVerticalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        self.axis_title_label = QLabel("数轴", self)
+        self.axis_title_label.setStyleSheet(heading_style)
+        self.axis_grid = _AxisCategoryGrid(axis_options, self)
+        self.category_title_label = QLabel("清单", self)
+        self.category_title_label.setStyleSheet(heading_style)
+        self.category_grid = _AxisCategoryGrid(categories, self)
+
+    def _category_grid_y(self):
+        axis_rows_height = (
+            2 * _AxisCategoryGrid.ROW_HEIGHT + _AxisCategoryGrid.ROW_GAP
         )
-        self.scroll.setStyleSheet(
-            "QScrollArea { background: transparent; border: none; } "
-            "QScrollBar:horizontal { height: 7px; background: transparent; } "
-            "QScrollBar::handle:horizontal { background: rgba(0,0,0,0.2); "
-            "border-radius: 3px; min-width: 20px; }"
-        )
-        self.category_grid = _AxisCategoryGrid(categories)
-        self.scroll.setWidget(self.category_grid)
-        layout.addWidget(self.scroll, 1)
-        self._schedule_grid_sync()
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self._schedule_grid_sync()
-
-    def showEvent(self, event):
-        super().showEvent(event)
-        self._schedule_grid_sync()
-
-    def _schedule_grid_sync(self):
-        QTimer.singleShot(0, self._sync_grid_extent)
-
-    def _sync_grid_extent(self):
-        viewport = self.scroll.viewport()
-        self.category_grid.set_viewport_extent(
-            viewport.width(),
-            viewport.height(),
+        return (
+            self.TITLE_HEIGHT
+            + self.TITLE_GAP
+            + axis_rows_height
+            + 5
+            + self.TITLE_HEIGHT
+            + self.TITLE_GAP
         )
 
+    def needed_columns(self, height):
+        grid_height = max(
+            _AxisCategoryGrid.ROW_HEIGHT,
+            int(height) - self._category_grid_y(),
+        )
+        return self.category_grid.needed_columns(grid_height)
 
-class _AxisSettingsPanel(QWidget):
-    def __init__(self, categories, parent=None):
+    def set_layout_density(
+        self,
+        width,
+        height,
+        visible_columns,
+        column_width,
+        column_gap,
+        line_gap,
+    ):
+        self.resize(max(1, int(width)), max(1, int(height)))
+        self.axis_title_label.setGeometry(0, 0, self.width(), self.TITLE_HEIGHT)
+        axis_grid_y = self.TITLE_HEIGHT + self.TITLE_GAP
+        axis_grid_height = (
+            2 * _AxisCategoryGrid.ROW_HEIGHT + _AxisCategoryGrid.ROW_GAP
+        )
+        self.axis_grid.reflow(
+            self.width(),
+            axis_grid_height,
+            1,
+            column_width,
+            column_gap,
+            line_gap,
+        )
+        self.axis_grid.move(0, axis_grid_y)
+        category_title_y = axis_grid_y + axis_grid_height + 5
+        self.category_title_label.setGeometry(
+            0,
+            category_title_y,
+            self.width(),
+            self.TITLE_HEIGHT,
+        )
+        grid_y = self._category_grid_y()
+        self.category_grid.reflow(
+            self.width(),
+            max(_AxisCategoryGrid.ROW_HEIGHT, self.height() - grid_y),
+            visible_columns,
+            column_width,
+            column_gap,
+            line_gap,
+        )
+        self.category_grid.move(0, grid_y)
+
+
+class _AxisOptionColumn(QWidget):
+    TITLE_HEIGHT = 17
+    GROUP_GAP = 5
+
+    def __init__(self, state, state_changed, accent, heading_style, parent=None):
         super().__init__(parent)
-        self.state = {
-            "direction": "both",
-            "range": "month",
-        }
+        self.state = state
+        self._state_changed = state_changed
         self._button_groups = []
-        accent = AppConfig.COLOR_GRADIENT_START
-        heading_style = (
-            "color: #333333; font-size: 11px; font-weight: bold; "
-            "background: transparent;"
+        self.range_title = QLabel("范围", self)
+        self.range_title.setStyleSheet(heading_style)
+        self.time_title = QLabel("跨度", self)
+        self.time_title.setStyleSheet(heading_style)
+        self.range_line = self._create_line(accent)
+        self.time_line = self._create_line(accent)
+        self.direction_buttons = self._create_buttons(
+            "direction",
+            (
+                ("future", "未来"),
+                ("both", "未来&&过去"),
+                ("past", "过去"),
+            ),
+            "both",
+            accent,
+        )
+        self.range_buttons = self._create_buttons(
+            "range",
+            (
+                ("day", "一天"),
+                ("week", "一周"),
+                ("two_weeks", "两周"),
+                ("month", "一月"),
+                ("year", "一年"),
+            ),
+            "month",
+            accent,
         )
 
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(12, 8, 12, 10)
-        outer.setSpacing(4)
-
-        title = QLabel("显示设置")
-        title.setStyleSheet(
-            "color: #222222; font-size: 15px; font-weight: bold; "
-            "background: transparent;"
-        )
-        outer.addWidget(title)
-
-        body = QHBoxLayout()
-        body.setContentsMargins(0, 0, 0, 0)
-        body.setSpacing(12)
-
-        range_panel = QWidget()
-        range_panel.setFixedWidth(132)
-        range_layout = QVBoxLayout(range_panel)
-        range_layout.setContentsMargins(0, 0, 0, 0)
-        range_layout.setSpacing(1)
-
-        range_title = QLabel("范围")
-        range_title.setStyleSheet(heading_style)
-        range_layout.addWidget(range_title)
-        range_layout.addWidget(
-            self._build_option_group(
-                "direction",
-                (
-                    ("future", "未来"),
-                    ("both", "未来&&过去"),
-                    ("past", "过去"),
-                ),
-                "both",
-                accent,
-            )
-        )
-
-        time_title = QLabel("时间")
-        time_title.setStyleSheet(heading_style)
-        range_layout.addWidget(time_title)
-        range_layout.addWidget(
-            self._build_option_group(
-                "range",
-                (
-                    ("day", "一天"),
-                    ("week", "一周"),
-                    ("two_weeks", "两周"),
-                    ("month", "一月"),
-                    ("year", "一年"),
-                ),
-                "month",
-                accent,
-            )
-        )
-        range_layout.addStretch()
-        body.addWidget(range_panel)
-
-        self.color_panel = _AxisColorPanel(categories, heading_style)
-        body.addWidget(self.color_panel)
-
-        self.preview_frame = QFrame()
-        self.preview_frame.setObjectName("AxisSettingsPreview")
-        self.preview_frame.setSizePolicy(
-            QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Expanding,
-        )
-        self.preview_frame.setStyleSheet(
-            "QFrame#AxisSettingsPreview { background-color: #ffffff; "
-            "border: 1px solid #d8d8d8; border-radius: 5px; }"
-        )
-        preview_layout = QVBoxLayout(self.preview_frame)
-        preview_label = QLabel("效果预览")
-        preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        preview_label.setStyleSheet(
-            "color: #999999; font-size: 11px; background: transparent;"
-        )
-        preview_layout.addWidget(preview_label)
-        body.addWidget(self.preview_frame, 1)
-
-        outer.addLayout(body, 1)
-
-    def _build_option_group(self, state_key, options, selected, accent):
-        container = QWidget()
-        layout = QHBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
-
-        group_line = QFrame()
-        group_line.setFixedWidth(2)
-        group_line.setStyleSheet(
+    def _create_line(self, accent):
+        line = QFrame(self)
+        line.setStyleSheet(
             f"background-color: {accent}; border: none; border-radius: 1px;"
         )
-        layout.addWidget(group_line)
+        return line
 
-        option_layout = QVBoxLayout()
-        option_layout.setContentsMargins(0, 0, 0, 0)
-        option_layout.setSpacing(0)
+    def _create_buttons(self, state_key, options, selected, accent):
         group = QButtonGroup(self)
         group.setExclusive(True)
         self._button_groups.append(group)
-
         radio_style = f"""
             QRadioButton {{
                 color: #333333;
@@ -952,23 +1023,340 @@ class _AxisSettingsPanel(QWidget):
                 background-color: {accent};
             }}
         """
+        buttons = []
         for value, label in options:
-            radio = QRadioButton(label)
-            radio.setFixedHeight(17)
+            radio = QRadioButton(label, self)
             radio.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
             radio.setStyleSheet(radio_style)
             radio.setChecked(value == selected)
             radio.toggled.connect(
-                lambda checked, key=state_key, option=value: self._set_option(
+                lambda checked, key=state_key, option=value: self._state_changed(
                     key,
                     option,
                     checked,
                 )
             )
             group.addButton(radio)
-            option_layout.addWidget(radio)
-        layout.addLayout(option_layout, 1)
-        return container
+            buttons.append(radio)
+        return buttons
+
+    def set_layout_density(self, width, height, line_gap):
+        self.resize(max(1, int(width)), max(1, int(height)))
+        line_gap = max(2, int(line_gap))
+        option_count = len(self.direction_buttons) + len(self.range_buttons)
+        option_space = max(
+            option_count * 15,
+            self.height() - self.TITLE_HEIGHT * 2 - self.GROUP_GAP,
+        )
+        option_pitch = option_space / option_count
+        range_title_y = 0
+        direction_top = range_title_y + self.TITLE_HEIGHT
+        direction_height = option_pitch * len(self.direction_buttons)
+        time_title_y = direction_top + direction_height + self.GROUP_GAP
+        time_top = time_title_y + self.TITLE_HEIGHT
+        time_height = max(1.0, self.height() - time_top)
+
+        self.range_title.setGeometry(0, range_title_y, self.width(), self.TITLE_HEIGHT)
+        self.time_title.setGeometry(
+            0,
+            round(time_title_y),
+            self.width(),
+            self.TITLE_HEIGHT,
+        )
+        self.range_line.setGeometry(
+            0,
+            round(direction_top),
+            2,
+            max(1, round(direction_height)),
+        )
+        self.time_line.setGeometry(
+            0,
+            round(time_top),
+            2,
+            max(1, round(time_height)),
+        )
+
+        button_x = 2 + line_gap
+        button_width = max(1, self.width() - button_x)
+        for index, button in enumerate(self.direction_buttons):
+            center_y = direction_top + option_pitch * (index + 0.5)
+            button_height = min(17, max(13, round(option_pitch - 1)))
+            button.setGeometry(
+                button_x,
+                round(center_y - button_height / 2),
+                button_width,
+                button_height,
+            )
+        time_pitch = time_height / max(len(self.range_buttons), 1)
+        for index, button in enumerate(self.range_buttons):
+            center_y = time_top + time_pitch * (index + 0.5)
+            button_height = min(17, max(13, round(time_pitch - 1)))
+            button.setGeometry(
+                button_x,
+                round(center_y - button_height / 2),
+                button_width,
+                button_height,
+            )
+
+
+class _AxisSettingsPanel(QWidget):
+    OUTER_LEFT = 12
+    OUTER_TOP = 8
+    OUTER_RIGHT = 12
+    OUTER_BOTTOM = 10
+    TITLE_HEIGHT = 20
+    BODY_TOP = 24
+    RANGE_NATURAL_WIDTH = 132
+    RANGE_MIN_WIDTH = 108
+    COLOR_NATURAL_WIDTH = 164
+    COLOR_MIN_WIDTH = 118
+    PANEL_NATURAL_GAP = 12
+    PANEL_MIN_GAP = 6
+    COLUMN_NATURAL_GAP = 8
+    COLUMN_MIN_GAP = 4
+    LINE_NATURAL_GAP = 8
+    LINE_MIN_GAP = 4
+    PREVIEW_MIN_WIDTH = 100
+
+    def __init__(self, categories, parent=None):
+        super().__init__(parent)
+        self.state = {
+            "direction": "both",
+            "range": "month",
+        }
+        accent = AppConfig.COLOR_GRADIENT_START
+        heading_style = (
+            "color: #333333; font-size: 11px; font-weight: bold; "
+            "background: transparent;"
+        )
+
+        self.controls_container = QWidget(self)
+        self.controls_container.setStyleSheet("background: transparent;")
+        self.title_label = QLabel("显示设置", self.controls_container)
+        self.title_label.setStyleSheet(
+            "color: #222222; font-size: 15px; font-weight: bold; "
+            "background: transparent;"
+        )
+        self.range_panel = _AxisOptionColumn(
+            self.state,
+            self._set_option,
+            accent,
+            heading_style,
+            self.controls_container,
+        )
+        self._button_groups = self.range_panel._button_groups
+        self.color_panel = _AxisColorPanel(
+            categories,
+            heading_style,
+            self.controls_container,
+        )
+
+        self.preview_frame = QFrame(self)
+        self.preview_frame.setObjectName("AxisSettingsPreview")
+        self.preview_frame.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+        self.preview_frame.setStyleSheet(
+            "QFrame#AxisSettingsPreview { background-color: #ffffff; "
+            "border: 1px solid #d8d8d8; border-radius: 5px; }"
+        )
+        preview_layout = QVBoxLayout(self.preview_frame)
+        preview_label = QLabel("效果预览")
+        preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        preview_label.setStyleSheet(
+            "color: #999999; font-size: 11px; background: transparent;"
+        )
+        preview_layout.addWidget(preview_label)
+        self._layout_snapshot = {}
+
+    @staticmethod
+    def _interpolate(minimum, natural, factor):
+        return int(minimum + (natural - minimum) * factor)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._relayout()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._relayout()
+
+    def _required_controls_width(
+        self,
+        visible_columns,
+        range_width,
+        color_width,
+        panel_gap,
+        column_gap,
+    ):
+        color_total = (
+            visible_columns * color_width
+            + max(visible_columns - 1, 0) * column_gap
+        )
+        return range_width + panel_gap + color_total
+
+    def _relayout(self):
+        inner_width = max(
+            1,
+            self.width() - self.OUTER_LEFT - self.OUTER_RIGHT,
+        )
+        inner_height = max(
+            1,
+            self.height() - self.OUTER_TOP - self.OUTER_BOTTOM,
+        )
+        body_height = max(1, inner_height - self.BODY_TOP)
+        needed_columns = self.color_panel.needed_columns(body_height)
+        visible_columns = needed_columns
+
+        def required_with_preview(
+            columns,
+            range_width,
+            color_width,
+            panel_gap,
+            column_gap,
+        ):
+            return (
+                self._required_controls_width(
+                    columns,
+                    range_width,
+                    color_width,
+                    panel_gap,
+                    column_gap,
+                )
+                + panel_gap
+                + self.PREVIEW_MIN_WIDTH
+            )
+
+        while visible_columns > 1 and required_with_preview(
+            visible_columns,
+            self.RANGE_MIN_WIDTH,
+            self.COLOR_MIN_WIDTH,
+            self.PANEL_MIN_GAP,
+            self.COLUMN_MIN_GAP,
+        ) > inner_width:
+            visible_columns -= 1
+
+        natural_required = required_with_preview(
+            visible_columns,
+            self.RANGE_NATURAL_WIDTH,
+            self.COLOR_NATURAL_WIDTH,
+            self.PANEL_NATURAL_GAP,
+            self.COLUMN_NATURAL_GAP,
+        )
+        minimum_required = required_with_preview(
+            visible_columns,
+            self.RANGE_MIN_WIDTH,
+            self.COLOR_MIN_WIDTH,
+            self.PANEL_MIN_GAP,
+            self.COLUMN_MIN_GAP,
+        )
+        if natural_required <= inner_width:
+            density = 1.0
+        elif minimum_required >= inner_width:
+            density = 0.0
+        else:
+            density = (inner_width - minimum_required) / (
+                natural_required - minimum_required
+            )
+
+        range_width = self._interpolate(
+            self.RANGE_MIN_WIDTH,
+            self.RANGE_NATURAL_WIDTH,
+            density,
+        )
+        color_width = self._interpolate(
+            self.COLOR_MIN_WIDTH,
+            self.COLOR_NATURAL_WIDTH,
+            density,
+        )
+        panel_gap = self._interpolate(
+            self.PANEL_MIN_GAP,
+            self.PANEL_NATURAL_GAP,
+            density,
+        )
+        column_gap = self._interpolate(
+            self.COLUMN_MIN_GAP,
+            self.COLUMN_NATURAL_GAP,
+            density,
+        )
+        line_gap = self._interpolate(
+            self.LINE_MIN_GAP,
+            self.LINE_NATURAL_GAP,
+            density,
+        )
+        controls_width = self._required_controls_width(
+            visible_columns,
+            range_width,
+            color_width,
+            panel_gap,
+            column_gap,
+        )
+        preview_width = max(
+            1,
+            inner_width - controls_width - panel_gap,
+        )
+
+        self.controls_container.setGeometry(
+            self.OUTER_LEFT,
+            self.OUTER_TOP,
+            controls_width,
+            inner_height,
+        )
+        self.title_label.setGeometry(
+            0,
+            0,
+            controls_width,
+            self.TITLE_HEIGHT,
+        )
+        self.range_panel.setGeometry(
+            0,
+            self.BODY_TOP,
+            range_width,
+            body_height,
+        )
+        self.range_panel.set_layout_density(
+            range_width,
+            body_height,
+            line_gap,
+        )
+        color_x = range_width + panel_gap
+        color_total_width = (
+            visible_columns * color_width
+            + max(visible_columns - 1, 0) * column_gap
+        )
+        self.color_panel.setGeometry(
+            color_x,
+            self.BODY_TOP,
+            color_total_width,
+            body_height,
+        )
+        self.color_panel.set_layout_density(
+            color_total_width,
+            body_height,
+            visible_columns,
+            color_width,
+            column_gap,
+            line_gap,
+        )
+        preview_x = self.OUTER_LEFT + controls_width + panel_gap
+        self.preview_frame.setGeometry(
+            preview_x,
+            self.OUTER_TOP,
+            preview_width,
+            inner_height,
+        )
+        self._layout_snapshot = {
+            "needed_columns": needed_columns,
+            "visible_columns": visible_columns,
+            "range_width": range_width,
+            "color_width": color_width,
+            "panel_gap": panel_gap,
+            "column_gap": column_gap,
+            "line_gap": line_gap,
+            "preview_width": preview_width,
+            "overflowed": visible_columns < needed_columns,
+        }
 
     def _set_option(self, key, value, checked):
         if checked:
@@ -1001,13 +1389,8 @@ class ScheduleAxisBoard(QWidget):
         self._detail_opener = None
         self._detail_popups = {}
         self._settings_open = False
-        self._settings_target_open = False
-        self._settings_transitioning = False
         self._settings_icon_angle = 0.0
         self._settings_icon_source = QPixmap()
-        self._content_expanded_height = 0
-        self._content_animation = None
-        self._settings_rotation_animation = None
         self.hover_preview = _AxisSchedulePreview(False)
         self.persistent_preview = _AxisSchedulePreview(True)
 
@@ -1190,70 +1573,27 @@ class ScheduleAxisBoard(QWidget):
         self.btn_settings.setIcon(QIcon(pixmap))
 
     def _toggle_settings_page(self):
-        if self._settings_transitioning:
-            return
-
         self.hover_preview.hide()
-        self._settings_transitioning = True
-        self._settings_target_open = not self._settings_open
         host_rect = self.content_host.rect()
-        self._content_expanded_height = max(host_rect.height(), 1)
-        collapsed_rect = QRect(0, 0, max(host_rect.width(), 1), 0)
-
         self.settings_page.setGeometry(host_rect)
-        self.settings_page.show()
-        self.settings_page.lower()
-        self.content_stack.show()
-        self.content_stack.raise_()
-
-        target_angle = 180.0 if self._settings_target_open else 0.0
-        self._settings_rotation_animation = QVariantAnimation(self)
-        self._settings_rotation_animation.setDuration(360)
-        self._settings_rotation_animation.setStartValue(self._settings_icon_angle)
-        self._settings_rotation_animation.setEndValue(target_angle)
-        self._settings_rotation_animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
-        self._settings_rotation_animation.valueChanged.connect(self._set_settings_icon_angle)
-        self._settings_rotation_animation.start()
-
-        self._content_animation = QPropertyAnimation(
-            self.content_stack,
-            b"geometry",
-            self,
-        )
-        self._content_animation.setDuration(180)
-        if self._settings_target_open:
-            self._content_animation.setStartValue(self.content_stack.geometry())
-            self._content_animation.setEndValue(collapsed_rect)
-            self._content_animation.setEasingCurve(QEasingCurve.Type.InCubic)
-        else:
-            self.content_stack.setGeometry(collapsed_rect)
-            self._content_animation.setStartValue(collapsed_rect)
-            self._content_animation.setEndValue(host_rect)
-            self._content_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self._content_animation.finished.connect(self._finish_settings_transition)
-        self._content_animation.start()
-
-    def _finish_settings_transition(self):
-        if self._settings_target_open:
+        self.content_stack.setGeometry(host_rect)
+        self._settings_open = not self._settings_open
+        self._set_settings_icon_angle(180.0 if self._settings_open else 0.0)
+        if self._settings_open:
             self.content_stack.hide()
+            self.settings_page.show()
+            self.settings_page.raise_()
         else:
-            self.content_stack.setGeometry(self.content_host.rect())
             self.settings_page.hide()
-        self._settings_open = self._settings_target_open
-        self._settings_transitioning = False
+            self.content_stack.show()
+            self.content_stack.raise_()
 
     def eventFilter(self, watched, event):
         if watched is self.content_host and event.type() == QEvent.Type.Resize:
             host_rect = self.content_host.rect()
             if hasattr(self, "settings_page"):
                 self.settings_page.setGeometry(host_rect)
-            if not self._settings_transitioning:
-                if self._settings_open:
-                    self.content_stack.setGeometry(
-                        QRect(0, 0, max(host_rect.width(), 1), 0)
-                    )
-                else:
-                    self.content_stack.setGeometry(host_rect)
+            self.content_stack.setGeometry(host_rect)
 
         if watched in self._resize_event_widgets:
             if event.type() == QEvent.Type.Leave:
