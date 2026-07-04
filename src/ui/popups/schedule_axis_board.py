@@ -153,6 +153,8 @@ class _ScheduleAxisCanvas(QWidget):
     DEADLINE_WIDTH = 2.0
     LANE_GAP = 1.0
     AXIS_MARKER_GAP = 6.0
+    AXIS_VERTICAL_RATIO = 0.618
+    CENTER_TICK_HALF_HEIGHT = 5.0
     MONTH_RANGE_HOURS = 30.0 * 24.0
     FOCUS_HOURS = 7.0 * 24.0
 
@@ -214,7 +216,7 @@ class _ScheduleAxisCanvas(QWidget):
 
         left = 20.0
         right = max(float(self.width() - 20), left + 1)
-        axis_y = float(self.height()) * 0.7 + self.vertical_offset
+        axis_y = float(self.height()) * self.AXIS_VERTICAL_RATIO + self.vertical_offset
         origin_x = self._virtual_to_screen(self.virtual_axis_width / 2.0, left, right)
 
         axis_color = QColor(AppConfig.COLOR_GRADIENT_START)
@@ -230,8 +232,14 @@ class _ScheduleAxisCanvas(QWidget):
             center_tick_color.setAlpha(150)
             painter.setPen(QPen(center_tick_color, 1))
             painter.drawLine(
-                QPoint(round(origin_x), round(axis_y - 10)),
-                QPoint(round(origin_x), round(axis_y + 10)),
+                QPoint(
+                    round(origin_x),
+                    round(axis_y - self.CENTER_TICK_HALF_HEIGHT),
+                ),
+                QPoint(
+                    round(origin_x),
+                    round(axis_y + self.CENTER_TICK_HALF_HEIGHT),
+                ),
             )
             painter.setPen(axis_color)
             painter.drawText(
@@ -745,23 +753,31 @@ class ScheduleAxisBoard(QWidget):
         display_layout.addWidget(self.canvas, 1)
 
         self.legend = self.range_label
-        self.settings_page = QWidget()
-        self.settings_page.setStyleSheet("background: transparent;")
-        self.settings_placeholder = QLabel("显示设置\n选项内容待实现", self.content_host)
+        self.settings_page = QFrame(self.content_host)
+        self.settings_page.setObjectName("AxisSettingsPage")
+        self.settings_page.setStyleSheet(
+            "QFrame#AxisSettingsPage { "
+            "background-color: rgba(255, 255, 255, 190); "
+            "border: 2px solid #ffffff; border-radius: 6px; "
+            "}"
+        )
+        settings_layout = QVBoxLayout(self.settings_page)
+        settings_layout.setContentsMargins(0, 0, 0, 0)
+        self.settings_placeholder = QLabel("显示设置\n选项内容待实现")
         self.settings_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.settings_placeholder.setAttribute(
             Qt.WidgetAttribute.WA_TransparentForMouseEvents,
             True,
         )
         self.settings_placeholder.setStyleSheet(
-            "color: rgba(255,255,255,0.88); font-size: 14px; "
+            "color: #333333; font-size: 14px; "
             "font-family: 'Microsoft YaHei'; background: transparent;"
         )
-        self.settings_placeholder.hide()
+        settings_layout.addWidget(self.settings_placeholder)
+        self.settings_page.hide()
 
         self.content_stack.addWidget(self.display_page)
-        self.content_stack.addWidget(self.settings_page)
-        self.content_stack.setCurrentWidget(self.display_page)
+        self.content_stack.raise_()
         layout.addWidget(self.content_host, 1)
         outer.addWidget(panel, 1)
 
@@ -842,6 +858,13 @@ class ScheduleAxisBoard(QWidget):
         self._settings_target_open = not self._settings_open
         host_rect = self.content_host.rect()
         self._content_expanded_height = max(host_rect.height(), 1)
+        collapsed_rect = QRect(0, 0, max(host_rect.width(), 1), 0)
+
+        self.settings_page.setGeometry(host_rect)
+        self.settings_page.show()
+        self.settings_page.lower()
+        self.content_stack.show()
+        self.content_stack.raise_()
 
         target_angle = 180.0 if self._settings_target_open else 0.0
         self._settings_rotation_animation = QVariantAnimation(self)
@@ -858,48 +881,39 @@ class ScheduleAxisBoard(QWidget):
             self,
         )
         self._content_animation.setDuration(180)
-        self._content_animation.setStartValue(self.content_stack.geometry())
-        self._content_animation.setEndValue(
-            QRect(0, 0, max(host_rect.width(), 1), 0)
-        )
-        self._content_animation.setEasingCurve(QEasingCurve.Type.InCubic)
-        self._content_animation.finished.connect(self._swap_settings_page)
-        self._content_animation.start()
-
-    def _swap_settings_page(self):
-        target_page = self.settings_page if self._settings_target_open else self.display_page
-        self.content_stack.setCurrentWidget(target_page)
-        self.settings_placeholder.setVisible(self._settings_target_open)
         if self._settings_target_open:
-            self.settings_placeholder.raise_()
-        host_rect = self.content_host.rect()
-        collapsed_rect = QRect(0, 0, max(host_rect.width(), 1), 0)
-        self.content_stack.setGeometry(collapsed_rect)
-
-        self._content_animation = QPropertyAnimation(
-            self.content_stack,
-            b"geometry",
-            self,
-        )
-        self._content_animation.setDuration(180)
-        self._content_animation.setStartValue(collapsed_rect)
-        self._content_animation.setEndValue(host_rect)
-        self._content_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+            self._content_animation.setStartValue(self.content_stack.geometry())
+            self._content_animation.setEndValue(collapsed_rect)
+            self._content_animation.setEasingCurve(QEasingCurve.Type.InCubic)
+        else:
+            self.content_stack.setGeometry(collapsed_rect)
+            self._content_animation.setStartValue(collapsed_rect)
+            self._content_animation.setEndValue(host_rect)
+            self._content_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._content_animation.finished.connect(self._finish_settings_transition)
         self._content_animation.start()
 
     def _finish_settings_transition(self):
-        self.content_stack.setGeometry(self.content_host.rect())
+        if self._settings_target_open:
+            self.content_stack.hide()
+        else:
+            self.content_stack.setGeometry(self.content_host.rect())
+            self.settings_page.hide()
         self._settings_open = self._settings_target_open
         self._settings_transitioning = False
 
     def eventFilter(self, watched, event):
         if watched is self.content_host and event.type() == QEvent.Type.Resize:
             host_rect = self.content_host.rect()
-            if hasattr(self, "settings_placeholder"):
-                self.settings_placeholder.setGeometry(host_rect)
+            if hasattr(self, "settings_page"):
+                self.settings_page.setGeometry(host_rect)
             if not self._settings_transitioning:
-                self.content_stack.setGeometry(host_rect)
+                if self._settings_open:
+                    self.content_stack.setGeometry(
+                        QRect(0, 0, max(host_rect.width(), 1), 0)
+                    )
+                else:
+                    self.content_stack.setGeometry(host_rect)
 
         if watched in self._resize_event_widgets:
             if event.type() == QEvent.Type.Leave:
