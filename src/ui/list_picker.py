@@ -8,6 +8,7 @@ from ..config import AppConfig
 from ..data.database import db_manager
 from ..services.category_policy_service import CategoryDeleteAction, CategoryPolicyService
 from ..utils.styles import StyleManager
+from ..utils.signals import global_signals
 
 # 复用气泡提示
 class CustomToolTip(QLabel):
@@ -77,7 +78,10 @@ class CategoryCard(QFrame):
         self.layout.addStretch()
         
         self.lbl_check = QLabel("✔")
-        self.lbl_check.setStyleSheet("color: #0cc0df; font-size: 16px; font-weight: bold;")
+        self.lbl_check.setStyleSheet(
+            f"color: {AppConfig.COLOR_GRADIENT_START}; "
+            "font-size: 16px; font-weight: bold;"
+        )
         self.lbl_check.hide()
         self.layout.addWidget(self.lbl_check)
         
@@ -85,12 +89,12 @@ class CategoryCard(QFrame):
 
     def update_style(self):
         if self.is_selected:
-            self.setStyleSheet("""
-                CategoryCard {
+            self.setStyleSheet(f"""
+                CategoryCard {{
                     background-color: rgba(255, 255, 255, 0.2);
-                    border: 1px solid #0cc0df;
+                    border: 1px solid {AppConfig.COLOR_GRADIENT_START};
                     border-radius: 8px;
-                }
+                }}
             """)
             self.lbl_check.show()
         else:
@@ -184,16 +188,16 @@ class ListPickerView(QWidget):
         self.input_new = QLineEdit()
         self.input_new.setPlaceholderText("输入清单名称，回车确认...")
         self.input_new.setFixedHeight(40)
-        self.input_new.setStyleSheet("""
-            QLineEdit {
+        self.input_new.setStyleSheet(f"""
+            QLineEdit {{
                 background-color: rgba(255, 255, 255, 0.2);
-                border: 1px solid #0cc0df;
+                border: 1px solid {AppConfig.COLOR_GRADIENT_START};
                 border-radius: 8px;
                 color: white;
                 padding-left: 10px;
                 font-family: 'Microsoft YaHei';
                 font-weight: bold;
-            }
+            }}
         """)
         
         self.btn_confirm_add = QPushButton("✔")
@@ -358,6 +362,7 @@ class ListPickerView(QWidget):
             
             # 重新加载列表
             self.load_data(self.selected_cat_id) 
+            global_signals.category_changed.emit()
         else:
             self._show_tooltip("⚠️ 添加清单失败", is_error=True)
 
@@ -384,6 +389,7 @@ class ListPickerView(QWidget):
                     if self.selected_cat_id == cat_id:
                         self.selected_cat_id = None
                     self.load_data(self.selected_cat_id)
+                    global_signals.category_changed.emit()
                 else:
                     self._show_tooltip("❌ 删除失败", is_error=True)
                 
@@ -393,6 +399,7 @@ class ListPickerView(QWidget):
                 if self.selected_cat_id == cat_id:
                     self.selected_cat_id = None
                 self.load_data(self.selected_cat_id)
+                global_signals.category_changed.emit()
             else:
                 self._show_tooltip("❌ 删除失败", is_error=True)
 

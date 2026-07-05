@@ -1,4 +1,6 @@
 import datetime
+import math
+import zlib
 
 from PyQt6.QtCore import (
     QEvent,
@@ -23,6 +25,7 @@ from PyQt6.QtGui import (
     QPixmap,
 )
 from PyQt6.QtWidgets import (
+    QAbstractButton,
     QButtonGroup,
     QFrame,
     QHBoxLayout,
@@ -40,6 +43,7 @@ from src.config import AppConfig
 from src.services.schedule_axis_service import ScheduleAxisService
 from src.ui.common.themed_color_dialog import ThemedColorDialog
 from src.ui.utils.icon_loader import load_colored_svg_pixmap
+from src.utils.signals import global_signals
 from src.utils.window_preferences import set_window_pin_state
 
 
@@ -167,6 +171,8 @@ class _ScheduleAxisCanvas(QWidget):
         self.hit_regions = []
         self._hovered_projection = None
         self.virtual_axis_width = 960.0
+        self.nonlinear_enabled = True
+        self._nonlinear_log_scale = 1.0
         self.log_scale = 1.0
         self.zoom = 1.0
         self.view_center_x = self.virtual_axis_width / 2.0
@@ -181,15 +187,25 @@ class _ScheduleAxisCanvas(QWidget):
             0.05,
             min(float(default_viewport_width) / self.virtual_axis_width, 1.0),
         )
-        self.log_scale = ScheduleAxisService.solve_log_scale(
+        self._nonlinear_log_scale = ScheduleAxisService.solve_log_scale(
             self.MONTH_RANGE_HOURS,
             self.FOCUS_HOURS,
             visible_fraction,
+        )
+        self.log_scale = (
+            self._nonlinear_log_scale if self.nonlinear_enabled else 1e-12
         )
         self.range_hours = self.MONTH_RANGE_HOURS
         self.zoom = 1.0
         self.view_center_x = self.virtual_axis_width / 2.0
         self.vertical_offset = 0.0
+        self.update()
+
+    def set_nonlinear_enabled(self, enabled):
+        self.nonlinear_enabled = bool(enabled)
+        self.log_scale = (
+            self._nonlinear_log_scale if self.nonlinear_enabled else 1e-12
+        )
         self.update()
 
     def set_data(self, projections, range_hours):
@@ -641,8 +657,16 @@ class _ElidedLabel(QLabel):
             QSizePolicy.Policy.Preferred,
         )
 
+    def set_full_text(self, text):
+        self._full_text = str(text)
+        self.setToolTip(self._full_text)
+        self._update_elided_text()
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self._update_elided_text()
+
+    def _update_elided_text(self):
         self.setText(
             self.fontMetrics().elidedText(
                 self._full_text,
@@ -660,10 +684,13 @@ class _AxisVisualOption:
 
 
 class _AxisCategoryRow(QWidget):
+    appearance_changed = pyqtSignal()
+
     def __init__(self, category, parent=None):
         super().__init__(parent)
         self.category_id = category.category_id
         self.color_value = category.color
+        self.source_color = category.color
         self.setFixedHeight(22)
 
         layout = QHBoxLayout(self)
@@ -696,8 +723,27 @@ class _AxisCategoryRow(QWidget):
             "border: 1px solid rgba(0,0,0,0.18); border-radius: 3px; "
             "font-size: 9px; padding: 0px 2px; }"
         )
+        self.alpha_spin.valueChanged.connect(
+            lambda _value: self.appearance_changed.emit()
+        )
         layout.addWidget(self.alpha_spin)
         self._apply_color_button_style()
+
+    def update_category(self, category):
+        self.category_id = category.category_id
+        self.name_label.set_full_text(category.name)
+        incoming_color = QColor(category.color)
+        if not incoming_color.isValid():
+            incoming_color = QColor(ScheduleAxisService.FALLBACK_COLOR)
+        previous_source = QColor(self.source_color)
+        current_color = QColor(self.color_value)
+        if (
+            not previous_source.isValid()
+            or current_color.name() == previous_source.name()
+        ):
+            self.color_value = incoming_color.name()
+            self._apply_color_button_style()
+        self.source_color = incoming_color.name()
 
     def set_compact_spacing(self, spacing):
         self.layout().setSpacing(max(2, int(spacing)))
@@ -715,20 +761,27 @@ class _AxisCategoryRow(QWidget):
         )
 
     def _choose_color(self):
+        if self.category_id == "axis":
+            title = "选择数轴轴体颜色"
+        elif self.category_id == "font":
+            title = "选择数轴字体颜色"
+        else:
+            title = f"选择清单{self.name_label._full_text}颜色"
         selected = ThemedColorDialog.get_color(
             QColor(self.color_value),
-            "选择清单颜色",
+            title,
             AppConfig.COLOR_GRADIENT_START,
             self,
         )
         if selected.isValid():
             self.color_value = selected.name()
             self._apply_color_button_style()
+            self.appearance_changed.emit()
 
 
 class _AxisCategoryGrid(QWidget):
-    ROW_HEIGHT = 22
-    ROW_GAP = 3
+    ROW_HEIGHT = 20
+    ROW_GAP = 2
     LINE_WIDTH = 2
 
     def __init__(self, categories, parent=None):
@@ -751,14 +804,40 @@ class _AxisCategoryGrid(QWidget):
         self._visible_columns = 1
         self._overflowed = False
 
+    def set_categories(self, categories):
+        existing = {row.category_id: row for row in self.rows}
+        synchronized_rows = []
+        added_rows = []
+        for category in categories:
+            row = existing.pop(category.category_id, None)
+            if row is None:
+                row = _AxisCategoryRow(category, self)
+                added_rows.append(row)
+            else:
+                row.update_category(category)
+            synchronized_rows.append(row)
+
+        for removed_row in existing.values():
+            removed_row.hide()
+            removed_row.setParent(None)
+            removed_row.deleteLater()
+        self.rows = synchronized_rows
+        return added_rows
+
     @classmethod
     def rows_per_column(cls, height):
         pitch = cls.ROW_HEIGHT + cls.ROW_GAP
         return max(1, (max(int(height), cls.ROW_HEIGHT) + cls.ROW_GAP) // pitch)
 
-    def needed_columns(self, height):
-        rows_per_column = self.rows_per_column(height)
-        return max(1, (len(self.rows) + rows_per_column - 1) // rows_per_column)
+    def needed_columns(self, height, first_column_top=0):
+        height = max(self.ROW_HEIGHT, int(height))
+        first_column_top = max(0, min(int(first_column_top), height - self.ROW_HEIGHT))
+        first_capacity = self.rows_per_column(height - first_column_top)
+        remaining = max(0, len(self.rows) - first_capacity)
+        if remaining == 0:
+            return 1
+        full_capacity = self.rows_per_column(height)
+        return 1 + (remaining + full_capacity - 1) // full_capacity
 
     def _ensure_lines(self, count):
         while len(self.column_lines) < count:
@@ -777,6 +856,7 @@ class _AxisCategoryGrid(QWidget):
         column_width,
         column_gap,
         line_gap,
+        first_column_top=0,
     ):
         width = max(1, int(width))
         height = max(self.ROW_HEIGHT, int(height))
@@ -784,33 +864,59 @@ class _AxisCategoryGrid(QWidget):
         column_width = max(1, int(column_width))
         column_gap = max(0, int(column_gap))
         line_gap = max(2, int(line_gap))
-        rows_per_column = self.rows_per_column(height)
-        capacity = visible_columns * rows_per_column
+        first_column_top = max(
+            0,
+            min(int(first_column_top), height - self.ROW_HEIGHT),
+        )
+        first_capacity = self.rows_per_column(height - first_column_top)
+        full_capacity = self.rows_per_column(height)
+        capacity = first_capacity + max(visible_columns - 1, 0) * full_capacity
         overflowed = len(self.rows) > capacity
         visible_row_count = min(
             len(self.rows),
             max(0, capacity - (1 if overflowed else 0)),
         )
 
-        self._rows_per_column = rows_per_column
+        self._rows_per_column = first_capacity
+        self._full_rows_per_column = full_capacity
         self._visible_columns = visible_columns
         self._overflowed = overflowed
         self.setGeometry(0, 0, width, height)
         self._ensure_lines(visible_columns)
 
+        def slot_for_index(item_index):
+            if item_index < first_capacity:
+                return 0, item_index
+            remainder = item_index - first_capacity
+            return 1 + remainder // full_capacity, remainder % full_capacity
+
+        def column_metrics(column):
+            top = first_column_top if column == 0 else 0
+            column_capacity = first_capacity if column == 0 else full_capacity
+            available_height = max(self.ROW_HEIGHT, height - top)
+            if column_capacity > 1:
+                gap = max(
+                    float(self.ROW_GAP),
+                    (available_height - column_capacity * self.ROW_HEIGHT)
+                    / (column_capacity - 1),
+                )
+            else:
+                gap = 0.0
+            return top, column_capacity, gap, self.ROW_HEIGHT + gap
+
         for index, row_widget in enumerate(self.rows):
             if index >= visible_row_count:
                 row_widget.hide()
                 continue
-            column = index // rows_per_column
-            row = index % rows_per_column
+            column, row = slot_for_index(index)
+            column_top, _capacity, _gap, row_pitch = column_metrics(column)
             column_x = column * (column_width + column_gap)
             row_x = column_x + self.LINE_WIDTH + line_gap
             row_width = max(1, column_width - self.LINE_WIDTH - line_gap)
             row_widget.set_compact_spacing(max(2, line_gap - 1))
             row_widget.setGeometry(
                 row_x,
-                row * (self.ROW_HEIGHT + self.ROW_GAP),
+                column_top + round(row * row_pitch),
                 row_width,
                 self.ROW_HEIGHT,
             )
@@ -818,12 +924,12 @@ class _AxisCategoryGrid(QWidget):
 
         if overflowed:
             overflow_index = visible_row_count
-            column = overflow_index // rows_per_column
-            row = overflow_index % rows_per_column
+            column, row = slot_for_index(overflow_index)
+            column_top, _capacity, _gap, row_pitch = column_metrics(column)
             column_x = column * (column_width + column_gap)
             self.overflow_label.setGeometry(
                 column_x + self.LINE_WIDTH + line_gap,
-                row * (self.ROW_HEIGHT + self.ROW_GAP),
+                column_top + round(row * row_pitch),
                 max(1, column_width - self.LINE_WIDTH - line_gap),
                 self.ROW_HEIGHT,
             )
@@ -837,7 +943,7 @@ class _AxisCategoryGrid(QWidget):
         if not self.rows:
             self.empty_label.setGeometry(
                 self.LINE_WIDTH + line_gap,
-                0,
+                first_column_top,
                 max(1, column_width - self.LINE_WIDTH - line_gap),
                 self.ROW_HEIGHT,
             )
@@ -847,9 +953,11 @@ class _AxisCategoryGrid(QWidget):
 
         counts = [0] * visible_columns
         for index in range(visible_row_count):
-            counts[index // rows_per_column] += 1
+            column, _row = slot_for_index(index)
+            counts[column] += 1
         if overflowed:
-            counts[visible_row_count // rows_per_column] += 1
+            column, _row = slot_for_index(visible_row_count)
+            counts[column] += 1
         if not self.rows:
             counts[0] = 1
 
@@ -861,15 +969,18 @@ class _AxisCategoryGrid(QWidget):
             if item_count <= 0:
                 line.hide()
                 continue
+            column_top, column_capacity, row_gap, _row_pitch = column_metrics(index)
             line_height = (
                 item_count * self.ROW_HEIGHT
-                + max(item_count - 1, 0) * self.ROW_GAP
+                + max(item_count - 1, 0) * row_gap
             )
+            if item_count == column_capacity:
+                line_height = height - column_top
             line.setGeometry(
                 index * (column_width + column_gap),
-                0,
+                column_top,
                 self.LINE_WIDTH,
-                line_height,
+                round(line_height),
             )
             line.show()
 
@@ -892,6 +1003,11 @@ class _AxisColorPanel(QWidget):
         self.category_title_label.setStyleSheet(heading_style)
         self.category_grid = _AxisCategoryGrid(categories, self)
 
+    def set_categories(self, categories):
+        categories = list(categories)
+        self.category_count = len(categories)
+        return self.category_grid.set_categories(categories)
+
     def _category_grid_y(self):
         axis_rows_height = (
             2 * _AxisCategoryGrid.ROW_HEIGHT + _AxisCategoryGrid.ROW_GAP
@@ -906,11 +1022,10 @@ class _AxisColorPanel(QWidget):
         )
 
     def needed_columns(self, height):
-        grid_height = max(
-            _AxisCategoryGrid.ROW_HEIGHT,
-            int(height) - self._category_grid_y(),
+        return self.category_grid.needed_columns(
+            max(_AxisCategoryGrid.ROW_HEIGHT, int(height)),
+            self._category_grid_y(),
         )
-        return self.category_grid.needed_columns(grid_height)
 
     def set_layout_density(
         self,
@@ -946,24 +1061,66 @@ class _AxisColorPanel(QWidget):
         grid_y = self._category_grid_y()
         self.category_grid.reflow(
             self.width(),
-            max(_AxisCategoryGrid.ROW_HEIGHT, self.height() - grid_y),
+            max(_AxisCategoryGrid.ROW_HEIGHT, self.height()),
             visible_columns,
             column_width,
             column_gap,
             line_gap,
+            grid_y,
         )
-        self.category_grid.move(0, grid_y)
+        self.category_grid.move(0, 0)
+        self.category_grid.lower()
+        self.axis_title_label.raise_()
+        self.axis_grid.raise_()
+        self.category_title_label.raise_()
+
+
+class _AxisToggleSwitch(QAbstractButton):
+    def __init__(self, accent, parent=None):
+        super().__init__(parent)
+        self.accent = QColor(accent)
+        if not self.accent.isValid():
+            self.accent = QColor("#0cc0df")
+        self.setCheckable(True)
+        self.setFixedSize(28, 16)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        track = QRectF(0.5, 1.5, self.width() - 1.0, self.height() - 3.0)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(self.accent if self.isChecked() else QColor("#d5d5d5"))
+        painter.drawRoundedRect(track, track.height() / 2.0, track.height() / 2.0)
+
+        knob_size = 12.0
+        knob_x = self.width() - knob_size - 2.0 if self.isChecked() else 2.0
+        painter.setBrush(QColor("#ffffff"))
+        painter.drawEllipse(QRectF(knob_x, 2.0, knob_size, knob_size))
 
 
 class _AxisOptionColumn(QWidget):
     TITLE_HEIGHT = 17
-    GROUP_GAP = 5
+    MODE_ROW_HEIGHT = 22
+    GROUP_GAP = 4
 
     def __init__(self, state, state_changed, accent, heading_style, parent=None):
         super().__init__(parent)
         self.state = state
         self._state_changed = state_changed
         self._button_groups = []
+        self.nonlinear_label = QLabel("非均匀显示", self)
+        self.nonlinear_label.setStyleSheet(heading_style)
+        self.nonlinear_switch = _AxisToggleSwitch(accent, self)
+        self.nonlinear_switch.setChecked(bool(self.state.get("nonlinear", True)))
+        self.nonlinear_switch.setToolTip("开启 log(t+1) 非均匀刻度")
+        self.nonlinear_switch.toggled.connect(
+            lambda checked: self._state_changed(
+                "nonlinear",
+                bool(checked),
+                True,
+            )
+        )
         self.range_title = QLabel("范围", self)
         self.range_title.setStyleSheet(heading_style)
         self.time_title = QLabel("跨度", self)
@@ -1046,10 +1203,23 @@ class _AxisOptionColumn(QWidget):
         option_count = len(self.direction_buttons) + len(self.range_buttons)
         option_space = max(
             option_count * 15,
-            self.height() - self.TITLE_HEIGHT * 2 - self.GROUP_GAP,
+            self.height()
+            - self.MODE_ROW_HEIGHT
+            - self.TITLE_HEIGHT * 2
+            - self.GROUP_GAP,
         )
         option_pitch = option_space / option_count
-        range_title_y = 0
+        self.nonlinear_label.setGeometry(
+            0,
+            0,
+            max(1, self.width() - self.nonlinear_switch.width() - 5),
+            self.MODE_ROW_HEIGHT,
+        )
+        self.nonlinear_switch.move(
+            max(0, self.width() - self.nonlinear_switch.width()),
+            max(0, (self.MODE_ROW_HEIGHT - self.nonlinear_switch.height()) // 2),
+        )
+        range_title_y = self.MODE_ROW_HEIGHT
         direction_top = range_title_y + self.TITLE_HEIGHT
         direction_height = option_pitch * len(self.direction_buttons)
         time_title_y = direction_top + direction_height + self.GROUP_GAP
@@ -1099,7 +1269,306 @@ class _AxisOptionColumn(QWidget):
             )
 
 
+class _AxisSettingsPreview(QFrame):
+    HORIZONTAL_PADDING = 12.0
+    VERTICAL_PADDING = 10.0
+    INTERVAL_WIDTH_LIMITS = {
+        "day": (0.12, 0.30),
+        "week": (0.06, 0.16),
+        "two_weeks": (0.04, 0.11),
+        "month": (0.025, 0.075),
+        "year": (0.012, 0.035),
+    }
+    SPAN_LABELS = {
+        "day": "1天",
+        "week": "1周",
+        "two_weeks": "2周",
+        "month": "1个月",
+        "year": "1年",
+    }
+    TICK_COUNTS = {
+        "day": 2,
+        "week": 4,
+        "two_weeks": 6,
+        "month": 8,
+        "year": 11,
+    }
+    LOG_CURVATURE = 9.0
+    ORIGIN_TICK_HALF_HEIGHT = 3.0
+    SCALE_TICK_HALF_HEIGHT = 2.0
+
+    def __init__(self, state, axis_rows, category_rows, parent=None):
+        super().__init__(parent)
+        self.state = state
+        self.axis_rows = list(axis_rows)
+        self.category_rows = []
+        self._connected_row_ids = set()
+        self.setObjectName("AxisSettingsPreview")
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+        self.setStyleSheet(
+            "QFrame#AxisSettingsPreview { background-color: #ffffff; "
+            "border: 1px solid #d8d8d8; border-radius: 5px; }"
+        )
+        self.set_category_rows(category_rows)
+        self._connect_rows(self.axis_rows)
+
+    def _connect_rows(self, rows):
+        for row in rows:
+            row_id = id(row)
+            if row_id in self._connected_row_ids:
+                continue
+            row.appearance_changed.connect(self.update)
+            self._connected_row_ids.add(row_id)
+
+    def set_category_rows(self, rows):
+        self.category_rows = list(rows)
+        self._connect_rows(self.category_rows)
+        self.update()
+
+    @staticmethod
+    def _stable_seed(row):
+        key = f"{row.category_id}:{row.name_label._full_text}"
+        return zlib.crc32(key.encode("utf-8")) & 0xFFFFFFFF
+
+    @staticmethod
+    def _row_color(row):
+        color = QColor(row.color_value)
+        if not color.isValid():
+            color = QColor(ScheduleAxisService.FALLBACK_COLOR)
+        color.setAlphaF(max(0.0, min(row.alpha_spin.value() / 100.0, 1.0)))
+        return color
+
+    def _build_preview_items(self, left, right, axis_y):
+        count = len(self.category_rows)
+        if count == 0:
+            return []
+
+        slot_width = max((right - left) / count, 1.0)
+        axis_width = max(right - left, 1.0)
+        minimum_ratio, maximum_ratio = self.INTERVAL_WIDTH_LIMITS.get(
+            self.state.get("range", "month"),
+            self.INTERVAL_WIDTH_LIMITS["month"],
+        )
+        items = []
+        for index, row in enumerate(self.category_rows):
+            seed = self._stable_seed(row)
+            is_interval = bool(seed & 1)
+            importance = (seed >> 1) % 3
+            completed = bool((seed >> 3) % 3 == 0)
+            marker_height = _ScheduleAxisCanvas.MARKER_HEIGHTS[importance]
+            slot_left = left + index * slot_width
+            slot_right = slot_left + slot_width
+            center_ratio = 0.35 + ((seed >> 5) % 31) / 100.0
+            center_x = slot_left + slot_width * center_ratio
+
+            if is_interval:
+                width_ratio = minimum_ratio + (
+                    ((seed >> 16) % 101) / 100.0
+                ) * (maximum_ratio - minimum_ratio)
+                desired_width = axis_width * width_ratio
+                slot_inset = min(max(slot_width * 0.08, 1.0), 4.0)
+                available_width = max(
+                    _ScheduleAxisCanvas.DEADLINE_WIDTH,
+                    slot_width - slot_inset * 2.0,
+                )
+                marker_width = min(desired_width, available_width)
+                center_x = max(
+                    slot_left + slot_inset + marker_width / 2.0,
+                    min(
+                        center_x,
+                        slot_right - slot_inset - marker_width / 2.0,
+                    ),
+                )
+                x1 = center_x - marker_width / 2.0
+                x2 = center_x + marker_width / 2.0
+            else:
+                x1 = center_x
+                x2 = center_x
+
+            lane = (seed >> 10) % 3
+            lane_step = 18.0
+            if completed:
+                center_y = axis_y + 8.0 + marker_height / 2.0 + lane * lane_step
+            else:
+                center_y = axis_y - 8.0 - marker_height / 2.0 - lane * lane_step
+            items.append(
+                {
+                    "category_id": row.category_id,
+                    "is_interval": is_interval,
+                    "importance": importance,
+                    "completed": completed,
+                    "height": marker_height,
+                    "x1": x1,
+                    "x2": x2,
+                    "y": center_y,
+                    "color": self._row_color(row),
+                }
+            )
+        return items
+
+    def _axis_origin_x(self, left, right):
+        direction = self.state.get("direction", "both")
+        if direction == "future":
+            return left
+        if direction == "past":
+            return right
+        return (left + right) / 2.0
+
+    def _axis_labels(self):
+        direction = self.state.get("direction", "both")
+        span = self.SPAN_LABELS.get(
+            self.state.get("range", "month"),
+            self.SPAN_LABELS["month"],
+        )
+        if direction == "future":
+            return "现在", "", span
+        if direction == "past":
+            return span, "", "现在"
+        return span, "现在", span
+
+    def _tick_positions(self, left, right):
+        direction = self.state.get("direction", "both")
+        tick_count = self.TICK_COUNTS.get(
+            self.state.get("range", "month"),
+            self.TICK_COUNTS["month"],
+        )
+        nonlinear = bool(self.state.get("nonlinear", True))
+        origin_x = self._axis_origin_x(left, right)
+        positions = []
+
+        def mapped_ratio(index):
+            ratio = index / (tick_count + 1.0)
+            if not nonlinear:
+                return ratio
+            return math.log1p(self.LOG_CURVATURE * ratio) / math.log1p(
+                self.LOG_CURVATURE
+            )
+
+        if direction in {"future", "both"}:
+            side_width = right - origin_x
+            positions.extend(
+                origin_x + mapped_ratio(index) * side_width
+                for index in range(1, tick_count + 1)
+            )
+        if direction in {"past", "both"}:
+            side_width = origin_x - left
+            positions.extend(
+                origin_x - mapped_ratio(index) * side_width
+                for index in range(1, tick_count + 1)
+            )
+        return sorted(positions)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        left = self.HORIZONTAL_PADDING
+        right = max(float(self.width()) - self.HORIZONTAL_PADDING, left + 1.0)
+        top = self.VERTICAL_PADDING
+        bottom = max(float(self.height()) - self.VERTICAL_PADDING, top + 1.0)
+        axis_y = top + (bottom - top) * _ScheduleAxisCanvas.AXIS_VERTICAL_RATIO
+
+        axis_row = self.axis_rows[0] if self.axis_rows else None
+        font_row = self.axis_rows[1] if len(self.axis_rows) > 1 else None
+        axis_color = self._row_color(axis_row) if axis_row else QColor(AppConfig.COLOR_GRADIENT_START)
+        font_color = self._row_color(font_row) if font_row else QColor("#333333")
+
+        painter.setPen(QPen(axis_color, 1.2))
+        painter.drawLine(QPointF(left, axis_y), QPointF(right, axis_y))
+        arrow_size = 4.0
+        direction = self.state.get("direction", "both")
+        if direction != "future":
+            painter.drawLine(
+                QPointF(left, axis_y),
+                QPointF(left + arrow_size, axis_y - arrow_size * 0.65),
+            )
+            painter.drawLine(
+                QPointF(left, axis_y),
+                QPointF(left + arrow_size, axis_y + arrow_size * 0.65),
+            )
+        if direction != "past":
+            painter.drawLine(
+                QPointF(right, axis_y),
+                QPointF(right - arrow_size, axis_y - arrow_size * 0.65),
+            )
+            painter.drawLine(
+                QPointF(right, axis_y),
+                QPointF(right - arrow_size, axis_y + arrow_size * 0.65),
+            )
+        origin_x = self._axis_origin_x(left, right)
+        tick_color = QColor(axis_color)
+        tick_color.setAlpha(max(1, round(axis_color.alpha() * 0.65)))
+        painter.setPen(QPen(tick_color, 1.0))
+        for tick_x in self._tick_positions(left, right):
+            painter.drawLine(
+                QPointF(tick_x, axis_y - self.SCALE_TICK_HALF_HEIGHT),
+                QPointF(tick_x, axis_y + self.SCALE_TICK_HALF_HEIGHT),
+            )
+        painter.setPen(QPen(axis_color, 1.2))
+        painter.drawLine(
+            QPointF(origin_x, axis_y - self.ORIGIN_TICK_HALF_HEIGHT),
+            QPointF(origin_x, axis_y + self.ORIGIN_TICK_HALF_HEIGHT),
+        )
+
+        for item in self._build_preview_items(left, right, axis_y):
+            color = item["color"]
+            height = item["height"]
+            if item["is_interval"]:
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(color)
+                painter.drawRect(
+                    QRectF(
+                        item["x1"],
+                        item["y"] - height / 2.0,
+                        max(_ScheduleAxisCanvas.DEADLINE_WIDTH, item["x2"] - item["x1"]),
+                        height,
+                    )
+                )
+            else:
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.setPen(
+                    QPen(
+                        color,
+                        _ScheduleAxisCanvas.DEADLINE_WIDTH,
+                        Qt.PenStyle.SolidLine,
+                        Qt.PenCapStyle.FlatCap,
+                    )
+                )
+                painter.drawLine(
+                    QPointF(item["x1"], item["y"] - height / 2.0),
+                    QPointF(item["x1"], item["y"] + height / 2.0),
+                )
+
+        painter.setPen(font_color)
+        left_label, center_label, right_label = self._axis_labels()
+        label_y = axis_y + 4.0
+        painter.drawText(
+            QRectF(left, label_y, max((right - left) * 0.34, 1.0), 14.0),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            left_label,
+        )
+        if center_label:
+            painter.drawText(
+                QRectF(origin_x - 25.0, label_y, 50.0, 14.0),
+                Qt.AlignmentFlag.AlignCenter,
+                center_label,
+            )
+        painter.drawText(
+            QRectF(right - max((right - left) * 0.34, 1.0), label_y, max((right - left) * 0.34, 1.0), 14.0),
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+            right_label,
+        )
+        if not self.category_rows:
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "暂无清单")
+
+
 class _AxisSettingsPanel(QWidget):
+    option_changed = pyqtSignal(str, object)
+
     OUTER_LEFT = 12
     OUTER_TOP = 8
     OUTER_RIGHT = 12
@@ -1121,6 +1590,7 @@ class _AxisSettingsPanel(QWidget):
     def __init__(self, categories, parent=None):
         super().__init__(parent)
         self.state = {
+            "nonlinear": True,
             "direction": "both",
             "range": "month",
         }
@@ -1151,23 +1621,12 @@ class _AxisSettingsPanel(QWidget):
             self.controls_container,
         )
 
-        self.preview_frame = QFrame(self)
-        self.preview_frame.setObjectName("AxisSettingsPreview")
-        self.preview_frame.setSizePolicy(
-            QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Expanding,
+        self.preview_frame = _AxisSettingsPreview(
+            self.state,
+            self.color_panel.axis_grid.rows,
+            self.color_panel.category_grid.rows,
+            self,
         )
-        self.preview_frame.setStyleSheet(
-            "QFrame#AxisSettingsPreview { background-color: #ffffff; "
-            "border: 1px solid #d8d8d8; border-radius: 5px; }"
-        )
-        preview_layout = QVBoxLayout(self.preview_frame)
-        preview_label = QLabel("效果预览")
-        preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        preview_label.setStyleSheet(
-            "color: #999999; font-size: 11px; background: transparent;"
-        )
-        preview_layout.addWidget(preview_label)
         self._layout_snapshot = {}
 
     @staticmethod
@@ -1361,6 +1820,17 @@ class _AxisSettingsPanel(QWidget):
     def _set_option(self, key, value, checked):
         if checked:
             self.state[key] = value
+            if hasattr(self, "preview_frame"):
+                self.preview_frame.update()
+            self.option_changed.emit(key, value)
+
+    def reload_categories(self, categories):
+        self.color_panel.set_categories(categories)
+        self.preview_frame.set_category_rows(
+            self.color_panel.category_grid.rows
+        )
+        self._relayout()
+        self.update()
 
 
 class ScheduleAxisBoard(QWidget):
@@ -1496,6 +1966,7 @@ class ScheduleAxisBoard(QWidget):
             ScheduleAxisService.load_category_options(),
             self.settings_page,
         )
+        self.settings_panel.option_changed.connect(self._on_setting_option_changed)
         settings_layout.addWidget(self.settings_panel)
         self.settings_page.hide()
 
@@ -1507,19 +1978,53 @@ class ScheduleAxisBoard(QWidget):
         self._update_header_button_positions()
 
         self.refresh_data()
+        global_signals.category_changed.connect(self.refresh_categories)
         self._install_resize_event_filters()
 
     def refresh_data(self):
+        self.refresh_categories()
         projections, _range_hours = ScheduleAxisService.load_current_projection(
             datetime.datetime.now()
         )
         self.canvas.set_data(projections, _range_hours)
-        self._annotation_text = (
-            "线上：未完成 · 线下：已完成 · 竖线：DDL/单时间 · "
-            "横条：时间段 · 拖动平移/滚轮缩放 · 范围 ±1个月"
-        )
+        self._update_annotation_text()
         if hasattr(self, "btn_settings"):
             self._update_header_button_positions()
+
+    def refresh_categories(self):
+        if not hasattr(self, "settings_panel"):
+            return
+        self.settings_panel.reload_categories(
+            ScheduleAxisService.load_category_options()
+        )
+
+    def _on_setting_option_changed(self, key, value):
+        if key == "nonlinear":
+            self.canvas.set_nonlinear_enabled(bool(value))
+        if key in {"direction", "range"}:
+            self._update_annotation_text()
+            self._update_header_button_positions()
+
+    def _update_annotation_text(self):
+        if not hasattr(self, "settings_panel"):
+            return
+        state = self.settings_panel.state
+        span = _AxisSettingsPreview.SPAN_LABELS.get(
+            state.get("range", "month"),
+            _AxisSettingsPreview.SPAN_LABELS["month"],
+        )
+        direction = state.get("direction", "both")
+        if direction == "future":
+            range_text = f"未来{span}"
+        elif direction == "past":
+            range_text = f"过去{span}"
+        else:
+            range_text = f"±{span}"
+        self._annotation_text = (
+            "线上：未完成 · 线下：已完成 · 竖线：DDL/单时间 · "
+            "横条：时间段 · 拖动平移/滚轮缩放 · "
+            f"范围 {range_text}"
+        )
 
     def set_detail_opener(self, opener):
         self._detail_opener = opener
@@ -1724,6 +2229,11 @@ class ScheduleAxisBoard(QWidget):
         popup.raise_()
 
     def showEvent(self, event):
+        self._settings_open = False
+        self._set_settings_icon_angle(0.0)
+        self.settings_page.hide()
+        self.content_stack.show()
+        self.content_stack.raise_()
         self.refresh_data()
         super().showEvent(event)
 
