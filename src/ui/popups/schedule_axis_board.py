@@ -8,6 +8,7 @@ from PyQt6.QtCore import (
     QPointF,
     QRect,
     QRectF,
+    QSignalBlocker,
     QSize,
     Qt,
     pyqtSignal,
@@ -43,6 +44,10 @@ from src.config import AppConfig
 from src.services.schedule_axis_service import ScheduleAxisService
 from src.ui.common.themed_color_dialog import ThemedColorDialog
 from src.ui.utils.icon_loader import load_colored_svg_pixmap
+from src.utils.axis_board_preferences import (
+    get_axis_board_preferences,
+    set_axis_board_preferences,
+)
 from src.utils.signals import global_signals
 from src.utils.window_preferences import set_window_pin_state
 
@@ -235,6 +240,7 @@ class _ScheduleAxisCanvas(QWidget):
         self.range_key = self.DEFAULT_RANGE_KEY
         self.range_hours = ScheduleAxisService.range_hours_for_key(self.range_key)
         self.direction = self.DEFAULT_DIRECTION
+        self.show_completed = True
         self.hit_regions = []
         self._hovered_projection = None
         self.virtual_axis_width = 960.0
@@ -297,9 +303,16 @@ class _ScheduleAxisCanvas(QWidget):
             self.direction,
             self.range_key,
             bool(enabled),
+            self.show_completed,
         )
 
-    def set_display_options(self, direction, range_key, nonlinear_enabled):
+    def set_display_options(
+        self,
+        direction,
+        range_key,
+        nonlinear_enabled,
+        show_completed=True,
+    ):
         normalized_direction = ScheduleAxisService.normalize_direction(direction)
         normalized_range_key = (
             range_key
@@ -310,11 +323,13 @@ class _ScheduleAxisCanvas(QWidget):
             normalized_direction != self.direction
             or normalized_range_key != self.range_key
             or bool(nonlinear_enabled) != self.nonlinear_enabled
+            or bool(show_completed) != self.show_completed
         )
         self.direction = normalized_direction
         self.range_key = normalized_range_key
         self.range_hours = ScheduleAxisService.range_hours_for_key(self.range_key)
         self.nonlinear_enabled = bool(nonlinear_enabled)
+        self.show_completed = bool(show_completed)
         self._recalculate_log_scale()
         self._apply_projection_filter()
         if changed:
@@ -339,6 +354,7 @@ class _ScheduleAxisCanvas(QWidget):
             for projection in self.all_projections
             if projection.end_delta_hours >= minimum_delta
             and projection.start_delta_hours <= maximum_delta
+            and (self.show_completed or not projection.is_completed)
         ]
         self._hovered_projection = None
         self.hit_regions.clear()
@@ -413,7 +429,11 @@ class _ScheduleAxisCanvas(QWidget):
         if not self.projections:
             empty_color = self._color_with_alpha_factor(font_color, 0.7)
             painter.setPen(empty_color)
-            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "暂无带时间的日程")
+            painter.drawText(
+                self.rect(),
+                Qt.AlignmentFlag.AlignCenter,
+                "暂无符合显示设置的日程",
+            )
             self._draw_axis_text(
                 painter,
                 axis_y,
@@ -970,6 +990,31 @@ class _AxisCategoryRow(QWidget):
     def set_compact_spacing(self, spacing):
         self.layout().setSpacing(max(2, int(spacing)))
 
+    def set_appearance(self, color, alpha=100):
+        selected = QColor(color)
+        if selected.isValid():
+            self.color_value = selected.name()
+        blocker = QSignalBlocker(self.alpha_spin)
+        self.alpha_spin.setValue(max(0, min(int(alpha), 100)))
+        blocker.unblock()
+        self._apply_color_button_style()
+
+    def appearance_preference(self):
+        return {
+            "color": QColor(self.color_value).name(),
+            "alpha": self.alpha_spin.value(),
+        }
+
+    def has_source_override(self):
+        current_color = QColor(self.color_value)
+        source_color = QColor(self.source_color)
+        color_changed = (
+            current_color.isValid()
+            and source_color.isValid()
+            and current_color.name() != source_color.name()
+        )
+        return color_changed or self.alpha_spin.value() != 100
+
     def _apply_color_button_style(self):
         color = QColor(self.color_value)
         if not color.isValid():
@@ -1051,15 +1096,24 @@ class _AxisCategoryGrid(QWidget):
         pitch = cls.ROW_HEIGHT + cls.ROW_GAP
         return max(1, (max(int(height), cls.ROW_HEIGHT) + cls.ROW_GAP) // pitch)
 
-    def needed_columns(self, height, first_column_top=0):
+    def needed_columns(
+        self,
+        height,
+        first_column_top=0,
+        following_column_top=0,
+    ):
         height = max(self.ROW_HEIGHT, int(height))
         first_column_top = max(0, min(int(first_column_top), height - self.ROW_HEIGHT))
+        following_column_top = max(
+            0,
+            min(int(following_column_top), height - self.ROW_HEIGHT),
+        )
         first_capacity = self.rows_per_column(height - first_column_top)
         remaining = max(0, len(self.rows) - first_capacity)
         if remaining == 0:
             return 1
-        full_capacity = self.rows_per_column(height)
-        return 1 + (remaining + full_capacity - 1) // full_capacity
+        following_capacity = self.rows_per_column(height - following_column_top)
+        return 1 + (remaining + following_capacity - 1) // following_capacity
 
     def _ensure_lines(self, count):
         while len(self.column_lines) < count:
@@ -1079,6 +1133,7 @@ class _AxisCategoryGrid(QWidget):
         column_gap,
         line_gap,
         first_column_top=0,
+        following_column_top=0,
     ):
         width = max(1, int(width))
         height = max(self.ROW_HEIGHT, int(height))
@@ -1090,9 +1145,16 @@ class _AxisCategoryGrid(QWidget):
             0,
             min(int(first_column_top), height - self.ROW_HEIGHT),
         )
+        following_column_top = max(
+            0,
+            min(int(following_column_top), height - self.ROW_HEIGHT),
+        )
         first_capacity = self.rows_per_column(height - first_column_top)
-        full_capacity = self.rows_per_column(height)
-        capacity = first_capacity + max(visible_columns - 1, 0) * full_capacity
+        following_capacity = self.rows_per_column(height - following_column_top)
+        capacity = (
+            first_capacity
+            + max(visible_columns - 1, 0) * following_capacity
+        )
         overflowed = len(self.rows) > capacity
         visible_row_count = min(
             len(self.rows),
@@ -1100,7 +1162,7 @@ class _AxisCategoryGrid(QWidget):
         )
 
         self._rows_per_column = first_capacity
-        self._full_rows_per_column = full_capacity
+        self._full_rows_per_column = following_capacity
         self._visible_columns = visible_columns
         self._overflowed = overflowed
         self.setGeometry(0, 0, width, height)
@@ -1110,11 +1172,16 @@ class _AxisCategoryGrid(QWidget):
             if item_index < first_capacity:
                 return 0, item_index
             remainder = item_index - first_capacity
-            return 1 + remainder // full_capacity, remainder % full_capacity
+            return (
+                1 + remainder // following_capacity,
+                remainder % following_capacity,
+            )
 
         def column_metrics(column):
-            top = first_column_top if column == 0 else 0
-            column_capacity = first_capacity if column == 0 else full_capacity
+            top = first_column_top if column == 0 else following_column_top
+            column_capacity = (
+                first_capacity if column == 0 else following_capacity
+            )
             available_height = max(self.ROW_HEIGHT, height - top)
             if column_capacity > 1:
                 gap = max(
@@ -1208,15 +1275,39 @@ class _AxisCategoryGrid(QWidget):
 
 
 class _AxisColorPanel(QWidget):
+    MODE_ROW_HEIGHT = 22
     TITLE_HEIGHT = 17
     TITLE_GAP = 3
+    GROUP_GAP = 4
 
-    def __init__(self, categories, heading_style, parent=None):
+    def __init__(
+        self,
+        categories,
+        state,
+        state_changed,
+        accent,
+        heading_style,
+        parent=None,
+    ):
         super().__init__(parent)
+        self.state = state
+        self._state_changed = state_changed
         self.category_count = len(categories)
         axis_options = (
             _AxisVisualOption("axis", "轴体", AppConfig.COLOR_GRADIENT_START),
             _AxisVisualOption("font", "字体", "#333333"),
+        )
+        self.completed_label = QLabel("已完成显示", self)
+        self.completed_label.setStyleSheet(heading_style)
+        self.completed_switch = _AxisToggleSwitch(accent, self)
+        self.completed_switch.setChecked(bool(self.state.get("show_completed", True)))
+        self.completed_switch.setToolTip("显示已完成日程")
+        self.completed_switch.toggled.connect(
+            lambda checked: self._state_changed(
+                "show_completed",
+                bool(checked),
+                True,
+            )
         )
         self.axis_title_label = QLabel("数轴", self)
         self.axis_title_label.setStyleSheet(heading_style)
@@ -1230,24 +1321,32 @@ class _AxisColorPanel(QWidget):
         self.category_count = len(categories)
         return self.category_grid.set_categories(categories)
 
-    def _category_grid_y(self):
+    def _axis_title_y(self):
+        return self.MODE_ROW_HEIGHT
+
+    def _axis_grid_y(self):
+        return self._axis_title_y() + self.TITLE_HEIGHT + self.TITLE_GAP
+
+    def _category_title_y(self):
         axis_rows_height = (
             2 * _AxisCategoryGrid.ROW_HEIGHT + _AxisCategoryGrid.ROW_GAP
         )
-        return (
-            self.TITLE_HEIGHT
-            + self.TITLE_GAP
-            + axis_rows_height
-            + 5
-            + self.TITLE_HEIGHT
-            + self.TITLE_GAP
-        )
+        return self._axis_grid_y() + axis_rows_height + self.GROUP_GAP
+
+    def _category_grid_y(self):
+        return self._category_title_y() + self.TITLE_HEIGHT + self.TITLE_GAP
 
     def needed_columns(self, height):
         return self.category_grid.needed_columns(
             max(_AxisCategoryGrid.ROW_HEIGHT, int(height)),
             self._category_grid_y(),
+            self._axis_grid_y(),
         )
+
+    def apply_state(self, state):
+        blocker = QSignalBlocker(self.completed_switch)
+        self.completed_switch.setChecked(bool(state.get("show_completed", True)))
+        blocker.unblock()
 
     def set_layout_density(
         self,
@@ -1259,8 +1358,24 @@ class _AxisColorPanel(QWidget):
         line_gap,
     ):
         self.resize(max(1, int(width)), max(1, int(height)))
-        self.axis_title_label.setGeometry(0, 0, self.width(), self.TITLE_HEIGHT)
-        axis_grid_y = self.TITLE_HEIGHT + self.TITLE_GAP
+        completed_switch_x = max(0, column_width - self.completed_switch.width())
+        self.completed_label.setGeometry(
+            0,
+            0,
+            max(1, completed_switch_x - 5),
+            self.MODE_ROW_HEIGHT,
+        )
+        self.completed_switch.move(
+            completed_switch_x,
+            max(0, (self.MODE_ROW_HEIGHT - self.completed_switch.height()) // 2),
+        )
+        self.axis_title_label.setGeometry(
+            0,
+            self._axis_title_y(),
+            column_width,
+            self.TITLE_HEIGHT,
+        )
+        axis_grid_y = self._axis_grid_y()
         axis_grid_height = (
             2 * _AxisCategoryGrid.ROW_HEIGHT + _AxisCategoryGrid.ROW_GAP
         )
@@ -1273,7 +1388,7 @@ class _AxisColorPanel(QWidget):
             line_gap,
         )
         self.axis_grid.move(0, axis_grid_y)
-        category_title_y = axis_grid_y + axis_grid_height + 5
+        category_title_y = self._category_title_y()
         self.category_title_label.setGeometry(
             0,
             category_title_y,
@@ -1289,9 +1404,12 @@ class _AxisColorPanel(QWidget):
             column_gap,
             line_gap,
             grid_y,
+            axis_grid_y,
         )
         self.category_grid.move(0, 0)
         self.category_grid.lower()
+        self.completed_label.raise_()
+        self.completed_switch.raise_()
         self.axis_title_label.raise_()
         self.axis_grid.raise_()
         self.category_title_label.raise_()
@@ -1331,6 +1449,7 @@ class _AxisOptionColumn(QWidget):
         self.state = state
         self._state_changed = state_changed
         self._button_groups = []
+        self._option_buttons = {}
         self.nonlinear_label = QLabel("非均匀显示", self)
         self.nonlinear_label.setStyleSheet(heading_style)
         self.nonlinear_switch = _AxisToggleSwitch(accent, self)
@@ -1416,8 +1535,20 @@ class _AxisOptionColumn(QWidget):
                 )
             )
             group.addButton(radio)
+            self._option_buttons.setdefault(state_key, {})[value] = radio
             buttons.append(radio)
         return buttons
+
+    def apply_state(self, state):
+        blocker = QSignalBlocker(self.nonlinear_switch)
+        self.nonlinear_switch.setChecked(bool(state.get("nonlinear", True)))
+        blocker.unblock()
+        for key in ("direction", "range"):
+            selected = self._option_buttons.get(key, {}).get(state.get(key))
+            if selected is not None:
+                blocker = QSignalBlocker(selected)
+                selected.setChecked(True)
+                blocker.unblock()
 
     def set_layout_density(self, width, height, line_gap):
         self.resize(max(1, int(width)), max(1, int(height)))
@@ -1564,7 +1695,14 @@ class _AxisSettingsPreview(QFrame):
         return color
 
     def _build_preview_items(self, left, right, axis_y):
-        count = len(self.category_rows)
+        row_specs = []
+        for row in self.category_rows:
+            seed = self._stable_seed(row)
+            completed = bool((seed >> 3) % 3 == 0)
+            if self.state.get("show_completed", True) or not completed:
+                row_specs.append((row, seed, completed))
+
+        count = len(row_specs)
         if count == 0:
             return []
 
@@ -1575,11 +1713,9 @@ class _AxisSettingsPreview(QFrame):
             self.INTERVAL_WIDTH_LIMITS["month"],
         )
         items = []
-        for index, row in enumerate(self.category_rows):
-            seed = self._stable_seed(row)
+        for index, (row, seed, completed) in enumerate(row_specs):
             is_interval = bool(seed & 1)
             importance = (seed >> 1) % 3
-            completed = bool((seed >> 3) % 3 == 0)
             marker_height = _ScheduleAxisCanvas.MARKER_HEIGHTS[importance]
             slot_left = left + index * slot_width
             slot_right = slot_left + slot_width
@@ -1814,9 +1950,11 @@ class _AxisSettingsPanel(QWidget):
         super().__init__(parent)
         self.state = {
             "nonlinear": True,
+            "show_completed": True,
             "direction": "both",
             "range": "month",
         }
+        self._category_preferences = {}
         accent = AppConfig.COLOR_GRADIENT_START
         heading_style = (
             "color: #333333; font-size: 11px; font-weight: bold; "
@@ -1840,6 +1978,9 @@ class _AxisSettingsPanel(QWidget):
         self._button_groups = self.range_panel._button_groups
         self.color_panel = _AxisColorPanel(
             categories,
+            self.state,
+            self._set_option,
+            accent,
             heading_style,
             self.controls_container,
         )
@@ -2058,6 +2199,62 @@ class _AxisSettingsPanel(QWidget):
             row.appearance_changed.connect(self.appearance_changed.emit)
             self._connected_appearance_row_ids.add(row_id)
 
+    @staticmethod
+    def _apply_row_preference(row, preference):
+        if row is None or not isinstance(preference, dict):
+            return
+        row.set_appearance(
+            preference.get("color", row.color_value),
+            preference.get("alpha", 100),
+        )
+
+    def restore_preferences(self, preferences):
+        if not isinstance(preferences, dict):
+            return
+        state = preferences.get("state", {})
+        self.state.update(state)
+        self.range_panel.apply_state(self.state)
+        self.color_panel.apply_state(self.state)
+
+        appearance = preferences.get("appearance", {})
+        axis_rows = {
+            str(row.category_id): row for row in self.color_panel.axis_grid.rows
+        }
+        for row_id in ("axis", "font"):
+            self._apply_row_preference(axis_rows.get(row_id), appearance.get(row_id))
+
+        self._category_preferences = dict(preferences.get("categories", {}))
+        for row in self.color_panel.category_grid.rows:
+            self._apply_row_preference(
+                row,
+                self._category_preferences.get(str(row.category_id)),
+            )
+        self.preview_frame.update()
+
+    def preference_snapshot(self):
+        axis_rows = {
+            str(row.category_id): row for row in self.color_panel.axis_grid.rows
+        }
+        appearance = {
+            row_id: axis_rows[row_id].appearance_preference()
+            for row_id in ("axis", "font")
+            if row_id in axis_rows
+        }
+        categories = dict(self._category_preferences)
+        for row in self.color_panel.category_grid.rows:
+            category_id = str(row.category_id)
+            if row.has_source_override():
+                categories[category_id] = row.appearance_preference()
+            else:
+                categories.pop(category_id, None)
+        self._category_preferences = categories
+        return {
+            "version": 1,
+            "state": dict(self.state),
+            "appearance": appearance,
+            "categories": categories,
+        }
+
     def appearance_snapshot(self):
         axis_rows = self.color_panel.axis_grid.rows
         axis_color = (
@@ -2078,6 +2275,11 @@ class _AxisSettingsPanel(QWidget):
 
     def reload_categories(self, categories):
         added_rows = self.color_panel.set_categories(categories)
+        for row in added_rows:
+            self._apply_row_preference(
+                row,
+                self._category_preferences.get(str(row.category_id)),
+            )
         self._connect_appearance_rows(added_rows)
         self.preview_frame.set_category_rows(
             self.color_panel.category_grid.rows
@@ -2220,6 +2422,7 @@ class ScheduleAxisBoard(QWidget):
             ScheduleAxisService.load_category_options(),
             self.settings_page,
         )
+        self.settings_panel.restore_preferences(get_axis_board_preferences())
         self.settings_panel.option_changed.connect(self._on_setting_option_changed)
         self.settings_panel.appearance_changed.connect(
             self._on_setting_appearance_changed
@@ -2259,9 +2462,10 @@ class ScheduleAxisBoard(QWidget):
     def _on_setting_option_changed(self, key, value):
         del value
         self._apply_display_options()
-        if key in {"direction", "range"}:
+        if key in {"direction", "range", "show_completed"}:
             self._update_annotation_text()
             self._update_header_button_positions()
+        self._save_preferences()
 
     def _on_setting_appearance_changed(self):
         if not hasattr(self, "settings_panel"):
@@ -2270,6 +2474,11 @@ class ScheduleAxisBoard(QWidget):
             self.settings_panel.appearance_snapshot()
         )
         self.canvas.set_appearance(axis_color, font_color, category_colors)
+        self._save_preferences()
+
+    def _save_preferences(self):
+        if hasattr(self, "settings_panel"):
+            set_axis_board_preferences(self.settings_panel.preference_snapshot())
 
     def _apply_display_options(self):
         state = self.settings_panel.state
@@ -2277,6 +2486,7 @@ class ScheduleAxisBoard(QWidget):
             state.get("direction", "both"),
             state.get("range", "month"),
             bool(state.get("nonlinear", True)),
+            bool(state.get("show_completed", True)),
         )
 
     def _apply_settings_to_canvas(self):
@@ -2298,8 +2508,13 @@ class ScheduleAxisBoard(QWidget):
             range_text = f"过去{span}"
         else:
             range_text = f"±{span}"
+        completion_text = (
+            "线下：已完成"
+            if state.get("show_completed", True)
+            else "已完成：隐藏"
+        )
         self._annotation_text = (
-            "线上：未完成 · 线下：已完成 · 竖线：DDL/单时间 · "
+            f"线上：未完成 · {completion_text} · 竖线：DDL/单时间 · "
             "横条：时间段 · 拖动平移/滚轮缩放 · "
             f"范围 {range_text}"
         )

@@ -1,3 +1,4 @@
+from src.services.category_color_service import CategoryColorService
 from src.services.category_policy_service import CategoryPolicyService
 
 
@@ -40,8 +41,16 @@ class CategoryRepository:
         except Exception:
             return None
 
-    def add_category(self, name, color="#0cc0df", list_type="schedule"):
+    def add_category(self, name, color=None, list_type="schedule"):
         try:
+            if color is None:
+                used_colors = (
+                    category.color
+                    for category in self._category_model.select(
+                        self._category_model.color
+                    )
+                )
+                color = CategoryColorService.choose_initial_color(used_colors)
             category = self._category_model.create(name=name, color=color, list_type=list_type)
             return category.id
         except Exception:

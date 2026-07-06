@@ -222,7 +222,7 @@ class DatabaseManager:
     def get_category(self, cat_id):
         return self.category_repository.get_category(cat_id)
 
-    def add_category(self, name, color="#0cc0df", list_type='schedule'):
+    def add_category(self, name, color=None, list_type='schedule'):
         return self.category_repository.add_category(name, color, list_type)
         
     def check_category_status(self, cat_id):

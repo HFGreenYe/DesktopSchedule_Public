@@ -307,3 +307,92 @@
   - 自定义重复规则。
   - 弹窗统一检查与美化。
   - 模式切换入口与后续卡片 / 课表真实渲染目标。
+
+---
+
+### 2026-06-18 至 2026-07-06：功能补充、月 panel 路由与坐标看板第一版归档
+
+阶段范围：
+
+- 月界面窄栏添加表单、清单 / 时间 / 提醒 picker 和持久 panel 的多轮 UI 修正。
+- `MP-0` 到 `MP-5` 月日程持久 panel 详情、生命周期、动态编辑路由和刷新阶段。
+- 坐标看板样本、架构收口、真实显示设置接线、视觉交互及持久化。
+- 主题选色弹窗单窗口化、圆角和内部几何对齐、自定义颜色槽持久化。
+- 日 / 周 / 月 / 挂起窗口的主题色与拖动交互细修。
+- 天气看板与安全加密入口壳，以及本地数据库加密 / 多账号长期规划记录。
+
+实际修改文件摘要：
+
+- 数据与服务：
+  - `src/data/database.py`
+  - `src/repositories/category_repository.py`
+  - `src/services/category_color_service.py`
+  - `src/services/schedule_axis_service.py`
+- 坐标看板与设置：
+  - `src/ui/popups/schedule_axis_board.py`
+  - `src/utils/axis_board_preferences.py`
+  - `src/utils/color_preferences.py`
+  - `src/ui/common/themed_color_dialog.py`
+  - `src/ui/main_window.py`
+  - `src/utils/signals.py`
+- 月 panel 与共享详情：
+  - `src/ui/month_window.py`
+  - `src/ui/popups/month_day_panel.py`
+  - `src/ui/popups/month_day_hover_preview.py`
+  - `src/ui/schedule_detail_pop.py`
+- 其他 UI：
+  - `src/ui/add_view.py`
+  - `src/ui/add_view_week.py`
+  - `src/ui/list_picker.py`
+  - `src/ui/time_picker.py`
+  - `src/ui/time_picker_week.py`
+  - `src/ui/week_window.py`
+  - `src/ui/dashboard.py`
+  - `src/ui/todo.py`
+  - `src/ui/todo_board.py`
+  - `src/ui/suspend_window.py`
+  - `src/ui/suspend_window_week.py`
+  - `src/ui/suspend_window_month.py`
+  - `src/ui/popups/weather_board.py`
+  - `src/ui/encryption_window.py`
+  - `src/ui/utils/window_drag_controller.py`
+- 配置、样式与资源：
+  - `src/config.py`
+  - `src/utils/styles.py`
+  - `src/utils/startup_manager.py`
+  - `src/utils/window_preferences.py`
+  - `assets/icons/axis.svg`
+  - `assets/icons/calendar.svg`
+  - `assets/icons/festival.svg`
+  - `assets/icons/security_lock.svg`
+  - `assets/icons/set.svg`
+- 管理文档：
+  - `manage_instruction/Final_Formulation.md`
+  - `manage_instruction/Work_Instruction.md`
+  - `manage_instruction/Work_Log.md`
+  - `manage_instruction/Work_Task_Prompts.md`
+
+完成内容：
+
+- 月日程 panel 完成紧凑列表、共享详情打开、跨视图保留、动态编辑路由和保存后多视图刷新；后续补齐无子详情时的层级恢复。
+- 月界面 hover 预览完成宽度限制、长标题换行和屏幕边界回退；持久 panel 标题省略、拖动、主题边框和日程项层次继续细化。
+- 坐标看板完成数据库日程投影、DDL / 时间段 marker、完成状态上下分区、重要性高度、重叠轨道、范围筛选与跨边界裁剪。
+- 坐标看板完成未来 / 双向 / 过去、五档范围、线性 / 非均匀映射、拖动、缩放、resize、置顶、hover 辅助线、主题化信息弹窗和单击详情。
+- 设置页完成响应式分列、实时清单同步、效果预览和真实画布接线；方向、跨度、非均匀开关、轴体 / 字体外观及清单覆盖通过独立 `QSettings` 持久化。
+- 新清单创建改为从未使用的高区分度色板随机选择初始颜色，色板耗尽后继续生成不重复颜色；不批量改写既有清单。
+- 主题选色弹窗完成单顶级窗口、圆角透明背景、动态中文标题、深浅主题适配、HSV / RGB / HTML 区域校准及自定义颜色槽持久化。
+- 日 / 周 / 月及挂起窗口完成多项主题派生色、广域拖动和布局细修；天气看板、安全加密入口壳和加密 / 多账号长期规划已记录。
+
+验收结果：
+
+- `MP-0 ~ MP-5` 的结构、信号、生命周期、路由、刷新 fake / monkeypatch / offscreen smoke 和目标文件 `py_compile` 已通过，阶段日志明确结论为可归档。
+- 坐标映射正反变换、方向边界、范围筛选、跨边界裁剪、marker 轨道、hover 辅助线、文字层级、resize 回退和设置真实画布接线均在对应小轮完成纯逻辑或 PyQt offscreen 验证。
+- 主题选色弹窗在对应小轮完成单窗口、中文文本、圆角遮罩、控件几何和自定义颜色持久化检查；系统级屏幕拾色继续依赖真实 Windows 回归。
+- 本次归档复核通过静态源码对照和 `git diff --check`；最后新增的看板设置持久化与随机清单配色因 Codex 工具额度审批限制未能再次运行项目 `.venv`，未伪称本轮运行时复验通过。
+
+风险和后续事项：
+
+- 坐标看板后续可增加完成日程独立开关、驻留低频定时刷新、按轨道自动扩窗和 Windows 高 DPI / 多屏持续回归；这些不阻塞第一版归档。
+- `schedule_axis_board.py` 仍同时承载窗口、画布、设置 UI、预览和 resize 行为；后续扩展前应先用测试锁定映射与状态，再做拆分。
+- 课程表模式、搜索 / 筛选、导出、自动化测试与 CI、真实换肤、字体设置、本地加密 / 多账号及云同步仍属于后续独立阶段。
+- 安全加密窗口当前只是入口壳，不包含真实加密、密钥或迁移逻辑。
