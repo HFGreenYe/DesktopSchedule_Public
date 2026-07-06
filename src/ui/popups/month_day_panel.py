@@ -237,7 +237,7 @@ class MonthDayPanel(QWidget):
         painter.setBrush(QBrush(gradient))
         painter.drawRoundedRect(rect, 12, 12)
 
-        # 内白线：距边缘 4px，2px 宽
+        # 内框：距边缘 4px，2px 白线，无填充
         inner_rect = rect.adjusted(4, 4, -4, -4)
         painter.setPen(QPen(QColor("#FFFFFF"), 2))
         painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -297,7 +297,7 @@ class MonthDayPanel(QWidget):
         item_frame.setStyleSheet(
             """
             QFrame#monthDayPanelItem {
-                background: rgba(255, 255, 255, 0.12);
+                background: rgba(255, 255, 255, 0.15);
                 border: 1px solid rgba(255, 255, 255, 0.22);
                 border-radius: 7px;
             }
