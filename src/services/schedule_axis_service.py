@@ -26,6 +26,13 @@ class ScheduleAxisService:
     MIN_RANGE_HOURS = 24.0
     MAX_RANGE_HOURS = 365.0 * 24.0
     FALLBACK_COLOR = "#ffffff"
+    RANGE_HOURS_BY_KEY = {
+        "day": 24.0,
+        "week": 7.0 * 24.0,
+        "two_weeks": 14.0 * 24.0,
+        "month": 30.0 * 24.0,
+        "year": 365.0 * 24.0,
+    }
 
     @classmethod
     def load_category_options(cls):
@@ -110,18 +117,31 @@ class ScheduleAxisService:
         left,
         right,
         log_scale=1.0,
+        direction="both",
     ):
         range_hours = max(float(range_hours), cls.MIN_RANGE_HOURS)
-        delta_hours = max(-range_hours, min(float(delta_hours), range_hours))
+        direction = cls.normalize_direction(direction)
+        minimum_delta, maximum_delta = cls.display_bounds(range_hours, direction)
+        delta_hours = max(minimum_delta, min(float(delta_hours), maximum_delta))
+        left = float(left)
+        right = float(right)
+        width = max(right - left, 0.0)
+        if width == 0:
+            return left
+
+        if direction == "future":
+            normalized = cls._log_fraction(delta_hours, range_hours, log_scale)
+            return left + normalized * width
+        if direction == "past":
+            normalized = cls._log_fraction(abs(delta_hours), range_hours, log_scale)
+            return right - normalized * width
+
         center = (float(left) + float(right)) / 2.0
-        half_width = max((float(right) - float(left)) / 2.0, 0.0)
+        half_width = width / 2.0
         if delta_hours == 0 or half_width == 0:
             return center
 
-        log_scale = max(float(log_scale), 1e-12)
-        normalized = math.log1p(log_scale * abs(delta_hours)) / math.log1p(
-            log_scale * range_hours
-        )
+        normalized = cls._log_fraction(abs(delta_hours), range_hours, log_scale)
         direction = -1.0 if delta_hours < 0 else 1.0
         return center + direction * normalized * half_width
 
@@ -133,21 +153,70 @@ class ScheduleAxisService:
         left,
         right,
         log_scale=1.0,
+        direction="both",
     ):
         range_hours = max(float(range_hours), cls.MIN_RANGE_HOURS)
+        direction = cls.normalize_direction(direction)
+        left = float(left)
+        right = float(right)
+        width = max(right - left, 0.0)
+        if width == 0:
+            return 0.0
+
+        if direction == "future":
+            normalized = max(0.0, min(1.0, (float(x) - left) / width))
+            return cls._inverse_log_fraction(normalized, range_hours, log_scale)
+        if direction == "past":
+            normalized = max(0.0, min(1.0, (right - float(x)) / width))
+            return -cls._inverse_log_fraction(normalized, range_hours, log_scale)
+
         center = (float(left) + float(right)) / 2.0
-        half_width = max((float(right) - float(left)) / 2.0, 0.0)
+        half_width = width / 2.0
         if half_width == 0:
             return 0.0
 
         normalized = max(-1.0, min(1.0, (float(x) - center) / half_width))
         direction = -1.0 if normalized < 0 else 1.0
         magnitude = abs(normalized)
-        log_scale = max(float(log_scale), 1e-12)
-        delta = math.expm1(
-            magnitude * math.log1p(log_scale * range_hours)
-        ) / log_scale
+        delta = cls._inverse_log_fraction(magnitude, range_hours, log_scale)
         return direction * delta
+
+    @classmethod
+    def range_hours_for_key(cls, range_key):
+        return cls.RANGE_HOURS_BY_KEY.get(
+            range_key,
+            cls.RANGE_HOURS_BY_KEY["month"],
+        )
+
+    @classmethod
+    def display_bounds(cls, range_hours, direction="both"):
+        range_hours = max(float(range_hours), cls.MIN_RANGE_HOURS)
+        direction = cls.normalize_direction(direction)
+        if direction == "future":
+            return 0.0, range_hours
+        if direction == "past":
+            return -range_hours, 0.0
+        return -range_hours, range_hours
+
+    @staticmethod
+    def normalize_direction(direction):
+        return direction if direction in {"future", "past", "both"} else "both"
+
+    @staticmethod
+    def _log_fraction(hours, range_hours, log_scale):
+        log_scale = max(float(log_scale), 1e-12)
+        hours = max(0.0, min(float(hours), float(range_hours)))
+        return math.log1p(log_scale * hours) / math.log1p(
+            log_scale * float(range_hours)
+        )
+
+    @staticmethod
+    def _inverse_log_fraction(fraction, range_hours, log_scale):
+        log_scale = max(float(log_scale), 1e-12)
+        fraction = max(0.0, min(float(fraction), 1.0))
+        return math.expm1(
+            fraction * math.log1p(log_scale * float(range_hours))
+        ) / log_scale
 
     @classmethod
     def solve_log_scale(cls, range_hours, focus_hours, target_fraction):

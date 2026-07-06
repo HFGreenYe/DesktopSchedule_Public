@@ -2394,6 +2394,7 @@ class MonthWindow(FramelessMainWindow):
         self.show_toast("✅ 添加日程成功")
         self._close_add_view()
         self._refresh_schedule_marker_cache()
+        self.schedule_updated.emit(None)
 
     def show_toast(self, message):
         from PyQt6.QtWidgets import QLabel

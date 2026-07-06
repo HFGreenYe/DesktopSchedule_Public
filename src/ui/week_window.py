@@ -768,7 +768,8 @@ class WeekWindow(FramelessMainWindow):
 
     def on_schedule_saved(self):
         self.switch_to_main_board()
-        self.refresh_week_data() 
+        self.refresh_week_data()
+        self.schedule_updated.emit(None)
         print("✅ 成功在周视图中添加了日程并存入数据库！")
 
     def go_to_time_picker(self, start, end):

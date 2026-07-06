@@ -160,65 +160,145 @@ class _ScheduleAxisCanvas(QWidget):
     AXIS_MARKER_GAP = 6.0
     AXIS_VERTICAL_RATIO = 0.618
     CENTER_TICK_HALF_HEIGHT = 5.0
-    MONTH_RANGE_HOURS = 30.0 * 24.0
+    DEFAULT_RANGE_KEY = "month"
+    DEFAULT_DIRECTION = "both"
     FOCUS_HOURS = 7.0 * 24.0
+    TICK_COUNTS = {
+        "day": 2,
+        "week": 4,
+        "two_weeks": 6,
+        "month": 8,
+        "year": 11,
+    }
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMouseTracking(True)
+        self.all_projections = []
         self.projections = []
-        self.range_hours = self.MONTH_RANGE_HOURS
+        self.range_key = self.DEFAULT_RANGE_KEY
+        self.range_hours = ScheduleAxisService.range_hours_for_key(self.range_key)
+        self.direction = self.DEFAULT_DIRECTION
         self.hit_regions = []
         self._hovered_projection = None
         self.virtual_axis_width = 960.0
+        self._default_visible_fraction = 0.75
         self.nonlinear_enabled = True
         self._nonlinear_log_scale = 1.0
         self.log_scale = 1.0
         self.zoom = 1.0
         self.view_center_x = self.virtual_axis_width / 2.0
+        self._view_pristine = True
         self.vertical_offset = 0.0
+        self.axis_color = QColor(AppConfig.COLOR_GRADIENT_START)
+        self.font_color = QColor(AppConfig.COLOR_GRADIENT_START)
+        self.category_colors = {}
         self._pan_start = None
         self._pan_center_start = 0.0
         self._pan_vertical_start = 0.0
 
-    def configure_month_demo(self, virtual_axis_width, default_viewport_width):
+    def configure_viewport(self, virtual_axis_width, default_viewport_width):
         self.virtual_axis_width = max(float(virtual_axis_width), 1.0)
-        visible_fraction = max(
+        self._default_visible_fraction = max(
             0.05,
             min(float(default_viewport_width) / self.virtual_axis_width, 1.0),
         )
-        self._nonlinear_log_scale = ScheduleAxisService.solve_log_scale(
-            self.MONTH_RANGE_HOURS,
-            self.FOCUS_HOURS,
-            visible_fraction,
-        )
-        self.log_scale = (
-            self._nonlinear_log_scale if self.nonlinear_enabled else 1e-12
-        )
-        self.range_hours = self.MONTH_RANGE_HOURS
-        self.zoom = 1.0
-        self.view_center_x = self.virtual_axis_width / 2.0
-        self.vertical_offset = 0.0
+        self._recalculate_log_scale()
+        self._reset_view()
         self.update()
 
-    def set_nonlinear_enabled(self, enabled):
-        self.nonlinear_enabled = bool(enabled)
+    def _recalculate_log_scale(self):
+        focus_hours = min(self.FOCUS_HOURS, self.range_hours / 4.0)
+        self._nonlinear_log_scale = ScheduleAxisService.solve_log_scale(
+            self.range_hours,
+            focus_hours,
+            self._default_visible_fraction,
+        )
         self.log_scale = (
             self._nonlinear_log_scale if self.nonlinear_enabled else 1e-12
         )
+
+    def _reset_view(self):
+        self.zoom = 1.0
+        self.vertical_offset = 0.0
+        self._view_pristine = True
+        self._apply_default_view_anchor()
+
+    def _apply_default_view_anchor(self):
+        left = 20.0
+        right = max(float(self.width() - 20), left + 1.0)
+        visible_width = min((right - left) / self.zoom, self.virtual_axis_width)
+        if self.direction == "future":
+            self.view_center_x = visible_width / 2.0
+        elif self.direction == "past":
+            self.view_center_x = self.virtual_axis_width - visible_width / 2.0
+        else:
+            self.view_center_x = self.virtual_axis_width / 2.0
+        self._clamp_view_center(left, right)
+
+    def set_nonlinear_enabled(self, enabled):
+        self.set_display_options(
+            self.direction,
+            self.range_key,
+            bool(enabled),
+        )
+
+    def set_display_options(self, direction, range_key, nonlinear_enabled):
+        normalized_direction = ScheduleAxisService.normalize_direction(direction)
+        normalized_range_key = (
+            range_key
+            if range_key in ScheduleAxisService.RANGE_HOURS_BY_KEY
+            else self.DEFAULT_RANGE_KEY
+        )
+        changed = (
+            normalized_direction != self.direction
+            or normalized_range_key != self.range_key
+            or bool(nonlinear_enabled) != self.nonlinear_enabled
+        )
+        self.direction = normalized_direction
+        self.range_key = normalized_range_key
+        self.range_hours = ScheduleAxisService.range_hours_for_key(self.range_key)
+        self.nonlinear_enabled = bool(nonlinear_enabled)
+        self._recalculate_log_scale()
+        self._apply_projection_filter()
+        if changed:
+            self._reset_view()
         self.update()
 
     def set_data(self, projections, range_hours):
         del range_hours
-        self.projections = [
-            projection
-            for projection in projections
-            if projection.end_delta_hours >= -self.MONTH_RANGE_HOURS
-            and projection.start_delta_hours <= self.MONTH_RANGE_HOURS
-        ]
-        self.range_hours = self.MONTH_RANGE_HOURS
+        self.all_projections = list(projections)
+        self._apply_projection_filter()
         self._hovered_projection = None
         self.hit_regions.clear()
+        self.update()
+
+    def _apply_projection_filter(self):
+        minimum_delta, maximum_delta = ScheduleAxisService.display_bounds(
+            self.range_hours,
+            self.direction,
+        )
+        self.projections = [
+            projection
+            for projection in self.all_projections
+            if projection.end_delta_hours >= minimum_delta
+            and projection.start_delta_hours <= maximum_delta
+        ]
+        self._hovered_projection = None
+        self.hit_regions.clear()
+
+    def set_appearance(self, axis_color, font_color, category_colors):
+        self.axis_color = QColor(axis_color)
+        if not self.axis_color.isValid():
+            self.axis_color = QColor(AppConfig.COLOR_GRADIENT_START)
+        self.font_color = QColor(font_color)
+        if not self.font_color.isValid():
+            self.font_color = QColor(AppConfig.COLOR_GRADIENT_START)
+        self.category_colors = {
+            category_id: QColor(color)
+            for category_id, color in category_colors.items()
+            if QColor(color).isValid()
+        }
         self.update()
 
     def paintEvent(self, event):
@@ -234,19 +314,31 @@ class _ScheduleAxisCanvas(QWidget):
         left = 20.0
         right = max(float(self.width() - 20), left + 1)
         axis_y = float(self.height()) * self.AXIS_VERTICAL_RATIO + self.vertical_offset
-        origin_x = self._virtual_to_screen(self.virtual_axis_width / 2.0, left, right)
+        origin_virtual_x = ScheduleAxisService.map_delta_to_x(
+            0.0,
+            self.range_hours,
+            0.0,
+            self.virtual_axis_width,
+            self.log_scale,
+            self.direction,
+        )
+        origin_x = self._virtual_to_screen(origin_virtual_x, left, right)
 
-        axis_color = QColor(AppConfig.COLOR_GRADIENT_START)
+        axis_color = QColor(self.axis_color)
+        font_color = QColor(self.font_color)
         painter.setPen(QPen(axis_color, 1.5))
         painter.drawLine(QPoint(round(left), round(axis_y)), QPoint(round(right), round(axis_y)))
-        painter.drawLine(QPoint(round(left), round(axis_y)), QPoint(round(left + 6), round(axis_y - 4)))
-        painter.drawLine(QPoint(round(left), round(axis_y)), QPoint(round(left + 6), round(axis_y + 4)))
-        painter.drawLine(QPoint(round(right), round(axis_y)), QPoint(round(right - 6), round(axis_y - 4)))
-        painter.drawLine(QPoint(round(right), round(axis_y)), QPoint(round(right - 6), round(axis_y + 4)))
+        if self.direction != "future":
+            painter.drawLine(QPoint(round(left), round(axis_y)), QPoint(round(left + 6), round(axis_y - 4)))
+            painter.drawLine(QPoint(round(left), round(axis_y)), QPoint(round(left + 6), round(axis_y + 4)))
+        if self.direction != "past":
+            painter.drawLine(QPoint(round(right), round(axis_y)), QPoint(round(right - 6), round(axis_y - 4)))
+            painter.drawLine(QPoint(round(right), round(axis_y)), QPoint(round(right - 6), round(axis_y + 4)))
+
+        self._draw_scale_ticks(painter, axis_y, left, right, axis_color)
 
         if left <= origin_x <= right:
-            center_tick_color = QColor(axis_color)
-            center_tick_color.setAlpha(150)
+            center_tick_color = self._color_with_alpha_factor(axis_color, 0.65)
             painter.setPen(QPen(center_tick_color, 1))
             painter.drawLine(
                 QPoint(
@@ -258,32 +350,24 @@ class _ScheduleAxisCanvas(QWidget):
                     round(axis_y + self.CENTER_TICK_HALF_HEIGHT),
                 ),
             )
-            painter.setPen(axis_color)
-            painter.drawText(
-                QRectF(origin_x - 25, axis_y + 8, 50, 18),
-                Qt.AlignmentFlag.AlignCenter,
-                "现在",
-            )
 
         left_delta = self._screen_to_delta(left, left, right)
         right_delta = self._screen_to_delta(right, left, right)
-        painter.setPen(axis_color)
-        painter.drawText(
-            QRectF(left, axis_y + 8, 92, 18),
-            Qt.AlignmentFlag.AlignLeft,
-            self._format_edge_delta(left_delta),
-        )
-        painter.drawText(
-            QRectF(right - 92, axis_y + 8, 92, 18),
-            Qt.AlignmentFlag.AlignRight,
-            self._format_edge_delta(right_delta),
-        )
 
         if not self.projections:
-            empty_color = QColor(axis_color)
-            empty_color.setAlpha(170)
+            empty_color = self._color_with_alpha_factor(font_color, 0.7)
             painter.setPen(empty_color)
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "暂无带时间的日程")
+            self._draw_axis_text(
+                painter,
+                axis_y,
+                left,
+                right,
+                origin_x,
+                left_delta,
+                right_delta,
+                font_color,
+            )
             return
 
         markers = self._layout_markers(left, right, axis_y)
@@ -305,6 +389,45 @@ class _ScheduleAxisCanvas(QWidget):
                 right,
             )
         painter.restore()
+        self._draw_axis_text(
+            painter,
+            axis_y,
+            left,
+            right,
+            origin_x,
+            left_delta,
+            right_delta,
+            font_color,
+        )
+
+    def _draw_axis_text(
+        self,
+        painter,
+        axis_y,
+        left,
+        right,
+        origin_x,
+        left_delta,
+        right_delta,
+        font_color,
+    ):
+        painter.setPen(font_color)
+        if self.direction == "both" and left <= origin_x <= right:
+            painter.drawText(
+                QRectF(origin_x - 25, axis_y + 8, 50, 18),
+                Qt.AlignmentFlag.AlignCenter,
+                "现在",
+            )
+        painter.drawText(
+            QRectF(left, axis_y + 8, 92, 18),
+            Qt.AlignmentFlag.AlignLeft,
+            self._format_edge_delta(left_delta),
+        )
+        painter.drawText(
+            QRectF(right - 92, axis_y + 8, 92, 18),
+            Qt.AlignmentFlag.AlignRight,
+            self._format_edge_delta(right_delta),
+        )
 
     def _layout_markers(self, left, right, axis_y):
         occupied_by_status = {False: [], True: []}
@@ -318,6 +441,7 @@ class _ScheduleAxisCanvas(QWidget):
                 0.0,
                 self.virtual_axis_width,
                 self.log_scale,
+                self.direction,
             )
             virtual_x2 = ScheduleAxisService.map_delta_to_x(
                 projection.end_delta_hours,
@@ -325,6 +449,7 @@ class _ScheduleAxisCanvas(QWidget):
                 0.0,
                 self.virtual_axis_width,
                 self.log_scale,
+                self.direction,
             )
             x1 = self._virtual_to_screen(virtual_x1, left, right)
             x2 = self._virtual_to_screen(virtual_x2, left, right)
@@ -398,7 +523,8 @@ class _ScheduleAxisCanvas(QWidget):
         y = marker["y"]
         marker_height = marker["height"]
         projection = marker["projection"]
-        color = QColor(projection.category_color)
+        category_id = getattr(projection.schedule, "category_id", None)
+        color = QColor(self.category_colors.get(category_id, projection.category_color))
         if not color.isValid():
             color = QColor(ScheduleAxisService.FALLBACK_COLOR)
 
@@ -454,8 +580,7 @@ class _ScheduleAxisCanvas(QWidget):
         if projection.is_interval:
             guide_xs.append(marker["x2"])
 
-        guide_color = QColor(AppConfig.COLOR_GRADIENT_START)
-        guide_color.setAlpha(150)
+        guide_color = self._color_with_alpha_factor(self.axis_color, 0.65)
         painter.save()
         painter.setPen(QPen(guide_color, 1.0, Qt.PenStyle.DashLine))
         for guide_x in guide_xs:
@@ -513,7 +638,7 @@ class _ScheduleAxisCanvas(QWidget):
             label_rects[0].moveRight(max(left, guide_xs[0] - 3.0))
             label_rects[1].moveLeft(min(right - label_rects[1].width(), guide_xs[1] + 3.0))
 
-        painter.setPen(QColor(AppConfig.COLOR_GRADIENT_START))
+        painter.setPen(self.font_color)
         for label_rect, label in zip(label_rects, labels):
             painter.drawText(label_rect, Qt.AlignmentFlag.AlignCenter, label)
 
@@ -541,15 +666,51 @@ class _ScheduleAxisCanvas(QWidget):
             0.0,
             self.virtual_axis_width,
             self.log_scale,
+            self.direction,
         )
 
     @staticmethod
     def _format_edge_delta(delta_hours):
+        if abs(delta_hours) < 0.01:
+            return "现在"
         direction = "过去" if delta_hours < 0 else "未来"
         hours = abs(delta_hours)
         if hours >= 24.0:
             return f"{direction} {max(1, round(hours / 24.0))}天"
         return f"{direction} {max(1, round(hours))}小时"
+
+    def _draw_scale_ticks(self, painter, axis_y, left, right, axis_color):
+        tick_count = self.TICK_COUNTS.get(self.range_key, self.TICK_COUNTS["month"])
+        tick_color = self._color_with_alpha_factor(axis_color, 0.65)
+        painter.setPen(QPen(tick_color, 1.0))
+        signs = []
+        if self.direction in {"past", "both"}:
+            signs.append(-1.0)
+        if self.direction in {"future", "both"}:
+            signs.append(1.0)
+        for sign in signs:
+            for index in range(1, tick_count + 1):
+                delta_hours = sign * self.range_hours * index / (tick_count + 1.0)
+                virtual_x = ScheduleAxisService.map_delta_to_x(
+                    delta_hours,
+                    self.range_hours,
+                    0.0,
+                    self.virtual_axis_width,
+                    self.log_scale,
+                    self.direction,
+                )
+                screen_x = self._virtual_to_screen(virtual_x, left, right)
+                if left <= screen_x <= right:
+                    painter.drawLine(
+                        QPointF(screen_x, axis_y - 2.0),
+                        QPointF(screen_x, axis_y + 2.0),
+                    )
+
+    @staticmethod
+    def _color_with_alpha_factor(color, factor):
+        adjusted = QColor(color)
+        adjusted.setAlpha(max(0, min(255, round(adjusted.alpha() * factor))))
+        return adjusted
 
     def _clamp_view_center(self, left, right):
         viewport_width = max(float(right) - float(left), 1.0)
@@ -575,6 +736,7 @@ class _ScheduleAxisCanvas(QWidget):
             right = max(float(self.width() - 20), left + 1.0)
             self.view_center_x = self._pan_center_start - delta.x() / self.zoom
             self.vertical_offset = self._pan_vertical_start + delta.y()
+            self._view_pristine = False
             self._clamp_view_center(left, right)
             self._hovered_projection = None
             self.hover_requested.emit(None, event.globalPosition().toPoint())
@@ -634,6 +796,7 @@ class _ScheduleAxisCanvas(QWidget):
         new_zoom = max(minimum_zoom, min(8.0, self.zoom * factor))
         screen_center = (left + right) / 2.0
         self.zoom = new_zoom
+        self._view_pristine = False
         self.view_center_x = virtual_under_cursor - (cursor_x - screen_center) / self.zoom
         self._clamp_view_center(left, right)
         self.update()
@@ -643,7 +806,10 @@ class _ScheduleAxisCanvas(QWidget):
         super().resizeEvent(event)
         left = 20.0
         right = max(float(self.width() - 20), left + 1.0)
-        self._clamp_view_center(left, right)
+        if self._view_pristine:
+            self._apply_default_view_anchor()
+        else:
+            self._clamp_view_center(left, right)
 
 
 class _ElidedLabel(QLabel):
@@ -1568,6 +1734,7 @@ class _AxisSettingsPreview(QFrame):
 
 class _AxisSettingsPanel(QWidget):
     option_changed = pyqtSignal(str, object)
+    appearance_changed = pyqtSignal()
 
     OUTER_LEFT = 12
     OUTER_TOP = 8
@@ -1627,6 +1794,9 @@ class _AxisSettingsPanel(QWidget):
             self.color_panel.category_grid.rows,
             self,
         )
+        self._connected_appearance_row_ids = set()
+        self._connect_appearance_rows(self.color_panel.axis_grid.rows)
+        self._connect_appearance_rows(self.color_panel.category_grid.rows)
         self._layout_snapshot = {}
 
     @staticmethod
@@ -1824,13 +1994,41 @@ class _AxisSettingsPanel(QWidget):
                 self.preview_frame.update()
             self.option_changed.emit(key, value)
 
+    def _connect_appearance_rows(self, rows):
+        for row in rows:
+            row_id = id(row)
+            if row_id in self._connected_appearance_row_ids:
+                continue
+            row.appearance_changed.connect(self.appearance_changed.emit)
+            self._connected_appearance_row_ids.add(row_id)
+
+    def appearance_snapshot(self):
+        axis_rows = self.color_panel.axis_grid.rows
+        axis_color = (
+            _AxisSettingsPreview._row_color(axis_rows[0])
+            if axis_rows
+            else QColor(AppConfig.COLOR_GRADIENT_START)
+        )
+        font_color = (
+            _AxisSettingsPreview._row_color(axis_rows[1])
+            if len(axis_rows) > 1
+            else QColor(AppConfig.COLOR_GRADIENT_START)
+        )
+        category_colors = {
+            row.category_id: _AxisSettingsPreview._row_color(row)
+            for row in self.color_panel.category_grid.rows
+        }
+        return axis_color, font_color, category_colors
+
     def reload_categories(self, categories):
-        self.color_panel.set_categories(categories)
+        added_rows = self.color_panel.set_categories(categories)
+        self._connect_appearance_rows(added_rows)
         self.preview_frame.set_category_rows(
             self.color_panel.category_grid.rows
         )
         self._relayout()
         self.update()
+        self.appearance_changed.emit()
 
 
 class ScheduleAxisBoard(QWidget):
@@ -1943,7 +2141,7 @@ class ScheduleAxisBoard(QWidget):
         display_layout.setSpacing(0)
 
         self.canvas = _ScheduleAxisCanvas()
-        self.canvas.configure_month_demo(
+        self.canvas.configure_viewport(
             self._month_virtual_axis_width,
             self._month_default_axis_viewport_width,
         )
@@ -1967,6 +2165,9 @@ class ScheduleAxisBoard(QWidget):
             self.settings_page,
         )
         self.settings_panel.option_changed.connect(self._on_setting_option_changed)
+        self.settings_panel.appearance_changed.connect(
+            self._on_setting_appearance_changed
+        )
         settings_layout.addWidget(self.settings_panel)
         self.settings_page.hide()
 
@@ -1987,6 +2188,7 @@ class ScheduleAxisBoard(QWidget):
             datetime.datetime.now()
         )
         self.canvas.set_data(projections, _range_hours)
+        self._apply_settings_to_canvas()
         self._update_annotation_text()
         if hasattr(self, "btn_settings"):
             self._update_header_button_positions()
@@ -1999,11 +2201,31 @@ class ScheduleAxisBoard(QWidget):
         )
 
     def _on_setting_option_changed(self, key, value):
-        if key == "nonlinear":
-            self.canvas.set_nonlinear_enabled(bool(value))
+        del value
+        self._apply_display_options()
         if key in {"direction", "range"}:
             self._update_annotation_text()
             self._update_header_button_positions()
+
+    def _on_setting_appearance_changed(self):
+        if not hasattr(self, "settings_panel"):
+            return
+        axis_color, font_color, category_colors = (
+            self.settings_panel.appearance_snapshot()
+        )
+        self.canvas.set_appearance(axis_color, font_color, category_colors)
+
+    def _apply_display_options(self):
+        state = self.settings_panel.state
+        self.canvas.set_display_options(
+            state.get("direction", "both"),
+            state.get("range", "month"),
+            bool(state.get("nonlinear", True)),
+        )
+
+    def _apply_settings_to_canvas(self):
+        self._apply_display_options()
+        self._on_setting_appearance_changed()
 
     def _update_annotation_text(self):
         if not hasattr(self, "settings_panel"):
