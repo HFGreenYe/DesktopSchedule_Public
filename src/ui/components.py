@@ -1,10 +1,11 @@
 # src/ui/components.py
 from PyQt6.QtWidgets import QWidget, QListWidget, QListWidgetItem, QScroller, QFrame, QLabel, QMenu, QWidgetAction, QHBoxLayout
 from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, pyqtProperty, QTimer,QPoint, QEvent, QObject, QRect
-from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen, QCursor
+from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen, QCursor, QGuiApplication
 from datetime import datetime
 from ..config import AppConfig
 from src.ui.todo_board import TodoBoardWindow
+from src.ui.encryption_window import EncryptionWindow
 from src.utils.signals import global_signals
 from src.utils.window_preferences import (
     get_primary_pin_preference,
@@ -549,7 +550,8 @@ class SharedMoreMenu(QMenu):
         )
         add_menu_separator()
         add_centered_btn("坐标看板", "axis", self._on_show_axis)
-        add_centered_btn("待办显示", "todo", self._on_show_todo)
+        add_centered_btn("待办看板", "todo", self._on_show_todo)
+        add_centered_btn("安全加密", "security_lock", self._on_open_encryption, icon_color="#333333")
         add_centered_btn("修改字体", "theme", self._on_modify_font, icon_color="#333333")
         add_centered_btn("导出日程", "export", self._on_export_schedule)
         add_centered_btn("全部日程", "history", self._on_show_history)
@@ -821,6 +823,38 @@ class SharedMoreMenu(QMenu):
 
     def _on_modify_font(self):
         print(f"[{self.parent_window.__class__.__name__}] 点击了修改字体")
+
+    def _on_open_encryption(self):
+        if not hasattr(self.parent_window, 'encryption_window') or self.parent_window.encryption_window is None:
+            self.parent_window.encryption_window = EncryptionWindow(self.parent_window)
+            anchor_geometry = self.parent_window.frameGeometry()
+            win = self.parent_window.encryption_window
+            x = anchor_geometry.right() + 10
+            y = anchor_geometry.top()
+            screen = (
+                QGuiApplication.screenAt(anchor_geometry.center())
+                or QGuiApplication.primaryScreen()
+            )
+            if screen is not None:
+                available = screen.availableGeometry()
+                if x + win.width() > available.right() + 1:
+                    x = anchor_geometry.left() - win.width() - 10
+                x = max(
+                    available.left(),
+                    min(x, available.right() - win.width() + 1),
+                )
+                y = max(
+                    available.top(),
+                    min(y, available.bottom() - win.height() + 1),
+                )
+            win.move(x, y)
+        win = self.parent_window.encryption_window
+        if win.isVisible():
+            win.hide()
+        else:
+            win.show()
+            win.raise_()
+            win.activateWindow()
 
     def _on_show_help_manual(self):
         print(f"[{self.parent_window.__class__.__name__}] 点击了使用手册")

@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import QFrame, QVBoxLayout, QLabel
 from PyQt6.QtCore import Qt, QRectF
-from PyQt6.QtGui import QPainter, QColor, QPen, QBrush
+from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QLinearGradient
 
 from ...config import AppConfig
 
@@ -19,10 +19,9 @@ class MonthDayHoverPreview(QFrame):
             QFrame#MonthDayHoverPreview {
                 background-color: transparent;
                 border: none;
-                border-radius: 8px;
             }
             QLabel {
-                color: #333333;
+                color: #FFFFFF;
                 background: transparent;
                 font-family: 'Microsoft YaHei';
             }
@@ -34,7 +33,7 @@ class MonthDayHoverPreview(QFrame):
 
         self.date_label = QLabel()
         self.date_label.setStyleSheet(
-            f"color: {AppConfig.COLOR_GRADIENT_START}; font-size: 12px; font-weight: bold;"
+            "font-size: 12px; font-weight: bold;"
         )
         self._layout.addWidget(self.date_label)
 
@@ -47,9 +46,18 @@ class MonthDayHoverPreview(QFrame):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        painter.setPen(QPen(QColor(0, 0, 0, 26), 1))
-        painter.setBrush(QBrush(QColor("#ffffff")))
+        rect = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+
+        gradient = QLinearGradient(0, 0, 0, self.height())
+        start_color = QColor(AppConfig.COLOR_GRADIENT_START)
+        end_color = QColor(AppConfig.COLOR_GRADIENT_END)
+        start_color.setAlpha(153)
+        end_color.setAlpha(153)
+        gradient.setColorAt(0.0, start_color)
+        gradient.setColorAt(1.0, end_color)
+
+        painter.setBrush(QBrush(gradient))
+        painter.setPen(QPen(QColor("#FFFFFF"), 2))
         painter.drawRoundedRect(rect, 8, 8)
         super().paintEvent(event)
 

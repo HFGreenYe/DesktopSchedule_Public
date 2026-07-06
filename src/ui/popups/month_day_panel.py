@@ -236,6 +236,13 @@ class MonthDayPanel(QWidget):
         painter.setPen(QPen(QColor(255, 255, 255, 110), 1))
         painter.setBrush(QBrush(gradient))
         painter.drawRoundedRect(rect, 12, 12)
+
+        # 内白线：距边缘 4px，2px 宽
+        inner_rect = rect.adjusted(4, 4, -4, -4)
+        painter.setPen(QPen(QColor("#FFFFFF"), 2))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(inner_rect, 8, 8)
+
         super().paintEvent(event)
 
     def set_panel_data(self, qdate, schedules):
