@@ -48,6 +48,10 @@ from src.utils.window_preferences import set_window_pin_state
 
 
 class _AxisSchedulePreview(QFrame):
+    OUTER_RADIUS = 8.0
+    INNER_MARGIN = 6.0
+    INNER_RADIUS = 6.0
+
     def __init__(self, persistent=False, parent=None):
         flags = Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint
         if not persistent:
@@ -62,7 +66,7 @@ class _AxisSchedulePreview(QFrame):
         self.setMaximumWidth(280)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setContentsMargins(17, 15, 17, 15)
         layout.setSpacing(5)
 
         header = QHBoxLayout()
@@ -70,43 +74,71 @@ class _AxisSchedulePreview(QFrame):
         header.setSpacing(0)
         self.title_label = QLabel()
         self.title_label.setWordWrap(True)
-        self.title_label.setStyleSheet(
-            "color: #222222; font-size: 12px; font-weight: bold; "
-            "font-family: 'Microsoft YaHei'; background: transparent;"
-        )
         header.addWidget(self.title_label, 1)
+        self.close_button = None
         if persistent:
-            close_button = QPushButton("×")
-            close_button.setFixedSize(20, 20)
-            close_button.setCursor(Qt.CursorShape.PointingHandCursor)
-            close_button.setStyleSheet(
-                "QPushButton { color: #555555; background: transparent; border: none; "
-                "font-size: 14px; font-weight: bold; } "
-                "QPushButton:hover { background: rgba(12,192,223,0.12); border-radius: 10px; }"
-            )
-            close_button.clicked.connect(self.hide)
-            header.addWidget(close_button)
+            self.close_button = QPushButton("×")
+            self.close_button.setFixedSize(20, 20)
+            self.close_button.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.close_button.clicked.connect(self.hide)
+            header.addWidget(self.close_button)
         layout.addLayout(header)
 
         self.time_label = QLabel()
         self.meta_label = QLabel()
         for label in (self.time_label, self.meta_label):
             label.setWordWrap(True)
-            label.setStyleSheet(
-                "color: #555555; font-size: 10px; "
-                "font-family: 'Microsoft YaHei'; background: transparent;"
-            )
             layout.addWidget(label)
 
+        self.note_label = None
         if persistent:
-            note = QLabel("单击详情样本：当前只读")
-            note.setStyleSheet(
-                "color: #0aa9c5; font-size: 9px; "
-                "font-family: 'Microsoft YaHei'; background: transparent;"
+            self.note_label = QLabel("单击详情样本：当前只读")
+            layout.addWidget(self.note_label)
+        self._apply_theme_text_colors()
+
+    def _apply_theme_text_colors(self):
+        title_color = QColor(AppConfig.COLOR_GRADIENT_START)
+        time_color = QColor("#FFFFFF")
+        detail_color = QColor(AppConfig.COLOR_GRADIENT_END)
+        if not title_color.isValid():
+            title_color = QColor("#222222")
+        if not time_color.isValid():
+            time_color = QColor("#222222")
+        if not detail_color.isValid():
+            detail_color = QColor("#555555")
+        self.title_label.setStyleSheet(
+            f"color: {title_color.name()}; "
+            "font-size: 12px; font-weight: bold; "
+            "font-family: 'Microsoft YaHei'; background: transparent;"
+        )
+        self.time_label.setStyleSheet(
+            f"color: {time_color.name()}; "
+            "font-size: 10px; font-family: 'Microsoft YaHei'; "
+            "background: transparent;"
+        )
+        self.meta_label.setStyleSheet(
+            f"color: {detail_color.name()}; "
+            "font-size: 10px; font-family: 'Microsoft YaHei'; "
+            "background: transparent;"
+        )
+        if self.note_label is not None:
+            self.note_label.setStyleSheet(
+                f"color: {detail_color.name()}; "
+                "font-size: 9px; font-family: 'Microsoft YaHei'; "
+                "background: transparent;"
             )
-            layout.addWidget(note)
+        if self.close_button is not None:
+            self.close_button.setStyleSheet(
+                "QPushButton { "
+                f"color: {detail_color.name()}; "
+                "background: transparent; border: none; font-size: 14px; "
+                "font-weight: bold; } "
+                "QPushButton:hover { background: rgba(255,255,255,90); "
+                "border-radius: 10px; }"
+            )
 
     def set_projection(self, projection):
+        self._apply_theme_text_colors()
         schedule = projection.schedule
         self.title_label.setText(getattr(schedule, "title", "") or "未命名日程")
         self.time_label.setText(self._format_time_text(schedule))
@@ -143,10 +175,34 @@ class _AxisSchedulePreview(QFrame):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        outer_rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        outer_path = QPainterPath()
+        outer_path.addRoundedRect(
+            outer_rect,
+            self.OUTER_RADIUS,
+            self.OUTER_RADIUS,
+        )
+        gradient = QLinearGradient(outer_rect.topLeft(), outer_rect.bottomLeft())
+        gradient.setColorAt(0.0, QColor(AppConfig.COLOR_GRADIENT_START))
+        gradient.setColorAt(1.0, QColor(AppConfig.COLOR_GRADIENT_END))
+        painter.fillPath(outer_path, QBrush(gradient))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(QPen(QColor(0, 0, 0, 28), 1))
-        painter.setBrush(QColor(255, 255, 255, 246))
-        painter.drawRoundedRect(rect, 8, 8)
+        painter.drawPath(outer_path)
+
+        inner_rect = outer_rect.adjusted(
+            self.INNER_MARGIN,
+            self.INNER_MARGIN,
+            -self.INNER_MARGIN,
+            -self.INNER_MARGIN,
+        )
+        painter.setPen(QPen(QColor("#ffffff"), 2.0))
+        painter.setBrush(QColor(255, 255, 255, 190))
+        painter.drawRoundedRect(
+            inner_rect,
+            self.INNER_RADIUS,
+            self.INNER_RADIUS,
+        )
         super().paintEvent(event)
 
 
