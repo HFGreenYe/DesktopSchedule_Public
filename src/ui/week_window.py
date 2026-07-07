@@ -221,7 +221,7 @@ class WeekWindow(FramelessMainWindow):
     day_double_clicked = pyqtSignal(QDate)
     def __init__(self):
         super().__init__()
-        self.setFixedSize(680, 400) 
+        self.setFixedSize(680, 414) 
         window_flags = Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window
         if get_primary_pin_preference():
             window_flags |= Qt.WindowType.WindowStaysOnTopHint
@@ -1052,6 +1052,7 @@ class WeekWindow(FramelessMainWindow):
                     panel_layout.insertWidget(panel_layout.count() - 1, card)
 
         self.update_placeholder_visibility(has_any_schedule)
+        self._sync_panel_scroll_heights()
 
     def update_placeholder_visibility(self, has_any_schedule: bool):
         """
@@ -1059,6 +1060,12 @@ class WeekWindow(FramelessMainWindow):
         """
         for lbl in self.placeholder_labels:
             lbl.setVisible(not has_any_schedule)
+
+    def _sync_panel_scroll_heights(self):
+        for panel in self.bottom_panels:
+            layout = panel.layout()
+            if layout is not None:
+                panel.setMinimumHeight(layout.sizeHint().height())
 
     def update_weather_ui(self, data):
         if not data: return

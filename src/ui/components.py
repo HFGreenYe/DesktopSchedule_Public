@@ -665,7 +665,10 @@ class SharedMoreMenu(QMenu):
         self.__class__._schedule_display_mode = mode_id
         self._refresh_mode_option_styles()
         mode_label = {"card": "卡片模式", "timetable": "课表模式"}[mode_id]
-        print(f"[{self.parent_window.__class__.__name__}] 选择日程显示模式：{mode_label}（功能待接入）")
+        handler = getattr(self.parent_window, "set_schedule_display_mode", None)
+        if callable(handler):
+            handler(mode_id)
+        print(f"[{self.parent_window.__class__.__name__}] 选择日程显示模式：{mode_label}")
 
     def _set_help_row_hover(self, hovered):
         if not self._help_row:

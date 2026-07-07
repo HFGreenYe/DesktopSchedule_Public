@@ -1,5 +1,5 @@
 # src/ui/main_window.py
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QStackedWidget
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QStackedWidget, QApplication
 from PyQt6.QtCore import Qt, QRectF, QTimer, QEvent, QPoint
 from PyQt6.QtGui import QPainter, QPainterPath, QBrush, QLinearGradient, QColor, QPen
 from qframelesswindow import FramelessMainWindow
@@ -42,6 +42,10 @@ class MainWindow(FramelessMainWindow):
         self.main_controller = MainController()
         self.axis_board = None
         self.weather_board = None
+        self._vertical_resize_margin = 8
+        self._vertical_resize_edge = None
+        self._vertical_resize_start_pos = QPoint()
+        self._vertical_resize_start_geometry = None
         
         self.setFixedWidth(AppConfig.DEFAULT_WIDTH)
         self.setMinimumHeight(600) 
@@ -51,6 +55,7 @@ class MainWindow(FramelessMainWindow):
             main_flags |= Qt.WindowType.WindowStaysOnTopHint
         self.setWindowFlags(main_flags)
         self.titleBar.hide()
+        self.setResizeEnabled(True)
 
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
@@ -59,6 +64,9 @@ class MainWindow(FramelessMainWindow):
         self.main_layout.setSpacing(10)
 
         self.header = HeaderBar(self)
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
         self.main_layout.addWidget(self.header)
         
         # --- 页面堆栈 ---
@@ -90,6 +98,7 @@ class MainWindow(FramelessMainWindow):
         self.page_dashboard.view_selector.view_selected.connect(self.switch_view)
         self.page_dashboard.context_action_requested.connect(self._handle_dashboard_context_action)
         self.page_dashboard.context_view_requested.connect(self._handle_dashboard_context_view)
+        self.page_dashboard.date_change_requested.connect(self.on_calendar_date_picked)
 
         self.page_dashboard.req_refresh_all.connect(self._refresh_week_if_visible)
         self.page_dashboard.req_refresh_all.connect(self._refresh_axis_if_visible)
@@ -231,6 +240,9 @@ class MainWindow(FramelessMainWindow):
         if self.axis_board is not None and self.axis_board.isVisible():
             self.axis_board.refresh_data()
 
+    def set_schedule_display_mode(self, mode_id):
+        self.page_dashboard.set_schedule_display_mode(mode_id)
+
     def toggle_axis_board(self, anchor_window=None):
         from PyQt6.QtGui import QGuiApplication
         from .popups.schedule_axis_board import ScheduleAxisBoard
@@ -335,7 +347,14 @@ class MainWindow(FramelessMainWindow):
 
     def eventFilter(self, obj, event):
         """事件过滤器：专门拦截顶部日期标签的滚轮事件"""
-        if obj == self.header.lbl_date_info and event.type() == QEvent.Type.Wheel:
+        if self._handle_vertical_resize_event(obj, event):
+            return True
+
+        if (
+            hasattr(self, "header")
+            and obj == self.header.lbl_date_info
+            and event.type() == QEvent.Type.Wheel
+        ):
             # 获取滚轮滚动的角度差
             delta = event.angleDelta().y()
             if delta != 0:
@@ -952,7 +971,88 @@ class MainWindow(FramelessMainWindow):
         painter.setPen(QPen(QColor(0, 0, 0, 26), 1))
         painter.drawPath(path)
 
+    def _handle_vertical_resize_event(self, watched, event):
+        if isinstance(watched, QWidget) and watched.window() is self:
+            event_type = event.type()
+            if event_type == QEvent.Type.MouseButtonPress:
+                if event.button() == Qt.MouseButton.LeftButton:
+                    edge = self._vertical_resize_edge_at(self._event_global_pos(event))
+                    if edge:
+                        self._vertical_resize_edge = edge
+                        self._vertical_resize_start_pos = self._event_global_pos(event)
+                        self._vertical_resize_start_geometry = self.geometry()
+                        event.accept()
+                        return True
+            elif event_type == QEvent.Type.MouseMove:
+                if self._vertical_resize_edge:
+                    self._apply_vertical_resize(self._event_global_pos(event))
+                    event.accept()
+                    return True
+                if self._vertical_resize_edge_at(self._event_global_pos(event)):
+                    self.setCursor(Qt.CursorShape.SizeVerCursor)
+                elif self.cursor().shape() == Qt.CursorShape.SizeVerCursor:
+                    self.unsetCursor()
+            elif event_type == QEvent.Type.MouseButtonRelease:
+                if self._vertical_resize_edge:
+                    self._vertical_resize_edge = None
+                    self._vertical_resize_start_geometry = None
+                    self.unsetCursor()
+                    event.accept()
+                    return True
+            elif event_type == QEvent.Type.Leave:
+                if not self._vertical_resize_edge and self.cursor().shape() == Qt.CursorShape.SizeVerCursor:
+                    self.unsetCursor()
+
+        return False
+
+    def _event_global_pos(self, event):
+        if hasattr(event, "globalPosition"):
+            return event.globalPosition().toPoint()
+        return event.globalPos()
+
+    def _vertical_resize_edge_at(self, global_pos):
+        local_pos = self.mapFromGlobal(global_pos)
+        if local_pos.x() < 0 or local_pos.x() > self.width():
+            return None
+        if 0 <= local_pos.y() <= self._vertical_resize_margin:
+            return "top"
+        if self.height() - self._vertical_resize_margin <= local_pos.y() <= self.height():
+            return "bottom"
+        return None
+
+    def _apply_vertical_resize(self, global_pos):
+        if self._vertical_resize_start_geometry is None:
+            return
+
+        start_geometry = self._vertical_resize_start_geometry
+        delta_y = global_pos.y() - self._vertical_resize_start_pos.y()
+        minimum_height = self.minimumHeight()
+        maximum_height = self.maximumHeight()
+        if maximum_height <= 0:
+            maximum_height = 16777215
+
+        if self._vertical_resize_edge == "bottom":
+            new_height = max(minimum_height, min(maximum_height, start_geometry.height() + delta_y))
+            self.setGeometry(
+                start_geometry.x(),
+                start_geometry.y(),
+                start_geometry.width(),
+                new_height,
+            )
+        elif self._vertical_resize_edge == "top":
+            new_height = max(minimum_height, min(maximum_height, start_geometry.height() - delta_y))
+            bottom = start_geometry.y() + start_geometry.height()
+            self.setGeometry(
+                start_geometry.x(),
+                bottom - new_height,
+                start_geometry.width(),
+                new_height,
+            )
+
     def closeEvent(self, event):
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
         if self.axis_board is not None:
             self.axis_board.close()
         if self.weather_board is not None:
