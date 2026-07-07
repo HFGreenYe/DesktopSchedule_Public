@@ -25,7 +25,8 @@ class AxisCategoryOption:
 class ScheduleAxisService:
     MIN_RANGE_HOURS = 24.0
     MAX_RANGE_HOURS = 365.0 * 24.0
-    FALLBACK_COLOR = "#ffffff"
+    UNCATEGORIZED_CATEGORY_KEY = "__uncategorized__"
+    FALLBACK_COLOR = "#0cc0df"
     RANGE_HOURS_BY_KEY = {
         "day": 24.0,
         "week": 7.0 * 24.0,

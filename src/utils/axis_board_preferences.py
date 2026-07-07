@@ -3,6 +3,8 @@ import re
 
 from PyQt6.QtCore import QSettings
 
+from src.services.schedule_axis_service import ScheduleAxisService
+
 
 _ORGANIZATION = "Wanji"
 _APPLICATION = "DesktopSchedule"
@@ -72,10 +74,13 @@ def normalize_axis_board_preferences(value):
         categories = {}
     normalized_categories = {}
     for category_id, category_appearance in categories.items():
-        try:
-            normalized_id = str(int(category_id))
-        except (TypeError, ValueError):
-            continue
+        if str(category_id) == ScheduleAxisService.UNCATEGORIZED_CATEGORY_KEY:
+            normalized_id = ScheduleAxisService.UNCATEGORIZED_CATEGORY_KEY
+        else:
+            try:
+                normalized_id = str(int(category_id))
+            except (TypeError, ValueError):
+                continue
         normalized = _normalize_appearance(category_appearance)
         if normalized is not None:
             normalized_categories[normalized_id] = normalized

@@ -3,6 +3,7 @@ import math
 import zlib
 
 from PyQt6.QtCore import (
+    QEasingCurve,
     QEvent,
     QPoint,
     QPointF,
@@ -11,6 +12,8 @@ from PyQt6.QtCore import (
     QSignalBlocker,
     QSize,
     Qt,
+    QTimer,
+    QVariantAnimation,
     pyqtSignal,
 )
 from PyQt6.QtGui import (
@@ -27,6 +30,7 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtWidgets import (
     QAbstractButton,
+    QAbstractSpinBox,
     QButtonGroup,
     QFrame,
     QHBoxLayout,
@@ -50,6 +54,26 @@ from src.utils.axis_board_preferences import (
 )
 from src.utils.signals import global_signals
 from src.utils.window_preferences import set_window_pin_state
+
+
+def _clamp_window_frame_to_rect(window, available):
+    frame = window.frameGeometry()
+    delta_x = 0
+    delta_y = 0
+    if frame.width() >= available.width():
+        delta_x = available.left() - frame.left()
+    elif frame.left() < available.left():
+        delta_x = available.left() - frame.left()
+    elif frame.right() > available.right():
+        delta_x = available.right() - frame.right()
+    if frame.height() >= available.height():
+        delta_y = available.top() - frame.top()
+    elif frame.top() < available.top():
+        delta_y = available.top() - frame.top()
+    elif frame.bottom() > available.bottom():
+        delta_y = available.bottom() - frame.bottom()
+    if delta_x or delta_y:
+        window.move(window.pos() + QPoint(delta_x, delta_y))
 
 
 class _AxisSchedulePreview(QFrame):
@@ -164,6 +188,8 @@ class _AxisSchedulePreview(QFrame):
             y = max(available.top(), min(y, available.bottom() - self.height() + 1))
         self.move(x, y)
         self.show()
+        if screen is not None:
+            _clamp_window_frame_to_rect(self, screen.availableGeometry())
         self.raise_()
 
     @staticmethod
@@ -214,6 +240,7 @@ class _AxisSchedulePreview(QFrame):
 class _ScheduleAxisCanvas(QWidget):
     hover_requested = pyqtSignal(object, object)
     item_clicked = pyqtSignal(object, object)
+    viewport_changed = pyqtSignal()
 
     MARKER_HEIGHTS = {0: 9.0, 1: 12.0, 2: 15.0}
     DEADLINE_WIDTH = 2.0
@@ -258,6 +285,7 @@ class _ScheduleAxisCanvas(QWidget):
         self._pan_start = None
         self._pan_center_start = 0.0
         self._pan_vertical_start = 0.0
+        self._last_viewport_pixel_width = None
 
     def configure_viewport(self, virtual_axis_width, default_viewport_width):
         self.virtual_axis_width = max(float(virtual_axis_width), 1.0)
@@ -267,6 +295,7 @@ class _ScheduleAxisCanvas(QWidget):
         )
         self._recalculate_log_scale()
         self._reset_view()
+        self._last_viewport_pixel_width = None
         self.update()
 
     def _recalculate_log_scale(self):
@@ -593,16 +622,41 @@ class _ScheduleAxisCanvas(QWidget):
             marker["y"] = lane_centers_by_status[completed][marker["lane_index"]]
         return markers
 
+    def required_height_for_visible_lanes(self):
+        left = 20.0
+        right = max(float(self.width() - 20), left + 1.0)
+        markers = self._layout_markers(left, right, 0.0)
+        if not markers:
+            return 0
+
+        upper_extent = 0.0
+        lower_extent = 0.0
+        for marker in markers:
+            marker_half_height = marker["height"] / 2.0
+            if marker["projection"].is_completed:
+                lower_extent = max(
+                    lower_extent,
+                    marker["y"] + marker_half_height,
+                )
+            else:
+                upper_extent = max(
+                    upper_extent,
+                    -(marker["y"] - marker_half_height),
+                )
+
+        required_for_upper = (upper_extent + 14.0) / self.AXIS_VERTICAL_RATIO
+        required_for_lower = (lower_extent + 30.0) / (
+            1.0 - self.AXIS_VERTICAL_RATIO
+        )
+        return math.ceil(max(required_for_upper, required_for_lower))
+
     def _draw_marker(self, painter, marker, left, right):
         x1 = marker["x1"]
         x2 = marker["x2"]
         y = marker["y"]
         marker_height = marker["height"]
         projection = marker["projection"]
-        category_id = getattr(projection.schedule, "category_id", None)
-        color = QColor(self.category_colors.get(category_id, projection.category_color))
-        if not color.isValid():
-            color = QColor(ScheduleAxisService.FALLBACK_COLOR)
+        color = self._projection_color(projection)
 
         if projection.is_interval:
             marker_rect = QRectF(
@@ -642,6 +696,18 @@ class _ScheduleAxisCanvas(QWidget):
         hit_path.addRect(hit_rect)
 
         self.hit_regions.append((hit_path, projection))
+
+    def _projection_color(self, projection):
+        category_id = getattr(projection.schedule, "category_id", None)
+        color_key = category_id
+        if category_id is None or projection.category_name == "未分类":
+            color_key = ScheduleAxisService.UNCATEGORIZED_CATEGORY_KEY
+        color = QColor(
+            self.category_colors.get(color_key, projection.category_color)
+        )
+        if not color.isValid():
+            color = QColor(ScheduleAxisService.FALLBACK_COLOR)
+        return color
 
     def _draw_hover_time_guides(self, painter, marker, axis_y, left, right):
         projection = marker["projection"]
@@ -858,6 +924,7 @@ class _ScheduleAxisCanvas(QWidget):
         if event.button() == Qt.MouseButton.LeftButton and self._pan_start is not None:
             self._pan_start = None
             self.setCursor(Qt.CursorShape.OpenHandCursor)
+            self.viewport_changed.emit()
             event.accept()
             return
         super().mouseReleaseEvent(event)
@@ -876,16 +943,34 @@ class _ScheduleAxisCanvas(QWidget):
         self.view_center_x = virtual_under_cursor - (cursor_x - screen_center) / self.zoom
         self._clamp_view_center(left, right)
         self.update()
+        self.viewport_changed.emit()
         event.accept()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         left = 20.0
         right = max(float(self.width() - 20), left + 1.0)
+        viewport_pixel_width = max(right - left, 1.0)
+        previous_pixel_width = self._last_viewport_pixel_width
+        if (
+            previous_pixel_width is not None
+            and previous_pixel_width > 0
+            and not math.isclose(previous_pixel_width, viewport_pixel_width)
+        ):
+            visible_virtual_width = previous_pixel_width / max(self.zoom, 1e-12)
+            minimum_zoom = min(
+                1.0,
+                max(viewport_pixel_width / self.virtual_axis_width, 0.1),
+            )
+            self.zoom = max(
+                minimum_zoom,
+                min(8.0, viewport_pixel_width / visible_virtual_width),
+            )
         if self._view_pristine:
             self._apply_default_view_anchor()
         else:
             self._clamp_view_center(left, right)
+        self._last_viewport_pixel_width = viewport_pixel_width
 
 
 class _ElidedLabel(QLabel):
@@ -1292,6 +1377,7 @@ class _AxisColorPanel(QWidget):
         super().__init__(parent)
         self.state = state
         self._state_changed = state_changed
+        categories = self._with_default_category(categories)
         self.category_count = len(categories)
         axis_options = (
             _AxisVisualOption("axis", "轴体", AppConfig.COLOR_GRADIENT_START),
@@ -1316,8 +1402,24 @@ class _AxisColorPanel(QWidget):
         self.category_title_label.setStyleSheet(heading_style)
         self.category_grid = _AxisCategoryGrid(categories, self)
 
+    @staticmethod
+    def _with_default_category(categories):
+        regular_categories = [
+            category
+            for category in categories
+            if category.category_id != ScheduleAxisService.UNCATEGORIZED_CATEGORY_KEY
+        ]
+        return [
+            _AxisVisualOption(
+                ScheduleAxisService.UNCATEGORIZED_CATEGORY_KEY,
+                "默认",
+                ScheduleAxisService.FALLBACK_COLOR,
+            ),
+            *regular_categories,
+        ]
+
     def set_categories(self, categories):
-        categories = list(categories)
+        categories = self._with_default_category(categories)
         self.category_count = len(categories)
         return self.category_grid.set_categories(categories)
 
@@ -2308,8 +2410,8 @@ class ScheduleAxisBoard(QWidget):
             available_width - 40,
             self._month_default_axis_viewport_width + 92,
         )
-        self.setMinimumSize(420, 260)
-        self.resize(max(420, default_board_width), 300)
+        self.setMinimumSize(420, 320)
+        self.resize(max(420, default_board_width), 320)
         self.is_pinned = False
         self._drag_offset = None
         self._detail_opener = None
@@ -2317,6 +2419,22 @@ class ScheduleAxisBoard(QWidget):
         self._settings_open = False
         self._settings_icon_angle = 0.0
         self._settings_icon_source = QPixmap()
+        self._settings_rotation_animation = QVariantAnimation(self)
+        self._settings_rotation_animation.setDuration(360)
+        self._settings_rotation_animation.setEasingCurve(
+            QEasingCurve.Type.InOutCubic
+        )
+        self._settings_rotation_animation.valueChanged.connect(
+            self._set_settings_icon_angle
+        )
+        self._clock_refresh_timer = QTimer(self)
+        self._clock_refresh_timer.setInterval(60_000)
+        self._clock_refresh_timer.setTimerType(Qt.TimerType.VeryCoarseTimer)
+        self._clock_refresh_timer.timeout.connect(self._refresh_for_clock_tick)
+        self._auto_fit_timer = QTimer(self)
+        self._auto_fit_timer.setSingleShot(True)
+        self._auto_fit_timer.setInterval(80)
+        self._auto_fit_timer.timeout.connect(self._auto_fit_height)
         self.hover_preview = _AxisSchedulePreview(False)
         self.persistent_preview = _AxisSchedulePreview(True)
 
@@ -2405,6 +2523,7 @@ class ScheduleAxisBoard(QWidget):
         )
         self.canvas.hover_requested.connect(self._show_hover_preview)
         self.canvas.item_clicked.connect(self._show_persistent_preview)
+        self.canvas.viewport_changed.connect(self._schedule_auto_fit_height)
         display_layout.addWidget(self.canvas, 1)
 
         self.legend = self.range_label
@@ -2443,14 +2562,22 @@ class ScheduleAxisBoard(QWidget):
 
     def refresh_data(self):
         self.refresh_categories()
-        projections, _range_hours = ScheduleAxisService.load_current_projection(
-            datetime.datetime.now()
-        )
-        self.canvas.set_data(projections, _range_hours)
+        self._refresh_projection_data()
         self._apply_settings_to_canvas()
         self._update_annotation_text()
         if hasattr(self, "btn_settings"):
             self._update_header_button_positions()
+
+    def _refresh_projection_data(self):
+        projections, _range_hours = ScheduleAxisService.load_current_projection(
+            datetime.datetime.now()
+        )
+        self.canvas.set_data(projections, _range_hours)
+        self._schedule_auto_fit_height()
+
+    def _refresh_for_clock_tick(self):
+        if self.isVisible():
+            self._refresh_projection_data()
 
     def refresh_categories(self):
         if not hasattr(self, "settings_panel"):
@@ -2465,6 +2592,7 @@ class ScheduleAxisBoard(QWidget):
         if key in {"direction", "range", "show_completed"}:
             self._update_annotation_text()
             self._update_header_button_positions()
+        self._schedule_auto_fit_height()
         self._save_preferences()
 
     def _on_setting_appearance_changed(self):
@@ -2576,7 +2704,12 @@ class ScheduleAxisBoard(QWidget):
         self.settings_page.setGeometry(host_rect)
         self.content_stack.setGeometry(host_rect)
         self._settings_open = not self._settings_open
-        self._set_settings_icon_angle(180.0 if self._settings_open else 0.0)
+        self._settings_rotation_animation.stop()
+        self._settings_rotation_animation.setStartValue(self._settings_icon_angle)
+        self._settings_rotation_animation.setEndValue(
+            180.0 if self._settings_open else 0.0
+        )
+        self._settings_rotation_animation.start()
         if self._settings_open:
             self.content_stack.hide()
             self.settings_page.show()
@@ -2585,6 +2718,40 @@ class ScheduleAxisBoard(QWidget):
             self.settings_page.hide()
             self.content_stack.show()
             self.content_stack.raise_()
+            self._schedule_auto_fit_height()
+
+    def _schedule_auto_fit_height(self):
+        self._auto_fit_timer.start()
+
+    def _auto_fit_height(self):
+        if not hasattr(self, "canvas"):
+            return
+        required_canvas_height = self.canvas.required_height_for_visible_lanes()
+        if required_canvas_height <= 0:
+            return
+
+        current_canvas_height = max(self.canvas.height(), 1)
+        non_canvas_height = max(74, self.height() - current_canvas_height)
+        target_height = max(
+            self.minimumHeight(),
+            required_canvas_height + non_canvas_height,
+        )
+
+        screen = (
+            QGuiApplication.screenAt(self.frameGeometry().center())
+            or QGuiApplication.primaryScreen()
+        )
+        available = screen.availableGeometry() if screen is not None else None
+        if available is not None:
+            target_height = min(target_height, available.height())
+        if target_height <= self.height():
+            return
+
+        geometry = self.geometry()
+        geometry.setHeight(target_height)
+        if available is not None and geometry.bottom() > available.bottom():
+            geometry.moveTop(max(available.top(), available.bottom() - target_height + 1))
+        self.setGeometry(geometry)
 
     def eventFilter(self, watched, event):
         if watched is self.content_host and event.type() == QEvent.Type.Resize:
@@ -2612,12 +2779,24 @@ class ScheduleAxisBoard(QWidget):
                     )
                     event.accept()
                     return True
+                if self._can_start_window_drag(watched, board_pos):
+                    self._begin_window_drag(event.globalPosition().toPoint())
+                    event.accept()
+                    return True
             if (
                 event.type() == QEvent.Type.MouseMove
                 and self._resize_edges
                 and event.buttons() & Qt.MouseButton.LeftButton
             ):
                 self._perform_resize(event.globalPosition().toPoint())
+                event.accept()
+                return True
+            if (
+                event.type() == QEvent.Type.MouseMove
+                and self._drag_offset is not None
+                and event.buttons() & Qt.MouseButton.LeftButton
+            ):
+                self.move(event.globalPosition().toPoint() - self._drag_offset)
                 event.accept()
                 return True
             if (
@@ -2628,7 +2807,43 @@ class ScheduleAxisBoard(QWidget):
                 self._finish_resize()
                 event.accept()
                 return True
+            if (
+                event.type() == QEvent.Type.MouseButtonRelease
+                and event.button() == Qt.MouseButton.LeftButton
+                and self._drag_offset is not None
+            ):
+                self._drag_offset = None
+                event.accept()
+                return True
         return super().eventFilter(watched, event)
+
+    @staticmethod
+    def _widget_is_or_descendant(widget, ancestor):
+        current = widget if isinstance(widget, QWidget) else None
+        while current is not None:
+            if current is ancestor:
+                return True
+            current = current.parentWidget()
+        return False
+
+    def _can_start_window_drag(self, watched, board_pos):
+        current = watched if isinstance(watched, QWidget) else None
+        while current is not None and current is not self:
+            if current is self.canvas:
+                return False
+            if isinstance(current, (QAbstractButton, QAbstractSpinBox)):
+                return False
+            current = current.parentWidget()
+
+        content_top_left = self.content_host.mapTo(self, QPoint(0, 0))
+        content_rect = QRect(content_top_left, self.content_host.size())
+        if not content_rect.contains(board_pos):
+            return True
+
+        return self._settings_open and self._widget_is_or_descendant(
+            watched,
+            self.settings_page,
+        )
 
     def _toggle_pin(self):
         self.set_pinned(not self.is_pinned)
@@ -2719,18 +2934,29 @@ class ScheduleAxisBoard(QWidget):
             y = max(available.top(), min(y, available.bottom() - popup.height() + 1))
         popup.move(x, y)
         popup.show()
+        if screen is not None:
+            _clamp_window_frame_to_rect(popup, screen.availableGeometry())
         popup.raise_()
 
     def showEvent(self, event):
         self._settings_open = False
+        self._settings_rotation_animation.stop()
         self._set_settings_icon_angle(0.0)
         self.settings_page.hide()
         self.content_stack.show()
         self.content_stack.raise_()
         self.refresh_data()
         super().showEvent(event)
+        self._clock_refresh_timer.start()
+        self._schedule_auto_fit_height()
+
+    def hideEvent(self, event):
+        self._clock_refresh_timer.stop()
+        super().hideEvent(event)
 
     def closeEvent(self, event):
+        self._clock_refresh_timer.stop()
+        self._auto_fit_timer.stop()
         self.hover_preview.hide()
         self.persistent_preview.hide()
         super().closeEvent(event)
@@ -2795,6 +3021,10 @@ class ScheduleAxisBoard(QWidget):
         self._resize_origin = None
         self._resize_geometry = None
 
+    def _begin_window_drag(self, global_pos):
+        self._finish_resize()
+        self._drag_offset = global_pos - self.frameGeometry().topLeft()
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             edges = self._resize_edges_at(event.position().toPoint())
@@ -2802,11 +3032,11 @@ class ScheduleAxisBoard(QWidget):
                 self._start_resize(edges, event.globalPosition().toPoint())
                 event.accept()
                 return
+            if self._can_start_window_drag(self, event.position().toPoint()):
+                self._begin_window_drag(event.globalPosition().toPoint())
+                event.accept()
+                return
 
-        if event.button() == Qt.MouseButton.LeftButton and event.position().y() <= 52:
-            self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-            event.accept()
-            return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
@@ -2894,3 +3124,5 @@ class ScheduleAxisBoard(QWidget):
         super().resizeEvent(event)
         if hasattr(self, "btn_close"):
             self._update_header_button_positions()
+        if hasattr(self, "_auto_fit_timer"):
+            self._schedule_auto_fit_height()
