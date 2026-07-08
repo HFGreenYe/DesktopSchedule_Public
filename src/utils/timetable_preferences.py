@@ -8,6 +8,7 @@ _ORGANIZATION = "Wanji"
 _APPLICATION = "DesktopSchedule"
 _SETTINGS_KEY = "timetable/display_settings"
 _HEX_COLOR_PATTERN = re.compile(r"^#[0-9a-fA-F]{6}$")
+_DISPLAY_MODES = {"card", "timetable"}
 
 
 def _normalize_color(value):
@@ -15,6 +16,11 @@ def _normalize_color(value):
     if not _HEX_COLOR_PATTERN.fullmatch(color):
         return None
     return color.lower()
+
+
+def _normalize_display_mode(value):
+    mode = str(value or "").strip().lower()
+    return mode if mode in _DISPLAY_MODES else "card"
 
 
 def normalize_timetable_preferences(value):
@@ -37,6 +43,7 @@ def normalize_timetable_preferences(value):
 
     return {
         "version": 1,
+        "display_mode": _normalize_display_mode(value.get("display_mode")),
         "schedule_colors": normalized_schedule_colors,
     }
 
@@ -80,5 +87,12 @@ def set_timetable_schedule_color(schedule_id, color):
         schedule_colors[normalized_id] = normalized_color
 
     preferences["schedule_colors"] = schedule_colors
+    set_timetable_preferences(preferences)
+    return preferences
+
+
+def set_timetable_display_mode(mode_id):
+    preferences = get_timetable_preferences()
+    preferences["display_mode"] = _normalize_display_mode(mode_id)
     set_timetable_preferences(preferences)
     return preferences

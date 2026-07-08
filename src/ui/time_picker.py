@@ -378,12 +378,6 @@ class TimePickerView(QWidget):
             start_m = int(self.scroll_start_min.get_value())
             dt_start = datetime(self.current_date.year(), self.current_date.month(), self.current_date.day(), start_h, start_m)
         now = datetime.now()
-        # 1. 检查开始时间
-        if dt_start and dt_start < now:
-            print("❌ 开始时间不能早于当前时间") 
-            return 
-
-        # 2. 检查结束时间
         if dt_end < now:
             print("❌ 结束时间不能早于当前时间")
             return
@@ -470,7 +464,4 @@ class TimePickerView(QWidget):
                 except:
                     pass
 
-            # 分别检查开始和结束时间
             check_scroller(self.scroll_end_hour, self.scroll_end_min)
-            if self.chk_enable_start.isChecked():
-                check_scroller(self.scroll_start_hour, self.scroll_start_min)

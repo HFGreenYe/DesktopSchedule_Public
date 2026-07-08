@@ -228,7 +228,6 @@ class TimePickerViewWeek(QWidget):
         # 二次校验：确保不早于当前时间 [cite: 1394, 1395]
         now = datetime.now()
         if dt_end < now: return
-        if dt_start and dt_start < now: return
             
         self.confirm_requested.emit(dt_start, dt_end)
 
@@ -248,5 +247,3 @@ class TimePickerViewWeek(QWidget):
                 except: pass
 
             check(self.scroll_end_hour, self.scroll_end_min)
-            if self.chk_enable_start.isChecked():
-                check(self.scroll_start_hour, self.scroll_start_min)

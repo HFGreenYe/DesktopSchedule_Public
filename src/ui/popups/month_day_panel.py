@@ -237,12 +237,6 @@ class MonthDayPanel(QWidget):
         painter.setBrush(QBrush(gradient))
         painter.drawRoundedRect(rect, 12, 12)
 
-        # 内框：距边缘 4px，2px 白线，无填充
-        inner_rect = rect.adjusted(4, 4, -4, -4)
-        painter.setPen(QPen(QColor("#FFFFFF"), 2))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawRoundedRect(inner_rect, 8, 8)
-
         super().paintEvent(event)
 
     def set_panel_data(self, qdate, schedules):
@@ -264,7 +258,7 @@ class MonthDayPanel(QWidget):
         self.empty_label.hide()
         self.body_scroll.show()
 
-        visible_items = schedules[:8]
+        visible_items = list(schedules)
         insert_at = self.body_layout.count() - 1
         for schedule in visible_items:
             self.body_layout.insertWidget(insert_at, self._build_schedule_item(schedule))
@@ -273,9 +267,9 @@ class MonthDayPanel(QWidget):
         item_height = 30
         item_spacing = 4
         visible_height = len(visible_items) * item_height + max(len(visible_items) - 1, 0) * item_spacing
-        self.body_scroll.setFixedHeight(min(visible_height + 2, 220))
+        self.body_scroll.setFixedHeight(min(visible_height + 2, 270))
 
-        if len(schedules) > len(visible_items):
+        if len(schedules) > 8:
             self.summary_label.setText(f"... 共 {len(schedules)} 条")
         else:
             self.summary_label.setText(f"共 {len(schedules)} 条")

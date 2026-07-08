@@ -493,9 +493,10 @@ class TimetablePlaceholderFrame(QFrame):
     DAY_MINUTES = 24 * 60
     HOUR_ROW_HEIGHT = 57.0
     EVENT_GAP = 2.0
+    EVENT_BLOCK_COLUMN_GAP = 2.0
     EVENT_COLUMN_GAP = 1.0
-    GRID_LEFT_INSET = 1.0
-    GRID_RIGHT_INSET = 3.0
+    GRID_LEFT_INSET = 0.0
+    GRID_RIGHT_INSET = 2.0
     EVENT_RADIUS = 3.0
     DDL_LINE_HEIGHT = 3.0
     EVENT_PALETTE = (
@@ -602,17 +603,27 @@ class TimetablePlaceholderFrame(QFrame):
 
     def _ensure_schedule_colors(self, schedules):
         for schedule in schedules:
-            schedule_id = getattr(schedule, "id", id(schedule))
+            raw_schedule_id = getattr(schedule, "id", None)
+            schedule_id = raw_schedule_id if raw_schedule_id is not None else id(schedule)
             if schedule_id in self._schedule_colors:
                 continue
-            override_color = self._schedule_color_overrides.get(str(schedule_id))
+            override_color = (
+                self._schedule_color_overrides.get(str(raw_schedule_id))
+                if raw_schedule_id is not None
+                else None
+            )
             if override_color:
                 color = QColor(override_color)
                 if color.isValid():
                     color.setAlpha(218)
                     self._schedule_colors[schedule_id] = color
                     continue
-            self._schedule_colors[schedule_id] = self._next_event_color()
+            color = self._next_event_color()
+            self._schedule_colors[schedule_id] = color
+            if raw_schedule_id is not None:
+                stored_color = color.name()
+                self._schedule_color_overrides[str(raw_schedule_id)] = stored_color
+                set_timetable_schedule_color(raw_schedule_id, stored_color)
 
     def _next_event_color(self):
         if self._next_color_index < len(self._palette_order):
@@ -853,13 +864,19 @@ class TimetablePlaceholderFrame(QFrame):
     ):
         for interval in intervals:
             column_count = interval["column_count"]
-            column_width = grid_width / column_count
-            rect_x = grid_left + interval["column"] * column_width + self.EVENT_COLUMN_GAP
+            column_gap = self.EVENT_BLOCK_COLUMN_GAP
+            available_width = max(
+                1.0,
+                grid_width - column_gap * (column_count + 1),
+            )
+            rect_width = max(1.0, available_width / column_count)
+            rect_x = grid_left + column_gap + interval["column"] * (
+                rect_width + column_gap
+            )
             rect_y = self._minute_to_y(interval["visible_start"], visible_start, top)
             rect_bottom = self._minute_to_y(interval["visible_end"], visible_start, top)
             rect_y = max(top + self.EVENT_GAP, rect_y + self.EVENT_GAP)
             rect_bottom = min(bottom - self.EVENT_GAP, rect_bottom - self.EVENT_GAP)
-            rect_width = max(1.0, column_width - self.EVENT_COLUMN_GAP * 2)
             rect_height = max(3.0, rect_bottom - rect_y)
             if rect_height <= 0:
                 continue
@@ -994,15 +1011,22 @@ class TimetablePlaceholderFrame(QFrame):
         for points in points_by_minute.values():
             points.sort(key=lambda item: getattr(item["schedule"], "id", 0))
             segment_count = max(1, len(points))
-            segment_width = grid_width / segment_count
+            segment_gap = self.EVENT_COLUMN_GAP
+            available_width = max(
+                1.0,
+                grid_width - segment_gap * (segment_count + 1),
+            )
+            segment_width = max(1.0, available_width / segment_count)
             for point_index, ddl_point in enumerate(points):
                 line_y = self._minute_to_y(ddl_point["point"], visible_start, top)
                 line_y = min(
                     max(top + self.DDL_LINE_HEIGHT, line_y),
                     bottom - self.DDL_LINE_HEIGHT,
                 )
-                line_x = grid_left + point_index * segment_width + self.EVENT_GAP
-                line_width = max(1.0, segment_width - self.EVENT_GAP * 2)
+                line_x = grid_left + segment_gap + point_index * (
+                    segment_width + segment_gap
+                )
+                line_width = segment_width
                 line_rect = QRectF(
                     line_x,
                     line_y - self.DDL_LINE_HEIGHT / 2,

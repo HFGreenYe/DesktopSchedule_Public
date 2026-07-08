@@ -35,6 +35,10 @@ from ..utils.window_preferences import (
     set_primary_pin_preference,
     set_window_pin_state,
 )
+from ..utils.timetable_preferences import (
+    get_timetable_preferences,
+    set_timetable_display_mode,
+)
 
 class MainWindow(FramelessMainWindow):
     def __init__(self):
@@ -168,6 +172,7 @@ class MainWindow(FramelessMainWindow):
         self.header.midnight_rollover.connect(self.handle_midnight_rollover)
         # 为顶部日期文本安装事件过滤器
         self.header.lbl_date_info.installEventFilter(self)
+        self._restore_schedule_display_mode()
         # 软件刚打开时，强制执行一次“选中今天”的逻辑，确保所有UI同步到今天
         self.on_calendar_date_picked(datetime.now().date())
         
@@ -242,10 +247,23 @@ class MainWindow(FramelessMainWindow):
         if self.axis_board is not None and self.axis_board.isVisible():
             self.axis_board.refresh_data()
 
-    def set_schedule_display_mode(self, mode_id):
+    def _restore_schedule_display_mode(self):
+        mode_id = get_timetable_preferences().get("display_mode", "card")
+        self.set_schedule_display_mode(mode_id, persist=False)
+
+    def set_schedule_display_mode(self, mode_id, persist=True):
+        if mode_id not in {"card", "timetable"}:
+            return
+        from .components import SharedMoreMenu
+
+        SharedMoreMenu._schedule_display_mode = mode_id
         self.page_dashboard.set_schedule_display_mode(mode_id)
+        if hasattr(self.week_window, "apply_schedule_display_mode"):
+            self.week_window.apply_schedule_display_mode(mode_id)
         if hasattr(self.header, "set_schedule_display_mode"):
             self.header.set_schedule_display_mode(mode_id)
+        if persist:
+            set_timetable_display_mode(mode_id)
 
     def reset_timetable_view_to_now(self):
         self.on_calendar_date_picked(datetime.now().date())

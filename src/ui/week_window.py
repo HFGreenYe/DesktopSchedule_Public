@@ -224,6 +224,12 @@ class WeekWindow(FramelessMainWindow):
     def set_schedule_display_mode(self, mode_id):
         self.schedule_display_mode_requested.emit(mode_id)
 
+    def apply_schedule_display_mode(self, mode_id):
+        if mode_id not in {"card", "timetable"}:
+            return
+        self.schedule_display_mode = mode_id
+        self._sync_schedule_display_mode_ui()
+
     def __init__(self):
         super().__init__()
         self.setFixedSize(680, 414) 
@@ -238,6 +244,7 @@ class WeekWindow(FramelessMainWindow):
         self.current_monday = self._get_monday(self.current_selected_date)
         self._active_drag_card = None
         self._drag_edge_direction = 0
+        self.schedule_display_mode = "card"
         self._drag_edge_entered_at = 0.0
         self._drag_last_turn_at = 0.0
         self._drag_edge_timer = QTimer(self)
@@ -337,6 +344,7 @@ class WeekWindow(FramelessMainWindow):
 
         icons_row = QHBoxLayout()
         icons_row.setSpacing(6) 
+        self.toolbar_buttons = {}
         for icon_name in ["skin.svg", "view.svg", "add.svg", "sort.svg", "filter.svg"]:
             btn = QPushButton()
             btn.setIcon(QIcon(f"assets/icons/{icon_name}"))
@@ -350,6 +358,7 @@ class WeekWindow(FramelessMainWindow):
             tip_map = {"skin.svg": "换肤", "view.svg": "视图选择", "add.svg": "添加日程", "sort.svg": "排序", "filter.svg": "筛选"}
             btn._tooltip_filter = ToolTipFilter(tip_map[icon_name], btn)
             btn.installEventFilter(btn._tooltip_filter)
+            self.toolbar_buttons[icon_name.split(".")[0]] = btn
             
             if icon_name == "view.svg":
                 self.btn_view_toggle = btn 
@@ -599,6 +608,10 @@ class WeekWindow(FramelessMainWindow):
             week_board_layout.addWidget(scroll_area, stretch=1)
             
         self.body_stack.addWidget(self.page_week_board)
+
+        self.page_week_timetable_placeholder = QWidget()
+        self.page_week_timetable_placeholder.setStyleSheet("background: transparent;")
+        self.body_stack.addWidget(self.page_week_timetable_placeholder)
         
         # --- 第1~4页：复用主界面的组件 ---
         self.page_add = AddScheduleViewWeek()
@@ -614,10 +627,42 @@ class WeekWindow(FramelessMainWindow):
         self.body_stack.addWidget(self.page_list)
         
         self.body_stack.setCurrentIndex(0)
+        self._sync_schedule_display_mode_ui()
         main_layout.addWidget(self.content_area, stretch=1)
         
         self._setup_routing_signals()
 
+
+    def _main_schedule_page(self):
+        if getattr(self, "schedule_display_mode", "card") == "timetable":
+            return self.page_week_timetable_placeholder
+        return self.page_week_board
+
+    def _set_toolbar_button_icon(self, button_key, icon_name, tooltip):
+        button = getattr(self, "toolbar_buttons", {}).get(button_key)
+        if button is None:
+            return
+        old_filter = getattr(button, "_tooltip_filter", None)
+        if old_filter is not None:
+            button.removeEventFilter(old_filter)
+        pixmap = get_colored_icon(icon_name, "#FFFFFF", 16)
+        button.setIcon(QIcon(pixmap) if not pixmap.isNull() else QIcon(f"assets/icons/{icon_name}"))
+        button._tooltip_filter = ToolTipFilter(tooltip, button)
+        button.installEventFilter(button._tooltip_filter)
+
+    def _sync_schedule_display_mode_ui(self):
+        if not hasattr(self, "body_stack"):
+            return
+        if getattr(self, "schedule_display_mode", "card") == "timetable":
+            self._set_toolbar_button_icon("sort", "refresh.svg", "刷新课表")
+        else:
+            self._set_toolbar_button_icon("sort", "sort.svg", "排序")
+
+        if self.body_stack.currentWidget() in (
+            self.page_week_board,
+            self.page_week_timetable_placeholder,
+        ):
+            self.body_stack.setCurrentWidget(self._main_schedule_page())
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -767,7 +812,7 @@ class WeekWindow(FramelessMainWindow):
         self._set_edit_mode_bg(True)
 
     def switch_to_main_board(self):
-        self.body_stack.setCurrentWidget(self.page_week_board)
+        self.body_stack.setCurrentWidget(self._main_schedule_page())
         # 恢复原状
         self._set_edit_mode_bg(False)
 
@@ -1264,7 +1309,10 @@ class WeekWindow(FramelessMainWindow):
         只在非编辑模式、且鼠标位于顶部导航区域时，允许使用滚轮切换上下周。
         """
         # 1. 如果当前正在添加/修改日程（处于其他堆栈页），不响应滚轮翻页
-        if self.is_edit_mode or self.body_stack.currentWidget() != self.page_week_board:
+        if self.is_edit_mode or self.body_stack.currentWidget() not in (
+            self.page_week_board,
+            self.page_week_timetable_placeholder,
+        ):
             super().wheelEvent(event)
             return
 
