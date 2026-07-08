@@ -726,29 +726,29 @@ class CalendarCellDelegate(QStyledItemDelegate):
 
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(QColor("#FFFFFF")))
+        painter.drawPath(label_path)
+
         marker_color = QColor(color)
         is_white_marker = (
             marker_color.red() == 255
             and marker_color.green() == 255
             and marker_color.blue() == 255
         )
-
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(marker_color))
-        painter.drawPath(label_path)
-
-        count_text = "9+" if count > 9 else str(count)
-        font = painter.font()
-        font.setPointSize(6)
-        font.setBold(True)
-        painter.setFont(font)
-        painter.setPen(
-            QColor(AppConfig.COLOR_GRADIENT_START)
-            if is_white_marker
-            else QColor("#FFFFFF")
-        )
-        text_rect = QRectF(rect.left(), rect.top(), 14, 14)
-        painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, count_text)
+        if not is_white_marker:
+            count_text = "9+" if count > 9 else str(count)
+            font = painter.font()
+            font.setBold(True)
+            for point_size in range(8, 5, -1):
+                font.setPointSize(point_size)
+                painter.setFont(font)
+                metrics = painter.fontMetrics()
+                if metrics.horizontalAdvance(count_text) + metrics.height() <= label_size - 2:
+                    break
+            painter.setPen(marker_color)
+            text_rect = QRectF(rect.left(), rect.top(), 15, 14)
+            painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, count_text)
         painter.restore()
 
 
@@ -1198,6 +1198,10 @@ class MonthWindow(FramelessMainWindow):
     date_selected = pyqtSignal(QDate)
     schedule_updated = pyqtSignal(object)
     schedule_detail_requested = pyqtSignal(object, object)
+    schedule_display_mode_requested = pyqtSignal(str)
+
+    def set_schedule_display_mode(self, mode_id):
+        self.schedule_display_mode_requested.emit(mode_id)
 
     def __init__(self):
         super().__init__()
@@ -2028,6 +2032,14 @@ class MonthWindow(FramelessMainWindow):
         self.close_view_selector()
         if vid == "month":
             pass # 已经在月视图，无操作
+        elif vid == "day":
+            target_date = self._get_add_target_date()
+            if target_date is not None and target_date.isValid():
+                self._hide_hover_preview()
+                self.close_day_panels()
+                self.date_selected.emit(target_date)
+            else:
+                self.view_selected.emit(vid)
         else:
             self.view_selected.emit(vid)
 

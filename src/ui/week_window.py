@@ -219,6 +219,11 @@ class WeekWindow(FramelessMainWindow):
     view_selected = pyqtSignal(str)
     schedule_updated = pyqtSignal(object)
     day_double_clicked = pyqtSignal(QDate)
+    schedule_display_mode_requested = pyqtSignal(str)
+
+    def set_schedule_display_mode(self, mode_id):
+        self.schedule_display_mode_requested.emit(mode_id)
+
     def __init__(self):
         super().__init__()
         self.setFixedSize(680, 414) 

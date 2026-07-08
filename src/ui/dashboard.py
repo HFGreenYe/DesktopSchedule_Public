@@ -494,6 +494,7 @@ class TimetablePlaceholderFrame(QFrame):
     HOUR_ROW_HEIGHT = 57.0
     EVENT_GAP = 2.0
     EVENT_COLUMN_GAP = 1.0
+    GRID_LEFT_INSET = 1.0
     GRID_RIGHT_INSET = 3.0
     EVENT_RADIUS = 3.0
     DDL_LINE_HEIGHT = 3.0
@@ -1186,7 +1187,11 @@ class TimetablePlaceholderFrame(QFrame):
         top = float(self.BORDER_WIDTH)
         right = float(width - self.BORDER_WIDTH)
         left_axis_right = content_left + float(self.TIME_AXIS_WIDTH)
-        grid_left_x = left_axis_right + float(self.DIVIDER_WIDTH)
+        grid_left_x = (
+            left_axis_right
+            + float(self.DIVIDER_WIDTH)
+            + float(self.GRID_LEFT_INSET)
+        )
         grid_right = right - self.GRID_RIGHT_INSET
         bottom = float(height - self.BORDER_WIDTH)
 

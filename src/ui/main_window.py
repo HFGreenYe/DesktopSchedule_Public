@@ -114,6 +114,8 @@ class MainWindow(FramelessMainWindow):
         self.month_window = MonthWindow()
         self.week_window.schedule_updated.connect(self._on_week_schedule_updated)
         self.month_window.schedule_updated.connect(self._on_week_schedule_updated)
+        self.week_window.schedule_display_mode_requested.connect(self.set_schedule_display_mode)
+        self.month_window.schedule_display_mode_requested.connect(self.set_schedule_display_mode)
         if hasattr(self.header, 'weather_updated'):
             self.header.weather_updated.connect(self.week_window.update_weather_ui)
             self.header.weather_updated.connect(self.month_window.update_weather_ui)
