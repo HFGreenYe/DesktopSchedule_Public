@@ -726,8 +726,15 @@ class CalendarCellDelegate(QStyledItemDelegate):
 
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        marker_color = QColor(color)
+        is_white_marker = (
+            marker_color.red() == 255
+            and marker_color.green() == 255
+            and marker_color.blue() == 255
+        )
+
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(color))
+        painter.setBrush(QBrush(marker_color))
         painter.drawPath(label_path)
 
         count_text = "9+" if count > 9 else str(count)
@@ -735,12 +742,6 @@ class CalendarCellDelegate(QStyledItemDelegate):
         font.setPointSize(6)
         font.setBold(True)
         painter.setFont(font)
-        marker_color = QColor(color)
-        is_white_marker = (
-            marker_color.red() == 255
-            and marker_color.green() == 255
-            and marker_color.blue() == 255
-        )
         painter.setPen(
             QColor(AppConfig.COLOR_GRADIENT_START)
             if is_white_marker

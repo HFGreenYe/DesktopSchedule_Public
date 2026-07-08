@@ -126,6 +126,7 @@ class ThemedColorDialog(QColorDialog):
         self._basic_colors_widget = None
         self._screen_pick_button = None
         self._custom_colors_label = None
+        self._custom_colors_widget = None
         self._add_custom_color_button = None
         self._hue_label = None
         self._alignment_widgets_detached = False
@@ -220,12 +221,19 @@ class ThemedColorDialog(QColorDialog):
             screen_pick_item = left_layout.itemAt(2)
             if screen_pick_item is not None:
                 self._screen_pick_button = screen_pick_item.widget()
+                if self._screen_pick_button is not None:
+                    self._screen_pick_button.setObjectName("ColorDialogActionButton")
             custom_colors_item = left_layout.itemAt(5)
             if custom_colors_item is not None:
                 self._custom_colors_label = custom_colors_item.widget()
+            custom_palette_item = left_layout.itemAt(6)
+            if custom_palette_item is not None:
+                self._custom_colors_widget = custom_palette_item.widget()
             add_custom_color_item = left_layout.itemAt(7)
             if add_custom_color_item is not None:
                 self._add_custom_color_button = add_custom_color_item.widget()
+                if self._add_custom_color_button is not None:
+                    self._add_custom_color_button.setObjectName("ColorDialogActionButton")
             for index in (2, 7):
                 item = left_layout.itemAt(index)
                 if item is not None and item.widget() is not None:
@@ -299,6 +307,7 @@ class ThemedColorDialog(QColorDialog):
             self._button_box.setParent(self._values_widget)
             self._button_box.setFixedSize(128, 24)
             for button in self._button_box.buttons():
+                button.setObjectName("ColorDialogActionButton")
                 button.setFixedHeight(22)
             self._button_box.show()
 
@@ -535,12 +544,20 @@ class ThemedColorDialog(QColorDialog):
             f"background: transparent; color: {arrow}; border: none; padding-right: 14px; }}"
             "QColorDialog#themedColorDialog QSpinBox QLineEdit { "
             f"background: transparent; color: {arrow}; border: none; padding: 0px 14px 0px 0px; }}"
-            "QColorDialog#themedColorDialog QPushButton { "
+            "QColorDialog#themedColorDialog QPushButton#ColorDialogActionButton { "
             f"background-color: {secondary}; color: {text}; "
             f"border: 1px solid {border}; border-radius: 4px; padding: 3px 10px; }}"
-            "QColorDialog#themedColorDialog QPushButton:hover { "
+            "QColorDialog#themedColorDialog QPushButton#ColorDialogActionButton:hover { "
             f"background-color: {'#3a3a3a' if dark else '#e9e9e9'}; }}"
         )
+        for widget in (
+            self._basic_colors_widget,
+            self._custom_colors_widget,
+            self._hue_picker,
+            self._luminance_picker,
+        ):
+            if widget is not None:
+                widget.setStyleSheet("border: none; background: transparent;")
         for _spin, up_button, down_button in self._spin_buttons:
             arrow_style = (
                 "QPushButton { background: transparent; border: none; padding: 0px; "

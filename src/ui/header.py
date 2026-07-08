@@ -140,6 +140,29 @@ class HeaderBar(QWidget):
         ratio = self.devicePixelRatio()
         return load_colored_svg_pixmap(icon_path, color_hex, width, height, ratio)
 
+    def _set_toolbar_button_icon(self, btn, icon_name, tooltip):
+        svg_path = f"assets/icons/{icon_name}"
+        pixmap = self._load_colored_svg(svg_path, "#FFFFFF", 24, 24)
+        if not pixmap.isNull():
+            btn.setPixmap(pixmap)
+            btn.setText("")
+        else:
+            btn.clear()
+            btn.setText("?")
+        btn.icon_path = svg_path
+        if hasattr(btn, "_tooltip_filter"):
+            btn._tooltip_filter.text = tooltip
+
+    def set_schedule_display_mode(self, mode_id):
+        sort_button = getattr(self, "toolbar_buttons", {}).get("sort")
+        if sort_button is None:
+            return
+
+        if mode_id == "timetable":
+            self._set_toolbar_button_icon(sort_button, "refresh.svg", "刷新课表")
+        else:
+            self._set_toolbar_button_icon(sort_button, "sort.svg", "排序")
+
     def _init_weather_service(self):
         self.weather_worker = WeatherWorker(self.my_api_key, self.my_api_host)
         self.weather_worker.data_received.connect(self.update_weather_ui)
@@ -261,6 +284,7 @@ class HeaderBar(QWidget):
         
         self.icon_group = QHBoxLayout()
         self.icon_group.setSpacing(3)
+        self.toolbar_buttons = {}
         
         buttons_config = [
             ("skin.svg", "换肤"),
@@ -283,6 +307,7 @@ class HeaderBar(QWidget):
                 btn.setText("?")
             action_key = icon_name.split('.')[0]
             btn.clicked.connect(lambda name=action_key: self.action_requested.emit(name))
+            self.toolbar_buttons[action_key] = btn
             self.icon_group.addWidget(btn)
 
         bottom_row.addWidget(self.search, stretch=1, alignment=Qt.AlignmentFlag.AlignVCenter)

@@ -10,6 +10,7 @@ from ..utils.win_api import apply_24h2_border_fix
 from ..utils.styles import StyleManager
 from ..utils.window_preferences import set_window_pin_state
 from ..config import AppConfig 
+from .common.themed_color_dialog import ThemedColorDialog
 import os
 from datetime import datetime
 
@@ -93,12 +94,14 @@ class RepeatConfirmDialog(QDialog):
         painter.setPen(QPen(QColor(255, 255, 255, 40), 1))
         painter.drawPath(path)
 
+
 class ScheduleDetailPop(QWidget):
     schedule_updated = pyqtSignal()
     req_edit_time = pyqtSignal(object)
     req_edit_alarm = pyqtSignal(object) 
     req_edit_list = pyqtSignal(object)  
     popup_closed = pyqtSignal(object)
+    timetable_color_changed = pyqtSignal(object, object)
 
     def __init__(self, schedule_data, source_view="dashboard", parent=None):
         super().__init__(parent)
@@ -106,6 +109,7 @@ class ScheduleDetailPop(QWidget):
         self.source_view = source_view
         self.is_pinned = False
         self.drag_pos = None
+        self.timetable_color = None
 
         # 弹窗其他地方的字和图标，必须永远保持白色！
         self.c_text_main = "white"
@@ -140,6 +144,57 @@ class ScheduleDetailPop(QWidget):
         if self.source_view == "week":
             return "#666666" if has_text else "#999999"
         return "rgba(255, 255, 255, 0.9)" if has_text else "rgba(255, 255, 255, 0.6)"
+
+    def set_timetable_color(self, color):
+        if color is None:
+            self.timetable_color = None
+            if hasattr(self, "timetable_color_holder"):
+                self.timetable_color_holder.hide()
+            return
+        color_obj = QColor(color)
+        if not color_obj.isValid():
+            self.timetable_color = None
+            if hasattr(self, "timetable_color_holder"):
+                self.timetable_color_holder.hide()
+            return
+
+        self.timetable_color = color_obj
+        if hasattr(self, "lbl_timetable_color"):
+            self.lbl_timetable_color.setStyleSheet(
+                "QLabel { "
+                "background-color: "
+                f"rgba({color_obj.red()}, {color_obj.green()}, "
+                f"{color_obj.blue()}, {color_obj.alpha()}); "
+                "border: 2px solid white; "
+                "border-radius: 2px; "
+                "}"
+            )
+            self.lbl_timetable_color.show()
+        if hasattr(self, "timetable_color_holder"):
+            self.timetable_color_holder.show()
+
+    def _handle_timetable_color_chip_clicked(self):
+        if self.timetable_color is None:
+            return
+        selected = ThemedColorDialog.get_color(
+            QColor(self.timetable_color),
+            f"选择{getattr(self.data, 'title', '') or '日程'}日程颜色",
+            AppConfig.COLOR_GRADIENT_START,
+            self,
+        )
+        if not selected.isValid():
+            return
+
+        selected.setAlpha(self.timetable_color.alpha())
+        self.set_timetable_color(selected)
+        self.timetable_color_changed.emit(self.data, selected)
+
+    def _handle_timetable_color_label_press(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._handle_timetable_color_chip_clicked()
+            event.accept()
+            return
+        QLabel.mousePressEvent(self.lbl_timetable_color, event)
 
     def _get_icon(self, icon_name, color, target_size=16):
         path = f"assets/icons/{icon_name}"
@@ -183,7 +238,8 @@ class ScheduleDetailPop(QWidget):
         # === 顶部控制栏 (标题 + 输入框切换) ===
         top_row = QHBoxLayout()
         top_row.setContentsMargins(0, 0, 60, 0)
-        top_row.setSpacing(3) 
+        top_row.setSpacing(5)
+        top_row.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         # 如果是从“待办看板”打开的弹窗，加一个便签图标以示区分
         if self.source_view == "todo_board":
@@ -197,8 +253,21 @@ class ScheduleDetailPop(QWidget):
             top_row.addWidget(self.lbl_source_icon, 0, Qt.AlignmentFlag.AlignTop)
 
         # 标题显示标签
+        self.timetable_color_holder = QWidget()
+        self.timetable_color_holder.setFixedSize(18, 22)
+        self.timetable_color_holder.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.timetable_color_holder.mousePressEvent = self._handle_timetable_color_label_press
+        self.timetable_color_holder.hide()
+        self.lbl_timetable_color = QLabel(self.timetable_color_holder)
+        self.lbl_timetable_color.setFixedSize(18, 18)
+        self.lbl_timetable_color.move(0, 4)
+        self.lbl_timetable_color.setToolTip("课表颜色")
+        self.lbl_timetable_color.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.lbl_timetable_color.mousePressEvent = self._handle_timetable_color_label_press
+
         self.lbl_title = QLabel(self.data.title)
         self.lbl_title.setStyleSheet("color: white; font-size: 20px; font-weight: bold; font-family: 'Microsoft YaHei';")
+        self.lbl_title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.lbl_title.setWordWrap(True)
         self.lbl_title.installEventFilter(self) # 监听双击
 
@@ -211,11 +280,13 @@ class ScheduleDetailPop(QWidget):
                 font-size: 20px; font-weight: bold; font-family: 'Microsoft YaHei'; padding: 0px;
             }
         """)
+        self.edit_title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.edit_title.hide()
         self.edit_title.installEventFilter(self)
 
+        top_row.addWidget(self.timetable_color_holder, 0, Qt.AlignmentFlag.AlignVCenter)
         top_row.addWidget(self.lbl_title, stretch=1)
-        top_row.addWidget(self.edit_title, stretch=1)
+        top_row.addWidget(self.edit_title, 1, Qt.AlignmentFlag.AlignVCenter)
         main_layout.addLayout(top_row)
 
         # 固钉按钮

@@ -10,8 +10,13 @@ from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QTimer, QPointF, QRectF
 from PyQt6.QtGui import (QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen)
 
 from ..data.database import db_manager
+from ..config import AppConfig
 from ..services.schedule_query_service import ScheduleQueryService
 from ..services.schedule_sort_service import ScheduleSortService
+from ..utils.timetable_preferences import (
+    get_timetable_preferences,
+    set_timetable_schedule_color,
+)
 from .schedule_detail_pop import ScheduleDetailPop
 from .common.action_context_menu import ActionContextMenu
 
@@ -477,6 +482,8 @@ class ScheduleCard(QFrame):
 
 class TimetablePlaceholderFrame(QFrame):
     day_offset_requested = pyqtSignal(int)
+    schedule_clicked = pyqtSignal(object, object)
+    schedule_context_requested = pyqtSignal(object, object)
 
     BORDER_WIDTH = 2
     CORNER_RADIUS = 8
@@ -484,8 +491,10 @@ class TimetablePlaceholderFrame(QFrame):
     TIME_AXIS_WIDTH = 40
     HOUR_COUNT = 24
     DAY_MINUTES = 24 * 60
-    HOUR_ROW_HEIGHT = 66.0
+    HOUR_ROW_HEIGHT = 57.0
     EVENT_GAP = 2.0
+    EVENT_COLUMN_GAP = 1.0
+    GRID_RIGHT_INSET = 3.0
     EVENT_RADIUS = 3.0
     DDL_LINE_HEIGHT = 3.0
     EVENT_PALETTE = (
@@ -514,12 +523,18 @@ class TimetablePlaceholderFrame(QFrame):
         self.schedules = []
         self.category_map = {}
         self._schedule_colors = {}
+        self._schedule_color_overrides = dict(
+            get_timetable_preferences().get("schedule_colors", {})
+        )
         self._palette_order = list(self.EVENT_PALETTE)
         random.SystemRandom().shuffle(self._palette_order)
         self._next_color_index = 0
         self._hit_regions = []
         self._visible_event_labels = []
+        self._visible_ddl_labels = []
+        self._occupied_label_rects = []
         self._hovered_schedule = None
+        self._pressed_schedule = None
         self._hover_preview = None
         try:
             from .popups.schedule_axis_board import _AxisSchedulePreview
@@ -573,11 +588,29 @@ class TimetablePlaceholderFrame(QFrame):
         total_minutes = int(total_minutes) % self.DAY_MINUTES
         return f"{total_minutes // 60:02d}:{total_minutes % 60:02d}"
 
+    @staticmethod
+    def _format_schedule_time_text(schedule):
+        start_time = getattr(schedule, "start_time", None)
+        end_time = getattr(schedule, "end_time", None)
+        if start_time and end_time and start_time != end_time:
+            return f"{start_time:%H:%M}-{end_time:%H:%M}"
+        target_time = end_time or start_time
+        if target_time:
+            return f"{target_time:%H:%M}"
+        return ""
+
     def _ensure_schedule_colors(self, schedules):
         for schedule in schedules:
             schedule_id = getattr(schedule, "id", id(schedule))
             if schedule_id in self._schedule_colors:
                 continue
+            override_color = self._schedule_color_overrides.get(str(schedule_id))
+            if override_color:
+                color = QColor(override_color)
+                if color.isValid():
+                    color.setAlpha(218)
+                    self._schedule_colors[schedule_id] = color
+                    continue
             self._schedule_colors[schedule_id] = self._next_event_color()
 
     def _next_event_color(self):
@@ -602,6 +635,78 @@ class TimetablePlaceholderFrame(QFrame):
             color = self._next_event_color()
             self._schedule_colors[schedule_id] = color
         return QColor(color)
+
+    def set_schedule_color(self, schedule, color):
+        schedule_id = getattr(schedule, "id", None)
+        if schedule_id is None:
+            return QColor()
+
+        color_obj = QColor(color)
+        if not color_obj.isValid():
+            return QColor()
+
+        stored_color = color_obj.name()
+        display_color = QColor(stored_color)
+        display_color.setAlpha(218)
+        self._schedule_color_overrides[str(schedule_id)] = stored_color
+        self._schedule_colors[schedule_id] = display_color
+        self.update()
+        return QColor(display_color)
+
+    @staticmethod
+    def _is_completed(schedule):
+        return int(getattr(schedule, "status", 0) or 0) == 1
+
+    @staticmethod
+    def _is_expired(schedule):
+        if TimetablePlaceholderFrame._is_completed(schedule):
+            return False
+        end_time = getattr(schedule, "end_time", None)
+        return bool(end_time and end_time < datetime.datetime.now())
+
+    @staticmethod
+    def _is_active_now(schedule):
+        if (
+            TimetablePlaceholderFrame._is_completed(schedule)
+            or TimetablePlaceholderFrame._is_expired(schedule)
+        ):
+            return False
+        start_time = getattr(schedule, "start_time", None)
+        end_time = getattr(schedule, "end_time", None)
+        if start_time is None or end_time is None or start_time == end_time:
+            return False
+        if start_time > end_time:
+            start_time, end_time = end_time, start_time
+        now = datetime.datetime.now()
+        return start_time <= now <= end_time
+
+    def _display_style_for_schedule(self, schedule):
+        if self._is_completed(schedule):
+            return {
+                "fill": QColor(255, 255, 255, 238),
+                "line": QColor(255, 255, 255, 245),
+                "text": QColor(AppConfig.COLOR_GRADIENT_START),
+                "shadow": QColor(255, 255, 255, 0),
+                "border": None,
+            }
+        if self._is_expired(schedule):
+            color = QColor(156, 166, 171, 218)
+            return {
+                "fill": color,
+                "line": color,
+                "text": QColor(255, 255, 255, 238),
+                "shadow": QColor(0, 0, 0, 95),
+                "border": None,
+            }
+
+        color = self._color_for_schedule(schedule)
+        return {
+            "fill": color,
+            "line": color,
+            "text": QColor(255, 255, 255, 238),
+            "shadow": QColor(0, 0, 0, 95),
+            "border": QColor(255, 255, 255, 245),
+        }
 
     def _projection_for_schedule(self, schedule):
         category = self.category_map.get(getattr(schedule, "category_id", None))
@@ -748,12 +853,12 @@ class TimetablePlaceholderFrame(QFrame):
         for interval in intervals:
             column_count = interval["column_count"]
             column_width = grid_width / column_count
-            rect_x = grid_left + interval["column"] * column_width + self.EVENT_GAP
+            rect_x = grid_left + interval["column"] * column_width + self.EVENT_COLUMN_GAP
             rect_y = self._minute_to_y(interval["visible_start"], visible_start, top)
             rect_bottom = self._minute_to_y(interval["visible_end"], visible_start, top)
             rect_y = max(top + self.EVENT_GAP, rect_y + self.EVENT_GAP)
             rect_bottom = min(bottom - self.EVENT_GAP, rect_bottom - self.EVENT_GAP)
-            rect_width = max(1.0, column_width - self.EVENT_GAP * 2)
+            rect_width = max(1.0, column_width - self.EVENT_COLUMN_GAP * 2)
             rect_height = max(3.0, rect_bottom - rect_y)
             if rect_height <= 0:
                 continue
@@ -765,20 +870,26 @@ class TimetablePlaceholderFrame(QFrame):
                 self.EVENT_RADIUS,
                 self.EVENT_RADIUS,
             )
-            painter.fillPath(
-                event_path,
-                self._color_for_schedule(interval["schedule"]),
-            )
+            display_style = self._display_style_for_schedule(interval["schedule"])
+            painter.fillPath(event_path, display_style["fill"])
+            if display_style["border"] is not None:
+                painter.save()
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.setPen(QPen(display_style["border"], 1))
+                painter.drawPath(event_path)
+                painter.restore()
             self._hit_regions.append(
                 {
                     "rect": event_rect,
                     "schedule": interval["schedule"],
                 }
             )
+            self._occupied_label_rects.append(event_rect)
             self._visible_event_labels.append(
                 {
                     "rect": event_rect,
                     "schedule": interval["schedule"],
+                    "style": display_style,
                 }
             )
 
@@ -786,37 +897,82 @@ class TimetablePlaceholderFrame(QFrame):
         if not self._visible_event_labels:
             return
 
-        font = painter.font()
-        font.setFamily("Microsoft YaHei")
-        font.setPixelSize(10)
-        font.setBold(True)
-        painter.setFont(font)
-        metrics = QFontMetrics(font)
+        title_font = painter.font()
+        title_font.setFamily("Microsoft YaHei")
+        title_font.setPixelSize(10)
+        title_font.setBold(True)
+        time_font = QFont(title_font)
+        time_font.setPixelSize(9)
+        time_font.setBold(False)
+        title_metrics = QFontMetrics(title_font)
+        time_metrics = QFontMetrics(time_font)
+        title_height = title_metrics.height()
+        time_height = time_metrics.height()
+        line_gap = 1
 
         for item in self._visible_event_labels:
             rect = item["rect"]
-            if rect.width() < 22 or rect.height() < 15:
+            total_text_height = title_height + time_height + line_gap
+            if rect.width() < 22 or rect.height() < total_text_height:
                 continue
 
             title = str(getattr(item["schedule"], "title", "") or "未命名日程")
+            time_text = self._format_schedule_time_text(item["schedule"])
             text_rect = rect.adjusted(4.0, 0.0, -4.0, 0.0)
-            elided = metrics.elidedText(
+            title_text = title_metrics.elidedText(
                 title,
                 Qt.TextElideMode.ElideRight,
                 max(1, int(text_rect.width())),
             )
-            shadow_rect = text_rect.translated(0.8, 0.8)
-            painter.setPen(QColor(0, 0, 0, 95))
-            painter.drawText(
-                shadow_rect,
-                Qt.AlignmentFlag.AlignCenter,
-                elided,
+            time_text = time_metrics.elidedText(
+                time_text,
+                Qt.TextElideMode.ElideRight,
+                max(1, int(text_rect.width())),
             )
-            painter.setPen(QColor(255, 255, 255, 238))
+            group_top = rect.center().y() - total_text_height / 2
+            title_rect = QRectF(
+                text_rect.left(),
+                group_top,
+                text_rect.width(),
+                title_height,
+            )
+            time_rect = QRectF(
+                text_rect.left(),
+                group_top + title_height + line_gap,
+                text_rect.width(),
+                time_height,
+            )
+            display_style = item.get("style") or self._display_style_for_schedule(
+                item["schedule"]
+            )
+
+            if display_style["shadow"].alpha() > 0:
+                painter.setPen(display_style["shadow"])
+                painter.setFont(title_font)
+                painter.drawText(
+                    title_rect.translated(0.8, 0.8),
+                    Qt.AlignmentFlag.AlignCenter,
+                    title_text,
+                )
+                painter.setFont(time_font)
+                painter.drawText(
+                    time_rect.translated(0.8, 0.8),
+                    Qt.AlignmentFlag.AlignCenter,
+                    time_text,
+                )
+            painter.setPen(display_style["text"])
+            painter.setFont(title_font)
             painter.drawText(
-                text_rect,
+                title_rect,
                 Qt.AlignmentFlag.AlignCenter,
-                elided,
+                title_text,
+            )
+            painter.setFont(time_font)
+            painter.setPen(display_style["text"])
+            painter.drawText(
+                time_rect,
+                Qt.AlignmentFlag.AlignCenter,
+                time_text,
             )
 
     def _draw_ddl_items(
@@ -852,9 +1008,10 @@ class TimetablePlaceholderFrame(QFrame):
                     line_width,
                     self.DDL_LINE_HEIGHT,
                 )
+                display_style = self._display_style_for_schedule(ddl_point["schedule"])
                 painter.fillRect(
                     line_rect,
-                    self._color_for_schedule(ddl_point["schedule"]),
+                    display_style["line"],
                 )
                 self._hit_regions.append(
                     {
@@ -862,6 +1019,94 @@ class TimetablePlaceholderFrame(QFrame):
                         "schedule": ddl_point["schedule"],
                     }
                 )
+                self._queue_ddl_label(
+                    ddl_point["schedule"],
+                    display_style,
+                    line_rect,
+                    top,
+                    bottom,
+                )
+
+    def _queue_ddl_label(self, schedule, display_style, line_rect, top, bottom):
+        font = QFont("Microsoft YaHei")
+        font.setPixelSize(9)
+        font.setBold(True)
+        metrics = QFontMetrics(font)
+        label_height = metrics.height()
+        if line_rect.width() < 22:
+            return
+
+        label_bottom = line_rect.top() - 2.0
+        label_top = label_bottom - label_height
+        if label_top < top + 1 or label_bottom > bottom:
+            return
+
+        label_rect = QRectF(
+            line_rect.left(),
+            label_top,
+            line_rect.width(),
+            label_height,
+        )
+        for occupied_rect in self._occupied_label_rects:
+            if label_rect.intersects(occupied_rect.adjusted(-1.0, -1.0, 1.0, 1.0)):
+                return
+
+        title = str(getattr(schedule, "title", "") or "未命名日程")
+        time_text = self._format_schedule_time_text(schedule)
+        text = f"{title} {time_text}".strip()
+        elided_text = metrics.elidedText(
+            text,
+            Qt.TextElideMode.ElideRight,
+            max(1, int(label_rect.width())),
+        )
+        self._visible_ddl_labels.append(
+            {
+                "rect": label_rect,
+                "text": elided_text,
+                "font": font,
+                "style": display_style,
+            }
+        )
+        self._occupied_label_rects.append(label_rect)
+
+    def _draw_ddl_labels(self, painter):
+        for item in self._visible_ddl_labels:
+            rect = item["rect"]
+            display_style = item["style"]
+            painter.setFont(item["font"])
+            if display_style["shadow"].alpha() > 0:
+                painter.setPen(display_style["shadow"])
+                painter.drawText(
+                    rect.translated(0.8, 0.8),
+                    Qt.AlignmentFlag.AlignCenter,
+                    item["text"],
+                )
+            painter.setPen(display_style["text"])
+            painter.drawText(
+                rect,
+                Qt.AlignmentFlag.AlignCenter,
+                item["text"],
+            )
+
+    def _draw_current_time_line(self, painter, visible_start, visible_end, grid_left, grid_width, top):
+        if self.current_date != datetime.date.today():
+            return
+        now = datetime.datetime.now()
+        current_minutes = now.hour * 60 + now.minute + now.second / 60.0
+        if not (visible_start <= current_minutes <= visible_end):
+            return
+
+        line_y = self._minute_to_y(current_minutes, visible_start, top)
+        painter.save()
+        pen = QPen(QColor(235, 238, 240, 215), 1)
+        pen.setStyle(Qt.PenStyle.DashLine)
+        pen.setDashPattern([4, 4])
+        painter.setPen(pen)
+        painter.drawLine(
+            QPointF(float(grid_left), float(line_y)),
+            QPointF(float(grid_left + grid_width), float(line_y)),
+        )
+        painter.restore()
 
     def _schedule_at_position(self, position):
         for region in reversed(self._hit_regions):
@@ -885,7 +1130,44 @@ class TimetablePlaceholderFrame(QFrame):
             self._hover_preview.show_near(event.globalPosition().toPoint())
         event.accept()
 
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._pressed_schedule = self._schedule_at_position(event.position())
+            if self._pressed_schedule is not None:
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            released_schedule = self._schedule_at_position(event.position())
+            if (
+                released_schedule is not None
+                and released_schedule is self._pressed_schedule
+            ):
+                self._hide_hover_preview()
+                self.schedule_clicked.emit(
+                    released_schedule,
+                    self._color_for_schedule(released_schedule),
+                )
+                self._pressed_schedule = None
+                event.accept()
+                return
+            self._pressed_schedule = None
+        super().mouseReleaseEvent(event)
+
+    def contextMenuEvent(self, event):
+        schedule = self._schedule_at_position(QPointF(event.pos()))
+        if schedule is None:
+            super().contextMenuEvent(event)
+            return
+
+        self._hide_hover_preview()
+        self.schedule_context_requested.emit(schedule, event.globalPos())
+        event.accept()
+
     def leaveEvent(self, event):
+        self._pressed_schedule = None
         self._hide_hover_preview()
         super().leaveEvent(event)
 
@@ -905,7 +1187,7 @@ class TimetablePlaceholderFrame(QFrame):
         right = float(width - self.BORDER_WIDTH)
         left_axis_right = content_left + float(self.TIME_AXIS_WIDTH)
         grid_left_x = left_axis_right + float(self.DIVIDER_WIDTH)
-        grid_right = right
+        grid_right = right - self.GRID_RIGHT_INSET
         bottom = float(height - self.BORDER_WIDTH)
 
         frame_line_width = 2
@@ -926,13 +1208,6 @@ class TimetablePlaceholderFrame(QFrame):
             max(0, int(round(bottom - top))),
             QColor(255, 255, 255, 26),
         )
-        painter.fillRect(
-            int(round(grid_left_x)),
-            int(round(top)),
-            max(0, int(round(right - grid_left_x))),
-            max(0, int(round(bottom - top))),
-            QColor(255, 255, 255, 26),
-        )
         painter.restore()
 
         grid_height = max(1.0, bottom - top)
@@ -949,6 +1224,8 @@ class TimetablePlaceholderFrame(QFrame):
         ) * 60
         self._hit_regions = []
         self._visible_event_labels = []
+        self._visible_ddl_labels = []
+        self._occupied_label_rects = []
         intervals, ddl_points = self._build_visible_items(
             visible_start_minutes,
             last_visible_minutes,
@@ -984,6 +1261,15 @@ class TimetablePlaceholderFrame(QFrame):
                 line_color,
             )
             hour_minutes += 60
+        self._draw_current_time_line(
+            painter,
+            visible_start_minutes,
+            last_visible_minutes,
+            grid_left,
+            grid_width,
+            top,
+        )
+        self._draw_ddl_labels(painter)
         self._draw_interval_labels(painter)
         painter.restore()
 
@@ -1106,6 +1392,12 @@ class DashboardView(QWidget):
         self.timetable_placeholder.day_offset_requested.connect(
             self._handle_timetable_day_offset
         )
+        self.timetable_placeholder.schedule_clicked.connect(
+            self._show_timetable_detail_popup
+        )
+        self.timetable_placeholder.schedule_context_requested.connect(
+            self._show_timetable_context_menu
+        )
         self.timetable_placeholder.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
@@ -1139,10 +1431,80 @@ class DashboardView(QWidget):
             self.timetable_placeholder.reset_to_current_time()
         self._sync_schedule_area_visibility()
 
+    def reset_timetable_to_current_time(self):
+        self.timetable_placeholder.reset_to_current_time()
+
     def _handle_timetable_day_offset(self, offset_days):
         self.date_change_requested.emit(
             self.current_date + datetime.timedelta(days=offset_days)
         )
+
+    def _show_timetable_detail_popup(self, schedule_data, timetable_color):
+        self._show_detail_popup(
+            schedule_data,
+            source_view="dashboard",
+            timetable_color=timetable_color,
+        )
+
+    def _show_timetable_context_menu(self, schedule_data, global_pos):
+        from .components import ScheduleContextMenu
+
+        menu = ScheduleContextMenu(schedule_data, self)
+        is_completed = TimetablePlaceholderFrame._is_completed(schedule_data)
+        menu._add_centered_action(
+            "撤销完成" if is_completed else "完成日程",
+            "undo.svg" if is_completed else "check.svg",
+            "#333333",
+            lambda: self._handle_timetable_status_change(
+                schedule_data,
+                0 if is_completed else 1,
+            ),
+        )
+        menu.addSeparator()
+        menu._add_centered_action(
+            "删除日程",
+            "delete.svg",
+            "#333333",
+            lambda: self._handle_timetable_delete(schedule_data),
+        )
+        menu.exec(global_pos)
+
+    def _handle_timetable_status_change(self, schedule_data, status):
+        schedule_id = getattr(schedule_data, "id", None)
+        if schedule_id is None:
+            return
+        if db_manager.update_schedule_status(schedule_id, status):
+            self.refresh_data()
+            self.req_refresh_all.emit()
+
+    def _handle_timetable_delete(self, schedule_data):
+        schedule_id = getattr(schedule_data, "id", None)
+        if schedule_id is None:
+            return
+        if db_manager.delete_schedule(schedule_id):
+            set_timetable_schedule_color(schedule_id, None)
+            self.refresh_data()
+            self.req_refresh_all.emit()
+
+    def _handle_timetable_color_changed(self, schedule_data, color):
+        applied_color = self.timetable_placeholder.set_schedule_color(
+            schedule_data,
+            color,
+        )
+        if not applied_color.isValid():
+            return
+
+        set_timetable_schedule_color(
+            getattr(schedule_data, "id", None),
+            QColor(color).name(),
+        )
+        for popup in self.open_popups:
+            if (
+                getattr(getattr(popup, "data", None), "id", None)
+                == getattr(schedule_data, "id", None)
+                and hasattr(popup, "set_timetable_color")
+            ):
+                popup.set_timetable_color(applied_color)
 
     def _sync_schedule_area_visibility(self, has_cards=None):
         if self.schedule_display_mode == "timetable":
@@ -1244,9 +1606,12 @@ class DashboardView(QWidget):
         schedule_data,
         source_view="dashboard",
         initial_pinned=None,
+        timetable_color=None,
     ):
         for p in self.open_popups:
             if p.data.id == schedule_data.id:
+                if timetable_color is not None and hasattr(p, "set_timetable_color"):
+                    p.set_timetable_color(timetable_color)
                 p.show()
                 p.raise_()
                 p.activateWindow()
@@ -1254,6 +1619,8 @@ class DashboardView(QWidget):
         
         # 把参数传给弹窗实例
         pop = ScheduleDetailPop(schedule_data, source_view=source_view)
+        if timetable_color is not None and hasattr(pop, "set_timetable_color"):
+            pop.set_timetable_color(timetable_color)
         if initial_pinned is None:
             initial_pinned = bool(
                 self.window().windowFlags() & Qt.WindowType.WindowStaysOnTopHint
@@ -1265,6 +1632,8 @@ class DashboardView(QWidget):
         pop.req_edit_time.connect(lambda data, sv=source_view: self.req_edit_time.emit(data, sv))
         pop.req_edit_alarm.connect(lambda data, sv=source_view: self.req_edit_alarm.emit(data, sv)) 
         pop.req_edit_list.connect(lambda data, sv=source_view: self.req_edit_list.emit(data, sv))
+        if hasattr(pop, "timetable_color_changed"):
+            pop.timetable_color_changed.connect(self._handle_timetable_color_changed)
         pop.popup_closed.connect(self._remove_detail_popup)
         self.open_popups.append(pop)
         

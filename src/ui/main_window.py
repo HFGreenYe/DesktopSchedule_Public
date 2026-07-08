@@ -242,6 +242,12 @@ class MainWindow(FramelessMainWindow):
 
     def set_schedule_display_mode(self, mode_id):
         self.page_dashboard.set_schedule_display_mode(mode_id)
+        if hasattr(self.header, "set_schedule_display_mode"):
+            self.header.set_schedule_display_mode(mode_id)
+
+    def reset_timetable_view_to_now(self):
+        self.on_calendar_date_picked(datetime.now().date())
+        self.page_dashboard.reset_timetable_to_current_time()
 
     def toggle_axis_board(self, anchor_window=None):
         from PyQt6.QtGui import QGuiApplication
@@ -763,6 +769,9 @@ class MainWindow(FramelessMainWindow):
                 self.page_dashboard.toggle_view_selector()
                 
         elif action_name == "sort":
+            if getattr(self.page_dashboard, "schedule_display_mode", "card") == "timetable":
+                self.reset_timetable_view_to_now()
+                return
             print("这里以后写排序逻辑")
 
     def _handle_dashboard_context_action(self, action_name):
