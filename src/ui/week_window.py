@@ -1,11 +1,13 @@
 # src/ui/week_window.py
 #import requests
+import colorsys
+import random
 import time
 
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                              QPushButton, QFrame, QToolButton, QLineEdit, QSizePolicy, QStackedWidget, QScrollArea)
 from PyQt6.QtCore import Qt, pyqtSignal, QDate, QTime, QTimer, QRectF, QSize
-from PyQt6.QtGui import QPainter, QPainterPath, QColor, QBrush, QLinearGradient, QIcon, QPixmap, QCursor
+from PyQt6.QtGui import QPainter, QPainterPath, QColor, QBrush, QLinearGradient, QIcon, QPixmap, QCursor, QPen
 from PyQt6.QtSvg import QSvgRenderer
 from qframelesswindow import FramelessMainWindow
 from zhdate import ZhDate
@@ -14,6 +16,10 @@ from datetime import datetime, timedelta
 from ..config import AppConfig
 from ..utils.win_api import apply_24h2_border_fix
 from ..utils.styles import StyleManager
+from ..utils.timetable_preferences import (
+    get_timetable_preferences,
+    set_timetable_schedule_color,
+)
 
 # 引入主界面的添加与选择组件
 from .add_view_week import AddScheduleViewWeek
@@ -206,6 +212,439 @@ class WeekScheduleCard(QFrame):
             delete_callback=lambda: self.req_delete.emit(self.schedule_obj.id)
         )
         menu.exec(self.mapToGlobal(pos))
+
+
+class WeekTimetableBoard(QFrame):
+    DAY_COUNT = 7
+    HOUR_ROWS = 7
+    DAY_MINUTES = 24 * 60
+    DDL_LINE_HEIGHT = 3.0
+    EVENT_GAP = 2.0
+    EVENT_COLUMN_GAP = 2.0
+    EVENT_RADIUS = 3.0
+    EVENT_PALETTE = (
+        "#ff6b6b",
+        "#4d96ff",
+        "#6bcb77",
+        "#ffd93d",
+        "#9b5de5",
+        "#f15bb5",
+        "#00bbf9",
+        "#00f5d4",
+        "#ff9f1c",
+        "#845ec2",
+        "#2ec4b6",
+        "#e76f51",
+        "#577590",
+        "#90be6d",
+        "#f94144",
+        "#43aa8b",
+    )
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.visible_start_hour = self._default_visible_start_hour()
+        self.current_monday = QDate.currentDate()
+        self.schedules_by_day = {day_index: [] for day_index in range(self.DAY_COUNT)}
+        self._schedule_colors = {}
+        self._schedule_color_overrides = dict(
+            get_timetable_preferences().get("schedule_colors", {})
+        )
+        self._palette_order = list(self.EVENT_PALETTE)
+        random.SystemRandom().shuffle(self._palette_order)
+        self._next_color_index = 0
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setMouseTracking(True)
+        self.setStyleSheet("background: transparent; border: none;")
+
+    def _default_visible_start_hour(self):
+        return min(max(datetime.now().hour, 0), 24 - self.HOUR_ROWS)
+
+    def reset_to_current_time(self):
+        self.visible_start_hour = self._default_visible_start_hour()
+        self.update()
+
+    def set_week_data(self, current_monday, schedules_by_day):
+        self.current_monday = current_monday
+        self.schedules_by_day = {
+            day_index: list((schedules_by_day or {}).get(day_index, []))
+            for day_index in range(self.DAY_COUNT)
+        }
+        all_schedules = [
+            schedule
+            for schedules in self.schedules_by_day.values()
+            for schedule in schedules
+        ]
+        self._ensure_schedule_colors(all_schedules)
+        self.update()
+
+    def wheelEvent(self, event):
+        delta = event.angleDelta().y()
+        if delta == 0:
+            event.ignore()
+            return
+
+        step = -1 if delta > 0 else 1
+        max_start_hour = 24 - self.HOUR_ROWS
+        next_hour = min(max(self.visible_start_hour + step, 0), max_start_hour)
+        if next_hour != self.visible_start_hour:
+            self.visible_start_hour = next_hour
+            self.update()
+        event.accept()
+
+    def _ensure_schedule_colors(self, schedules):
+        for schedule in schedules:
+            raw_schedule_id = getattr(schedule, "id", None)
+            schedule_id = raw_schedule_id if raw_schedule_id is not None else id(schedule)
+            if schedule_id in self._schedule_colors:
+                continue
+            override_color = (
+                self._schedule_color_overrides.get(str(raw_schedule_id))
+                if raw_schedule_id is not None
+                else None
+            )
+            if override_color:
+                color = QColor(override_color)
+                if color.isValid():
+                    color.setAlpha(218)
+                    self._schedule_colors[schedule_id] = color
+                    continue
+
+            color = self._next_event_color()
+            self._schedule_colors[schedule_id] = color
+            if raw_schedule_id is not None:
+                stored_color = color.name()
+                self._schedule_color_overrides[str(raw_schedule_id)] = stored_color
+                set_timetable_schedule_color(raw_schedule_id, stored_color)
+
+    def _next_event_color(self):
+        if self._next_color_index < len(self._palette_order):
+            color = QColor(self._palette_order[self._next_color_index])
+        else:
+            hue = (self._next_color_index * 0.61803398875) % 1.0
+            red, green, blue = colorsys.hsv_to_rgb(hue, 0.64, 0.94)
+            color = QColor(round(red * 255), round(green * 255), round(blue * 255))
+        self._next_color_index += 1
+        color.setAlpha(218)
+        return color
+
+    def _color_for_schedule(self, schedule):
+        schedule_id = getattr(schedule, "id", id(schedule))
+        color = self._schedule_colors.get(schedule_id)
+        if color is None:
+            color = self._next_event_color()
+            self._schedule_colors[schedule_id] = color
+        return QColor(color)
+
+    @staticmethod
+    def _is_completed(schedule):
+        return int(getattr(schedule, "status", 0) or 0) == 1
+
+    @staticmethod
+    def _is_expired(schedule):
+        if WeekTimetableBoard._is_completed(schedule):
+            return False
+        end_time = getattr(schedule, "end_time", None)
+        return bool(end_time and end_time < datetime.now())
+
+    @staticmethod
+    def _is_active_now(schedule):
+        if WeekTimetableBoard._is_completed(schedule) or WeekTimetableBoard._is_expired(schedule):
+            return False
+        start_time = getattr(schedule, "start_time", None)
+        end_time = getattr(schedule, "end_time", None)
+        if start_time is None or end_time is None or start_time == end_time:
+            return False
+        if start_time > end_time:
+            start_time, end_time = end_time, start_time
+        now = datetime.now()
+        return start_time <= now <= end_time
+
+    def _display_style_for_schedule(self, schedule):
+        if self._is_completed(schedule):
+            return {
+                "fill": QColor(255, 255, 255, 238),
+                "line": QColor(255, 255, 255, 245),
+                "border": QColor(170, 184, 192, 210),
+            }
+        if self._is_expired(schedule):
+            color = QColor(156, 166, 171, 218)
+            return {
+                "fill": color,
+                "line": color,
+                "border": None,
+            }
+
+        color = self._color_for_schedule(schedule)
+        return {
+            "fill": color,
+            "line": color,
+            "border": QColor(255, 255, 255, 245),
+        }
+
+    def _datetime_value(self, value):
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value
+        if hasattr(value, "toPyDateTime"):
+            return value.toPyDateTime()
+        return None
+
+    def _minutes_from_day_start(self, date_time, day_start):
+        return (date_time - day_start).total_seconds() / 60.0
+
+    def _build_day_items(self, day_index, visible_start, visible_end):
+        day_date = self.current_monday.addDays(day_index).toPyDate()
+        day_start = datetime.combine(day_date, datetime.min.time())
+        intervals = []
+        ddl_points = []
+
+        for schedule in self.schedules_by_day.get(day_index, []):
+            if getattr(schedule, "status", 0) == 2:
+                continue
+            if ScheduleQueryService.is_todo(schedule):
+                continue
+
+            start_time = self._datetime_value(getattr(schedule, "start_time", None))
+            end_time = self._datetime_value(getattr(schedule, "end_time", None))
+
+            if start_time and end_time and start_time != end_time:
+                if start_time > end_time:
+                    start_time, end_time = end_time, start_time
+                start_minutes = max(0.0, self._minutes_from_day_start(start_time, day_start))
+                end_minutes = min(float(self.DAY_MINUTES), self._minutes_from_day_start(end_time, day_start))
+                if end_minutes <= 0 or start_minutes >= self.DAY_MINUTES or end_minutes <= start_minutes:
+                    continue
+                intervals.append(
+                    {
+                        "schedule": schedule,
+                        "start": start_minutes,
+                        "end": end_minutes,
+                        "visible_start": max(start_minutes, visible_start),
+                        "visible_end": min(end_minutes, visible_end),
+                    }
+                )
+                continue
+
+            point_time = end_time or start_time
+            if point_time is None:
+                continue
+            point_minutes = self._minutes_from_day_start(point_time, day_start)
+            if visible_start <= point_minutes <= visible_end:
+                ddl_points.append(
+                    {
+                        "schedule": schedule,
+                        "point": point_minutes,
+                    }
+                )
+
+        visible_intervals = [
+            interval
+            for interval in self._layout_interval_groups(intervals)
+            if interval["visible_end"] > visible_start
+            and interval["visible_start"] < visible_end
+        ]
+        return visible_intervals, ddl_points
+
+    def _layout_interval_groups(self, intervals):
+        if not intervals:
+            return []
+
+        sorted_intervals = sorted(
+            intervals,
+            key=lambda item: (
+                item["start"],
+                item["end"],
+                getattr(item["schedule"], "id", 0),
+            ),
+        )
+        groups = []
+        current_group = []
+        current_group_end = None
+
+        for interval in sorted_intervals:
+            if current_group_end is None or interval["start"] < current_group_end:
+                current_group.append(interval)
+                current_group_end = max(current_group_end or interval["end"], interval["end"])
+            else:
+                groups.append(current_group)
+                current_group = [interval]
+                current_group_end = interval["end"]
+
+        if current_group:
+            groups.append(current_group)
+
+        positioned = []
+        for group in groups:
+            columns_end = []
+            for interval in group:
+                assigned_column = None
+                for column_index, column_end in enumerate(columns_end):
+                    if column_end <= interval["start"]:
+                        assigned_column = column_index
+                        columns_end[column_index] = interval["end"]
+                        break
+                if assigned_column is None:
+                    assigned_column = len(columns_end)
+                    columns_end.append(interval["end"])
+                interval["column"] = assigned_column
+
+            column_count = max(1, len(columns_end))
+            for interval in group:
+                interval["column_count"] = column_count
+                positioned.append(interval)
+
+        return positioned
+
+    def _minute_to_y(self, minute_value, visible_start, top, row_height):
+        return top + ((minute_value - visible_start) / 60.0) * row_height
+
+    def _draw_interval_items(self, painter, intervals, visible_start, top, bottom, day_left, day_width, row_height):
+        for interval in intervals:
+            column_count = interval["column_count"]
+            available_width = max(
+                1.0,
+                day_width - self.EVENT_COLUMN_GAP * (column_count + 1),
+            )
+            rect_width = max(1.0, available_width / column_count)
+            rect_x = day_left + self.EVENT_COLUMN_GAP + interval["column"] * (
+                rect_width + self.EVENT_COLUMN_GAP
+            )
+            rect_y = self._minute_to_y(interval["visible_start"], visible_start, top, row_height)
+            rect_bottom = self._minute_to_y(interval["visible_end"], visible_start, top, row_height)
+            rect_y = max(top + self.EVENT_GAP, rect_y + self.EVENT_GAP)
+            rect_bottom = min(bottom - self.EVENT_GAP, rect_bottom - self.EVENT_GAP)
+            rect_height = max(3.0, rect_bottom - rect_y)
+            if rect_height <= 0:
+                continue
+
+            event_rect = QRectF(rect_x, rect_y, rect_width, rect_height)
+            event_path = QPainterPath()
+            event_path.addRoundedRect(event_rect, self.EVENT_RADIUS, self.EVENT_RADIUS)
+            display_style = self._display_style_for_schedule(interval["schedule"])
+            painter.fillPath(event_path, display_style["fill"])
+            if display_style["border"] is not None:
+                painter.save()
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.setPen(QPen(display_style["border"], 1))
+                painter.drawPath(event_path)
+                painter.restore()
+
+    def _draw_ddl_items(self, painter, ddl_points, visible_start, top, day_left, day_width, row_height):
+        if not ddl_points:
+            return
+
+        grouped_points = {}
+        for point in ddl_points:
+            grouped_points.setdefault(round(point["point"], 2), []).append(point)
+
+        for same_time_points in grouped_points.values():
+            same_time_points.sort(key=lambda item: getattr(item["schedule"], "id", 0))
+            count = len(same_time_points)
+            available_width = max(
+                1.0,
+                day_width - self.EVENT_COLUMN_GAP * (count + 1),
+            )
+            line_width = max(1.0, available_width / count)
+            for index, point in enumerate(same_time_points):
+                line_x = day_left + self.EVENT_COLUMN_GAP + index * (
+                    line_width + self.EVENT_COLUMN_GAP
+                )
+                line_y = self._minute_to_y(point["point"], visible_start, top, row_height)
+                line_rect = QRectF(
+                    line_x,
+                    line_y - self.DDL_LINE_HEIGHT / 2,
+                    line_width,
+                    self.DDL_LINE_HEIGHT,
+                )
+                painter.fillRect(line_rect, self._display_style_for_schedule(point["schedule"])["line"])
+
+    def _draw_day_schedules(self, painter, board_rect, day_index, day_width, row_height, visible_start, visible_end):
+        day_left = board_rect.left() + day_index * day_width
+        intervals, ddl_points = self._build_day_items(day_index, visible_start, visible_end)
+        self._draw_interval_items(
+            painter,
+            intervals,
+            visible_start,
+            board_rect.top(),
+            board_rect.bottom(),
+            day_left,
+            day_width,
+            row_height,
+        )
+        self._draw_ddl_items(
+            painter,
+            ddl_points,
+            visible_start,
+            board_rect.top(),
+            day_left,
+            day_width,
+            row_height,
+        )
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        width = self.width()
+        height = self.height()
+        if width <= 0 or height <= 0:
+            return
+
+        board_rect = QRectF(0.0, 0.0, float(width), float(height))
+        day_width = board_rect.width() / self.DAY_COUNT
+        row_height = board_rect.height() / self.HOUR_ROWS
+        visible_start = float(self.visible_start_hour * 60)
+        visible_end = visible_start + self.HOUR_ROWS * 60.0
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setClipRect(board_rect)
+        for day_index in range(self.DAY_COUNT):
+            self._draw_day_schedules(
+                painter,
+                board_rect,
+                day_index,
+                day_width,
+                row_height,
+                visible_start,
+                visible_end,
+            )
+        painter.restore()
+
+        line_color = QColor(150, 150, 150, 185)
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        painter.setPen(Qt.PenStyle.NoPen)
+        for day_index in range(1, self.DAY_COUNT):
+            x = int(round(board_rect.left() + day_index * day_width))
+            painter.fillRect(x, 0, 1, height, line_color)
+        for row_index in range(1, self.HOUR_ROWS):
+            y = int(round(board_rect.top() + row_index * row_height))
+            painter.fillRect(0, y, width, 1, line_color)
+        painter.restore()
+
+        painter.save()
+        painter.setPen(line_color)
+        font = painter.font()
+        font.setFamily("Microsoft YaHei")
+        font.setPixelSize(9)
+        painter.setFont(font)
+        for day_index in range(self.DAY_COUNT):
+            for row_index in range(self.HOUR_ROWS):
+                hour_value = (self.visible_start_hour + row_index) % 24
+                cell_rect = QRectF(
+                    board_rect.left() + day_index * day_width,
+                    board_rect.top() + row_index * row_height,
+                    day_width,
+                    row_height,
+                ).adjusted(2.0, 2.0, -4.0, -2.0)
+                painter.drawText(
+                    cell_rect,
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop,
+                    f"{hour_value:02d}:00",
+                )
+        painter.restore()
+
 
 from .todo import TodoListContainer
 from ..utils.window_preferences import get_primary_pin_preference
@@ -609,8 +1048,7 @@ class WeekWindow(FramelessMainWindow):
             
         self.body_stack.addWidget(self.page_week_board)
 
-        self.page_week_timetable_placeholder = QWidget()
-        self.page_week_timetable_placeholder.setStyleSheet("background: transparent;")
+        self.page_week_timetable_placeholder = WeekTimetableBoard(self)
         self.body_stack.addWidget(self.page_week_timetable_placeholder)
         
         # --- 第1~4页：复用主界面的组件 ---
@@ -1054,6 +1492,7 @@ class WeekWindow(FramelessMainWindow):
     def load_week_schedules_from_db(self):
         """直接从数据库读取本周所有数据，并渲染到 7 个面板"""
         has_any_schedule = False
+        week_timetable_schedules = {}
         active_drag_card = self._active_drag_card
         active_drag_id = (
             getattr(getattr(active_drag_card, "data", None), "id", None)
@@ -1082,6 +1521,7 @@ class WeekWindow(FramelessMainWindow):
             target_date = self.current_monday.addDays(day_index).toPyDate()
             daily_schedules = db_manager.get_schedules_for_date(target_date)
             valid_schedules =[s for s in daily_schedules if ScheduleQueryService.is_schedule(s) and getattr(s, 'status', 0) != 2]
+            week_timetable_schedules[day_index] = list(valid_schedules)
 
             if valid_schedules:
                 has_any_schedule = True
@@ -1102,6 +1542,10 @@ class WeekWindow(FramelessMainWindow):
                     panel_layout.insertWidget(panel_layout.count() - 1, card)
 
         self.update_placeholder_visibility(has_any_schedule)
+        self.page_week_timetable_placeholder.set_week_data(
+            self.current_monday,
+            week_timetable_schedules,
+        )
         self._sync_panel_scroll_heights()
 
     def update_placeholder_visibility(self, has_any_schedule: bool):
