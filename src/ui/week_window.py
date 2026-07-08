@@ -3,10 +3,11 @@
 import colorsys
 import random
 import time
+from types import SimpleNamespace
 
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                              QPushButton, QFrame, QToolButton, QLineEdit, QSizePolicy, QStackedWidget, QScrollArea)
-from PyQt6.QtCore import Qt, pyqtSignal, QDate, QTime, QTimer, QRectF, QSize
+from PyQt6.QtCore import Qt, pyqtSignal, QDate, QTime, QTimer, QPointF, QRectF, QSize
 from PyQt6.QtGui import QPainter, QPainterPath, QColor, QBrush, QLinearGradient, QIcon, QPixmap, QCursor, QPen
 from PyQt6.QtSvg import QSvgRenderer
 from qframelesswindow import FramelessMainWindow
@@ -215,6 +216,9 @@ class WeekScheduleCard(QFrame):
 
 
 class WeekTimetableBoard(QFrame):
+    schedule_clicked = pyqtSignal(object)
+    schedule_context_requested = pyqtSignal(object, object)
+
     DAY_COUNT = 7
     HOUR_ROWS = 7
     DAY_MINUTES = 24 * 60
@@ -243,9 +247,12 @@ class WeekTimetableBoard(QFrame):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.visible_start_hour = self._default_visible_start_hour()
-        self.current_monday = QDate.currentDate()
+        today = QDate.currentDate()
+        self.current_monday = today.addDays(-(today.dayOfWeek() - 1))
         self.schedules_by_day = {day_index: [] for day_index in range(self.DAY_COUNT)}
+        self.category_map = {}
+        self._visible_start_hours = {}
+        self._visible_hours_anchor = None
         self._schedule_colors = {}
         self._schedule_color_overrides = dict(
             get_timetable_preferences().get("schedule_colors", {})
@@ -253,19 +260,31 @@ class WeekTimetableBoard(QFrame):
         self._palette_order = list(self.EVENT_PALETTE)
         random.SystemRandom().shuffle(self._palette_order)
         self._next_color_index = 0
+        self._hit_regions = []
+        self._hovered_schedule = None
+        self._pressed_schedule = None
+        self._hover_preview = None
+        try:
+            from .popups.schedule_axis_board import _AxisSchedulePreview
+
+            self._hover_preview = _AxisSchedulePreview(False)
+        except Exception:
+            self._hover_preview = None
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setMouseTracking(True)
         self.setStyleSheet("background: transparent; border: none;")
 
     def _default_visible_start_hour(self):
-        return min(max(datetime.now().hour, 0), 24 - self.HOUR_ROWS)
+        return min(max(datetime.now().hour, 0), 23)
 
     def reset_to_current_time(self):
-        self.visible_start_hour = self._default_visible_start_hour()
+        self._reset_visible_start_hours()
         self.update()
 
-    def set_week_data(self, current_monday, schedules_by_day):
+    def set_week_data(self, current_monday, schedules_by_day, category_map=None):
         self.current_monday = current_monday
+        self.category_map = dict(category_map or {})
+        self._ensure_visible_start_hours()
         self.schedules_by_day = {
             day_index: list((schedules_by_day or {}).get(day_index, []))
             for day_index in range(self.DAY_COUNT)
@@ -278,17 +297,50 @@ class WeekTimetableBoard(QFrame):
         self._ensure_schedule_colors(all_schedules)
         self.update()
 
+    def _visible_anchor(self):
+        return (
+            self.current_monday.toPyDate(),
+            QDate.currentDate().toPyDate(),
+        )
+
+    def _reset_visible_start_hours(self):
+        today = QDate.currentDate()
+        default_today_hour = self._default_visible_start_hour()
+        self._visible_start_hours = {}
+        for day_index in range(self.DAY_COUNT):
+            iter_date = self.current_monday.addDays(day_index)
+            self._visible_start_hours[day_index] = (
+                default_today_hour if iter_date == today else 0
+            )
+        self._visible_hours_anchor = self._visible_anchor()
+
+    def _ensure_visible_start_hours(self):
+        if self._visible_hours_anchor != self._visible_anchor():
+            self._reset_visible_start_hours()
+
+    def _visible_start_hour_for_day(self, day_index):
+        self._ensure_visible_start_hours()
+        return self._visible_start_hours.get(day_index, 0)
+
+    def _day_index_at_x(self, x):
+        width = max(1.0, float(self.width()))
+        day_width = width / self.DAY_COUNT
+        return min(max(int(float(x) / day_width), 0), self.DAY_COUNT - 1)
+
     def wheelEvent(self, event):
         delta = event.angleDelta().y()
         if delta == 0:
             event.ignore()
             return
 
+        day_index = self._day_index_at_x(event.position().x())
         step = -1 if delta > 0 else 1
-        max_start_hour = 24 - self.HOUR_ROWS
-        next_hour = min(max(self.visible_start_hour + step, 0), max_start_hour)
-        if next_hour != self.visible_start_hour:
-            self.visible_start_hour = next_hour
+        max_start_hour = 23
+        current_hour = self._visible_start_hour_for_day(day_index)
+        next_hour = min(max(current_hour + step, 0), max_start_hour)
+        if next_hour != current_hour:
+            self._visible_start_hours[day_index] = next_hour
+            self._hide_hover_preview()
             self.update()
         event.accept()
 
@@ -530,6 +582,12 @@ class WeekTimetableBoard(QFrame):
                 painter.setPen(QPen(display_style["border"], 1))
                 painter.drawPath(event_path)
                 painter.restore()
+            self._hit_regions.append(
+                {
+                    "rect": event_rect,
+                    "schedule": interval["schedule"],
+                }
+            )
 
     def _draw_ddl_items(self, painter, ddl_points, visible_start, top, day_left, day_width, row_height):
         if not ddl_points:
@@ -559,9 +617,17 @@ class WeekTimetableBoard(QFrame):
                     self.DDL_LINE_HEIGHT,
                 )
                 painter.fillRect(line_rect, self._display_style_for_schedule(point["schedule"])["line"])
+                self._hit_regions.append(
+                    {
+                        "rect": line_rect.adjusted(0.0, -4.0, 0.0, 4.0),
+                        "schedule": point["schedule"],
+                    }
+                )
 
-    def _draw_day_schedules(self, painter, board_rect, day_index, day_width, row_height, visible_start, visible_end):
+    def _draw_day_schedules(self, painter, board_rect, day_index, day_width, row_height):
         day_left = board_rect.left() + day_index * day_width
+        visible_start = float(self._visible_start_hour_for_day(day_index) * 60)
+        visible_end = visible_start + self.HOUR_ROWS * 60.0
         intervals, ddl_points = self._build_day_items(day_index, visible_start, visible_end)
         self._draw_interval_items(
             painter,
@@ -583,6 +649,38 @@ class WeekTimetableBoard(QFrame):
             row_height,
         )
 
+    def _draw_current_time_line(self, painter, board_rect, day_width, row_height):
+        today = QDate.currentDate()
+        day_index = self.current_monday.daysTo(today)
+        if day_index < 0 or day_index >= self.DAY_COUNT:
+            return
+
+        now = datetime.now()
+        current_minutes = now.hour * 60 + now.minute + now.second / 60.0
+        visible_start = float(self._visible_start_hour_for_day(day_index) * 60)
+        visible_end = visible_start + self.HOUR_ROWS * 60.0
+        if current_minutes < visible_start or current_minutes > visible_end:
+            return
+
+        line_y = board_rect.top() + (
+            (current_minutes - visible_start) / 60.0
+        ) * row_height
+        day_left = board_rect.left() + day_index * day_width
+        day_right = day_left + day_width
+
+        painter.save()
+        pen = QPen(QColor(235, 238, 240, 215), 1)
+        pen.setStyle(Qt.PenStyle.DashLine)
+        pen.setDashPattern([4, 4])
+        painter.setPen(pen)
+        painter.drawLine(
+            int(round(day_left)),
+            int(round(line_y)),
+            int(round(day_right)),
+            int(round(line_y)),
+        )
+        painter.restore()
+
     def paintEvent(self, event):
         painter = QPainter(self)
         width = self.width()
@@ -593,12 +691,11 @@ class WeekTimetableBoard(QFrame):
         board_rect = QRectF(0.0, 0.0, float(width), float(height))
         day_width = board_rect.width() / self.DAY_COUNT
         row_height = board_rect.height() / self.HOUR_ROWS
-        visible_start = float(self.visible_start_hour * 60)
-        visible_end = visible_start + self.HOUR_ROWS * 60.0
 
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setClipRect(board_rect)
+        self._hit_regions = []
         for day_index in range(self.DAY_COUNT):
             self._draw_day_schedules(
                 painter,
@@ -606,21 +703,18 @@ class WeekTimetableBoard(QFrame):
                 day_index,
                 day_width,
                 row_height,
-                visible_start,
-                visible_end,
             )
         painter.restore()
+        self._draw_current_time_line(painter, board_rect, day_width, row_height)
 
         line_color = QColor(150, 150, 150, 185)
+        day_divider_width = 2
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         painter.setPen(Qt.PenStyle.NoPen)
         for day_index in range(1, self.DAY_COUNT):
-            x = int(round(board_rect.left() + day_index * day_width))
-            painter.fillRect(x, 0, 1, height, line_color)
-        for row_index in range(1, self.HOUR_ROWS):
-            y = int(round(board_rect.top() + row_index * row_height))
-            painter.fillRect(0, y, width, 1, line_color)
+            x = int(round(board_rect.left() + day_index * day_width)) - day_divider_width // 2
+            painter.fillRect(x, 0, day_divider_width, height, line_color)
         painter.restore()
 
         painter.save()
@@ -630,20 +724,98 @@ class WeekTimetableBoard(QFrame):
         font.setPixelSize(9)
         painter.setFont(font)
         for day_index in range(self.DAY_COUNT):
+            visible_start_hour = self._visible_start_hour_for_day(day_index)
             for row_index in range(self.HOUR_ROWS):
-                hour_value = (self.visible_start_hour + row_index) % 24
+                hour_value = visible_start_hour + row_index
+                if hour_value >= 24:
+                    continue
                 cell_rect = QRectF(
                     board_rect.left() + day_index * day_width,
                     board_rect.top() + row_index * row_height,
                     day_width,
                     row_height,
-                ).adjusted(2.0, 2.0, -4.0, -2.0)
+                ).adjusted(4.0, 2.0, -2.0, -2.0)
                 painter.drawText(
                     cell_rect,
-                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop,
+                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
                     f"{hour_value:02d}:00",
                 )
         painter.restore()
+
+    def _projection_for_schedule(self, schedule):
+        category = self.category_map.get(getattr(schedule, "category_id", None))
+        category_name = getattr(category, "name", None) or "未分类"
+        importance = max(0, min(int(getattr(schedule, "priority", 0) or 0), 2))
+        return SimpleNamespace(
+            schedule=schedule,
+            category_name=category_name,
+            importance=importance,
+        )
+
+    def _hide_hover_preview(self):
+        self._hovered_schedule = None
+        if self._hover_preview is not None:
+            self._hover_preview.hide()
+
+    def _schedule_at_position(self, position):
+        for region in reversed(self._hit_regions):
+            if region["rect"].contains(position):
+                return region["schedule"]
+        return None
+
+    def mouseMoveEvent(self, event):
+        schedule = self._schedule_at_position(event.position())
+        if schedule is None:
+            self._hide_hover_preview()
+            super().mouseMoveEvent(event)
+            return
+
+        if self._hover_preview is not None:
+            if schedule is not self._hovered_schedule:
+                self._hovered_schedule = schedule
+                self._hover_preview.set_projection(
+                    self._projection_for_schedule(schedule)
+                )
+            self._hover_preview.show_near(event.globalPosition().toPoint())
+        event.accept()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._pressed_schedule = self._schedule_at_position(event.position())
+            if self._pressed_schedule is not None:
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            released_schedule = self._schedule_at_position(event.position())
+            if (
+                released_schedule is not None
+                and released_schedule is self._pressed_schedule
+            ):
+                self._hide_hover_preview()
+                self.schedule_clicked.emit(released_schedule)
+                self._pressed_schedule = None
+                event.accept()
+                return
+            self._pressed_schedule = None
+        super().mouseReleaseEvent(event)
+
+    def contextMenuEvent(self, event):
+        schedule = self._schedule_at_position(QPointF(event.pos()))
+        if schedule is None:
+            super().contextMenuEvent(event)
+            return
+
+        self._hide_hover_preview()
+        self.schedule_context_requested.emit(schedule, event.globalPos())
+        event.accept()
+
+    def leaveEvent(self, event):
+        self._pressed_schedule = None
+        self._hide_hover_preview()
+        super().leaveEvent(event)
 
 
 from .todo import TodoListContainer
@@ -1049,6 +1221,12 @@ class WeekWindow(FramelessMainWindow):
         self.body_stack.addWidget(self.page_week_board)
 
         self.page_week_timetable_placeholder = WeekTimetableBoard(self)
+        self.page_week_timetable_placeholder.schedule_clicked.connect(
+            self.request_schedule_detail.emit
+        )
+        self.page_week_timetable_placeholder.schedule_context_requested.connect(
+            self._show_timetable_schedule_context_menu
+        )
         self.body_stack.addWidget(self.page_week_timetable_placeholder)
         
         # --- 第1~4页：复用主界面的组件 ---
@@ -1493,6 +1671,7 @@ class WeekWindow(FramelessMainWindow):
         """直接从数据库读取本周所有数据，并渲染到 7 个面板"""
         has_any_schedule = False
         week_timetable_schedules = {}
+        category_map = db_manager.get_category_map()
         active_drag_card = self._active_drag_card
         active_drag_id = (
             getattr(getattr(active_drag_card, "data", None), "id", None)
@@ -1545,6 +1724,7 @@ class WeekWindow(FramelessMainWindow):
         self.page_week_timetable_placeholder.set_week_data(
             self.current_monday,
             week_timetable_schedules,
+            category_map,
         )
         self._sync_panel_scroll_heights()
 
@@ -1855,6 +2035,23 @@ class WeekWindow(FramelessMainWindow):
         if db_manager.delete_schedule(schedule_id):
             self.refresh_week_data()
             self.schedule_updated.emit(None)
+
+    def _show_timetable_schedule_context_menu(self, schedule_obj, global_pos):
+        from .components import ScheduleContextMenu
+
+        menu = ScheduleContextMenu(schedule_obj, self)
+        menu.setup_actions(
+            status_callback=lambda status: self._handle_schedule_status_change(
+                schedule_obj.id,
+                status,
+            ),
+            pin_callback=lambda is_pinned: self._handle_schedule_pin_change(
+                schedule_obj.id,
+                is_pinned,
+            ),
+            delete_callback=lambda: self._handle_schedule_delete(schedule_obj.id),
+        )
+        menu.exec(global_pos)
 
     def _handle_card_drop(self, dragged_id, target_index, col_index):
         panel_layout = self.bottom_panels[col_index].layout()
