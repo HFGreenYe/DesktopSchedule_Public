@@ -79,6 +79,7 @@ class WeatherIconLabel(QWidget):
         self._loading_timeout_timer.start(self._loading_timeout_ms)
 
     def set_weather_icon(self, icon_path):
+        self._current_weather_path = icon_path
         if icon_path == "assets/weather/999-fill.svg" and self._loading_timeout_timer.isActive():
             return True
 
@@ -105,6 +106,12 @@ class WeatherIconLabel(QWidget):
         self._weather_label.setPixmap(pixmap)
         self._show_weather_layer()
         return True
+
+    def set_color(self, color):
+        """更新图标颜色并重载（用于暗色模式切换）"""
+        self.icon_color = color
+        if hasattr(self, '_current_weather_path') and self._current_weather_path:
+            self.set_weather_icon(self._current_weather_path)
 
     def setAlignment(self, alignment):
         self._alignment = alignment

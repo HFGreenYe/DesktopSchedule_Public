@@ -1560,18 +1560,20 @@ class WeekWindow(FramelessMainWindow):
         
         week_names = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
         self.day_blocks = []
-        
+        self.weekday_labels = []
+
         for i in range(7):
             col_widget = QWidget()
             col_widget.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-            
+
             col_layout = QVBoxLayout(col_widget)
             col_layout.setContentsMargins(2, 0, 2, 0)
             col_layout.setSpacing(4)
-            
+
             lbl_week = QLabel(week_names[i])
             lbl_week.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl_week.setStyleSheet("color: white; font-size: 10px; font-weight: bold; font-family: 'Microsoft YaHei';")
+            self.weekday_labels.append(lbl_week)
             
             block = DayBlock()
             block.clicked.connect(self._on_day_clicked)
@@ -2462,8 +2464,11 @@ class WeekWindow(FramelessMainWindow):
         dark = self._dark_mode
         bg = "#2b2b2b" if dark else "#FFFFFF"
         border_color = "rgba(255,255,255,0.08)" if dark else "rgba(0,0,0,0.1)"
+        # 暗色下头部文字和图标用灰色，亮色下保持白色
+        header_text = "#999999" if dark else "#FFFFFF"
+        header_icon_color = "#999999" if dark else "#FFFFFF"
 
-        # content_area 背景
+        # ── content_area 背景 ──
         self.content_area.setStyleSheet(f"""
             QWidget#week_content_surface {{
                 background-color: {bg};
@@ -2475,21 +2480,73 @@ class WeekWindow(FramelessMainWindow):
             }}
         """)
 
-        # 卡片模式面板
+        # ── 卡片模式面板 ──
         if hasattr(self, 'bottom_panels'):
             for panel in self.bottom_panels:
                 panel.setStyleSheet(f"background-color: {bg};")
 
-        # 课表模式
+        # ── 课表模式 ──
         if hasattr(self, 'page_week_timetable_placeholder'):
             self.page_week_timetable_placeholder.set_dark_mode(dark)
 
-        # DayBlock 头部日期文字
+        # ── 头部文字：周几标签、时钟、周数、温度 ──
+        for lbl in getattr(self, 'weekday_labels', []):
+            lbl.setStyleSheet(
+                f"color: {header_text}; font-size: 10px; font-weight: bold; font-family: 'Microsoft YaHei';"
+            )
+        if hasattr(self, 'lbl_time'):
+            self.lbl_time.setStyleSheet(
+                f'color: {header_text}; font-family: "Segoe UI Variable Display"; font-size: 26px; font-weight: 200;'
+            )
+        if hasattr(self, 'lbl_week_num'):
+            self.lbl_week_num.setStyleSheet(f'color: {header_text}; font-size: 10px;')
+        if hasattr(self, 'lbl_temp'):
+            self.lbl_temp.setStyleSheet(f'color: {header_text}; font-size: 10px;')
+
+        # ── 头部图标按钮：工具栏、挂起、更多、同步、关闭 ──
+        icon_buttons = []
+        # 工具栏 5 按钮
+        for name in ["skin", "view", "add", "sort", "filter"]:
+            btn = getattr(self, 'toolbar_buttons', {}).get(name)
+            if btn:
+                icon_buttons.append((btn, f"{name}.svg", 16))
+        # 挂起
+        if hasattr(self, 'btn_suspend'):
+            icon_buttons.append((self.btn_suspend, "hang_up.png", 14))
+        # 更多 / 同步 / 关闭
+        for attr, icon_name, size in [
+            ("btn_more", "more.png", 12),
+            ("btn_sync", "sync.png", 12),
+            ("btn_close", "close.png", 12),
+        ]:
+            btn = getattr(self, attr, None)
+            if btn:
+                icon_buttons.append((btn, icon_name, size))
+        for btn, icon_name, size in icon_buttons:
+            pix = get_colored_icon(icon_name, header_icon_color, size)
+            if not pix.isNull():
+                btn.setIcon(QIcon(pix))
+
+        # ── 天气图标 ──
+        if hasattr(self, 'lbl_weather_icon'):
+            self.lbl_weather_icon.set_color(header_icon_color)
+
+        # ── 前后翻页箭头 ──
+        arrow_style = (
+            "QPushButton {{ color: {c}; font-size: 14px; font-weight: bold; border: none; background: transparent; text-align: {a}; padding-{p}: 6px; }} "
+            "QPushButton:hover {{ background: rgba(255,255,255,0.2); border-radius: 4px; }}"
+        )
+        if hasattr(self, 'btn_prev'):
+            self.btn_prev.setStyleSheet(arrow_style.format(c=header_text, a="left", p="left"))
+        if hasattr(self, 'btn_next'):
+            self.btn_next.setStyleSheet(arrow_style.format(c=header_text, a="right", p="right"))
+
+        # ── DayBlock 头部日期文字 ──
         if hasattr(self, 'day_blocks'):
             for block in self.day_blocks:
                 block.set_dark_mode(dark)
 
-        # 卡片模式日程卡片
+        # ── 卡片模式日程卡片 ──
         if hasattr(self, 'bottom_panels'):
             for panel in self.bottom_panels:
                 for card in panel.findChildren(WeekScheduleCard):
