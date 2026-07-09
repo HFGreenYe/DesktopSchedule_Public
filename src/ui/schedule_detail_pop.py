@@ -107,7 +107,7 @@ class ScheduleDetailPop(QWidget):
         super().__init__(parent)
         self.data = schedule_data
         self.source_view = source_view
-        self.dark_mode = dark_mode
+        self._popup_dark_mode = dark_mode
         self.is_pinned = False
         self.drag_pos = None
         self.timetable_color = None
@@ -121,8 +121,20 @@ class ScheduleDetailPop(QWidget):
         self.c_icon_pin = QColor(255, 255, 255, 255)
         self.c_icon_pin_off = QColor(255, 255, 255, 150)
 
+        self._compute_theme_colors()
+
+        self.setFixedWidth(320)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.win_id = int(self.winId())
+        apply_24h2_border_fix(self.win_id)
+        
+        self._setup_ui()
+
+    def _compute_theme_colors(self):
+        """根据 _popup_dark_mode 和 source_view 计算所有动态颜色"""
         if self.source_view == "week":
-            if self.dark_mode:
+            if self._popup_dark_mode:
                 self.c_desc_bg = "#3a3a3a"
                 self.c_desc_border = "rgba(255,255,255,0.1)"
                 self._grid_text_color = "rgba(255,255,255,0.85)"
@@ -143,18 +155,57 @@ class ScheduleDetailPop(QWidget):
             self._grid_text_color = "rgba(255,255,255,0.9)"
             self._grid_icon_color = "#FFFFFF"
 
-        self.setFixedWidth(320)
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.win_id = int(self.winId())
-        apply_24h2_border_fix(self.win_id)
-        
-        self._setup_ui()
+    def _apply_popup_theme(self):
+        """动态重设所有颜色相关 widget 的样式（用于切换暗色模式）"""
+        # 描述框
+        if hasattr(self, "desc_frame"):
+            self.desc_frame.setStyleSheet(f"""
+                QFrame {{ border: 1px solid {self.c_desc_border}; border-radius: 8px; background-color: {self.c_desc_bg}; }}
+            """)
+        # 描述文字
+        if hasattr(self, "lbl_desc"):
+            desc_color = self._get_desc_color(bool(self.data.description))
+            self.lbl_desc.setStyleSheet(
+                f"color: {desc_color}; border: none; background: transparent; font-size: 13px; font-family: 'Microsoft YaHei'; line-height: 1.5;"
+            )
+        if hasattr(self, "edit_desc"):
+            self.edit_desc.setStyleSheet(f"""
+                QTextEdit {{
+                    background: transparent; color: {self._get_desc_color(True)};
+                    border: none;
+                    font-size: 13px; font-family: 'Microsoft YaHei'; padding: 0px;
+                }}
+            """)
+        # 网格文字标签
+        for attr in ("lbl_time_info", "lbl_alarm_info", "lbl_list_info",
+                     "lbl_created_info", "lbl_priority", "lbl_repeat"):
+            widget = getattr(self, attr, None)
+            if widget is None:
+                continue
+            widget.setStyleSheet(
+                f"color: {self._grid_text_color}; background: transparent; "
+                "border: none; padding: 0px; font-size: 12px; "
+                "font-family: 'Microsoft YaHei';"
+            )
+        # 网格图标（重新着色）
+        for icon_lbl, icon_name in getattr(self, "_grid_icon_labels", []):
+            if icon_name is None:
+                continue
+            pix = self._get_icon(icon_name, self._grid_icon_color, 16)
+            if not pix.isNull():
+                icon_lbl.setPixmap(pix)
+        # 重复图标单独处理（它是 QLabel 对象，icon_name=None）
+        if hasattr(self, "icon_repeat"):
+            pix = self._get_icon("repeat.svg", self._grid_icon_color, 16)
+            if not pix.isNull():
+                self.icon_repeat.setPixmap(pix)
+        # 强制重绘
+        self.update()
 
     def _get_desc_color(self, has_text):
         """动态获取详情框里文字的颜色"""
         if self.source_view == "week":
-            if self.dark_mode:
+            if self._popup_dark_mode:
                 return "rgba(255,255,255,0.85)" if has_text else "rgba(255,255,255,0.45)"
             return "#666666" if has_text else "#999999"
         return "rgba(255, 255, 255, 0.9)" if has_text else "rgba(255, 255, 255, 0.6)"
@@ -373,13 +424,15 @@ class ScheduleDetailPop(QWidget):
         grid.setSpacing(10)
         grid.setContentsMargins(0, 8, 0, 0)
 
+        self._grid_icon_labels = []  # 存储 (icon_label, icon_name) 用于主题切换
+
         def create_info_item(icon_source, content):
             # 加上 self，防止我们后面隐藏它时，它变成游离的幽灵窗口
-            w = QWidget(self) 
+            w = QWidget(self)
             l = QHBoxLayout(w)
             l.setContentsMargins(0, 0, 0, 0)
             l.setSpacing(6)
-            
+
             # 图标支持传入字符串(生成静态图标) 或 QLabel(生成动态图标)
             if isinstance(icon_source, str):
                 icon_lbl = QLabel()
@@ -387,8 +440,10 @@ class ScheduleDetailPop(QWidget):
                 pix = self._get_icon(icon_source, self._grid_icon_color, 16)
                 if not pix.isNull(): icon_lbl.setPixmap(pix)
                 l.addWidget(icon_lbl)
+                self._grid_icon_labels.append((icon_lbl, icon_source))
             else:
                 l.addWidget(icon_source)
+                self._grid_icon_labels.append((icon_source, None))
 
             if isinstance(content, str):
                 text_lbl = QLabel(content)
@@ -840,7 +895,7 @@ class ScheduleDetailPop(QWidget):
         path.addRoundedRect(rect, 10.0, 10.0)
 
         if self.source_view == "week":
-            if self.dark_mode:
+            if self._popup_dark_mode:
                 bg_color = QColor("#2b2b2b")
                 border_color = QColor(255, 255, 255, 25)
             else:
@@ -889,6 +944,29 @@ class ScheduleDetailPop(QWidget):
         if self.drag_pos:
             self.move(event.globalPosition().toPoint() - self.drag_pos)
             event.accept()
+
+    def mouseDoubleClickEvent(self, event):
+        """双击分界线以下空白区切换弹窗暗色模式（仅周界面）"""
+        if self.source_view != "week":
+            super().mouseDoubleClickEvent(event)
+            return
+
+        # 计算渐变头部底边（与 paintEvent 一致）
+        if hasattr(self, "desc_frame"):
+            gap = getattr(self, "_main_layout", None)
+            gap = gap.spacing() if gap else 15
+            header_bottom = self.desc_frame.geometry().bottom() + gap
+        else:
+            header_bottom = self.height() // 2
+
+        if event.position().y() > header_bottom:
+            self._popup_dark_mode = not self._popup_dark_mode
+            self._compute_theme_colors()
+            self._apply_popup_theme()
+            event.accept()
+            return
+
+        super().mouseDoubleClickEvent(event)
 
     def mouseReleaseEvent(self, event):
         self.drag_pos = None
