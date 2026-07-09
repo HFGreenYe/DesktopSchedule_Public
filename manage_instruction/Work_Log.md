@@ -142,3 +142,39 @@
 - 增加当前时间灰白虚线，仅在今天列且当前时间位于该列可见时段内显示。
 - 周课表日程命中区域接入交互：悬停复用日课表的轴向信息预览，左键点击复用周窗口日程详情入口，右键复用周日程卡片菜单。
 - 验证：`python -m py_compile src\ui\week_window.py` 与 `git diff --check` 通过；`.venv` offscreen 验证因额度/审批限制被拒绝，本轮未绕过执行。
+
+### 2026-07-09：周课表视觉精简与交互增强
+- 先提交上一轮"每日独立滚动与交互补齐"，提交号：`e7fd31d`，提交信息：`周课表每日独立滚动与交互补齐`。
+- **移除竖分隔线**：删除 `paintEvent` 中 6 条 2px 日分隔竖线绘制循环，解决因像素取整导致的粗细不一致问题。
+- **日列选中高亮**：`WeekTimetableBoard` 新增 `selected_day_index` 状态和 `day_selected` 信号；点击课表空白区域 → `mousePressEvent` 计算 `_day_index_at_x` → 设置选中列 → 绘制 `rgba(0,0,0,15)` 浅灰高亮 → 发送 `day_selected` 信号 → `WeekWindow._on_day_clicked` 同步更新顶部 DayBlock 选中状态；`_on_day_clicked` 同时反调 `set_selected_day()` 实现双向同步；`refresh_week_data` 末尾同步选中日期。
+- **加深时间虚线**：`_draw_current_time_line` 中虚线颜色从 `QColor(235,238,240,215)` 改为 `QColor(120,120,120,200)`，白色背景下清晰可见。
+- **删除整时标签**：移除 `paintEvent` 中每格左上角 `HH:00` 小时标注循环。
+- 验证：`python -m py_compile src\ui\week_window.py` 通过。
+
+### 2026-07-09：周课表文本标注系统与菜单修正
+- **日程块文字标注**（`_draw_interval_labels` 完全重写）：
+  - 顶部左对齐显示开始时间（`HH:MM`），底部左对齐显示结束时间，字体 8px。
+  - 普通/过期日程文字白色 `QColor(255,255,255,235)`；已完成日程（白色背景）文字使用该日程原分配颜色 `QColor(230 alpha)`。
+  - 标题智能分行算法（`_wrap_title_lines`）：逐字按 `QFontMetrics.horizontalAdvance` 计算折行。
+  - 空间优先级：块高度 < 时间总高度 → 不显示任何文字；块高度仅够时间 → 只显示时间无标题；否则按可用标题行数 N 决定：
+    - N=0：无标题
+    - N=1 且放得下：完整显示；放不下：首字 + `...`
+    - N=2 且放得下：完整 2 行；放不下：第1行正文 + 第2行 `...`
+    - N=3 且放得下：完整 3 行；放不下：前2行正文 + 第3行 `...`
+    - N≥4：最多 3 行正文；放不下则前2行正文 + 第3行 `...`
+  - 标题区域在时间标签之间的剩余空间中垂直居中。
+- **DDL 时间标签**（新增 `_draw_ddl_labels`）：线段上方 2px 处绘制灰色 `HH:MM`（`QColor(140,140,140)`，字体 8px）；检测与日程块 `_occupied_label_rects` 重叠则自动跳过；宽度 < 22px 则跳过。
+- **空日程占位**：`paintEvent` 末尾根据 `_hit_regions` 计算有内容的日期集合，无日程的列居中显示灰色 `"空日程"`（`QColor(185,185,185)`，字体 11px）。
+- **课表右键菜单去置顶**：`WeekWindow._show_timetable_schedule_context_menu` 改为手动构建菜单（仿日界面 `dashboard.py:_show_timetable_context_menu`），仅保留"完成/撤销完成"、"隐藏"、"删除"，移除"置顶"选项。`WeekScheduleCard` 和 `_handle_schedule_pin_change` 未修改，卡片模式右键不受影响。
+- 新增辅助方法：`_text_color_for_schedule`、`_format_schedule_time_text`（返回 `(start_str, end_str)` 元组）、`_wrap_title_lines`。
+- 新增导入：`QFont`、`QFontMetrics`。
+- 清理：移除不再使用的 `_truncate_title` 静态方法。
+- 影响范围确认：仅修改 `src/ui/week_window.py`（+336/−40 行），未触及 `WeekScheduleCard`、`bottom_panels`、拖拽逻辑、日界面、月界面。`_handle_schedule_pin_change` 方法保留供卡片模式使用。
+- 验证：`python -m py_compile src\ui\week_window.py` 通过。
+
+### 2026-07-09：选中日列白色整时标注
+- 用户要求：之前删除的整时标注改为选中某天时才显示，白色字体，若与日程块重叠则跳过。
+- 新增 `WeekTimetableBoard._draw_hour_labels_for_selected_day` 方法：仅当 `selected_day_index` 有效时绘制；遍历可见小时范围（`visible_start_hour` 起 `HOUR_ROWS` 格），每格左上角白色 `HH:00`（`QColor(255,255,255,210)`，9px）。
+- 每个整时标签与 `_occupied_label_rects`（已收集的日程块矩形）做 `intersects` 碰撞检测，重叠则跳过不绘制。
+- `paintEvent` 中在空日程占位之后调用该方法，确保标签在日程块之上但不产生重叠文字。
+- 验证：`python -m py_compile src\ui\week_window.py` 通过。

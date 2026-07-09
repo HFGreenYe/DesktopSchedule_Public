@@ -102,6 +102,7 @@ class MainWindow(FramelessMainWindow):
         self.page_dashboard.view_selector.view_selected.connect(self.switch_view)
         self.page_dashboard.context_action_requested.connect(self._handle_dashboard_context_action)
         self.page_dashboard.context_view_requested.connect(self._handle_dashboard_context_view)
+        self.page_dashboard.context_mode_requested.connect(self.set_schedule_display_mode)
         self.page_dashboard.date_change_requested.connect(self.on_calendar_date_picked)
 
         self.page_dashboard.req_refresh_all.connect(self._refresh_week_if_visible)
@@ -137,6 +138,20 @@ class MainWindow(FramelessMainWindow):
                 ),
             )
         )
+        self.week_window.request_timetable_schedule_detail.connect(
+            lambda data, color: self.page_dashboard._show_detail_popup(
+                data,
+                source_view="week",
+                initial_pinned=bool(
+                    self.week_window.windowFlags()
+                    & Qt.WindowType.WindowStaysOnTopHint
+                ),
+                timetable_color=color,
+                on_timetable_color_changed=(
+                    self.week_window._handle_timetable_color_changed
+                ),
+            )
+        )
         self.week_window.day_double_clicked.connect(self.jump_to_date)
         self.week_window.suspend_requested.connect(self.switch_week_to_suspend)
         self.month_window.restore_requested.connect(self.restore_from_month_view)
@@ -162,6 +177,8 @@ class MainWindow(FramelessMainWindow):
         self.header.suspend_requested.connect(self.switch_to_suspend)
         self.suspend_window.restore_requested.connect(self.switch_to_normal)
         self.header.action_requested.connect(self.handle_header_action)
+        self.header.view_requested.connect(self.switch_view)
+        self.header.mode_requested.connect(self.set_schedule_display_mode)
         # 实例化日历弹窗
         self.calendar_pop = CalendarPop(self)
         # 监听日历选中的日期

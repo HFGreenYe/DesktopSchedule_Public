@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                              QPushButton, QFrame, QToolButton, QLineEdit, QSizePolicy, QStackedWidget, QScrollArea)
 from PyQt6.QtCore import Qt, pyqtSignal, QDate, QTime, QTimer, QPointF, QRectF, QSize
-from PyQt6.QtGui import QPainter, QPainterPath, QColor, QBrush, QLinearGradient, QIcon, QPixmap, QCursor, QPen
+from PyQt6.QtGui import QPainter, QPainterPath, QColor, QBrush, QLinearGradient, QIcon, QPixmap, QCursor, QPen, QFont, QFontMetrics
 from PyQt6.QtSvg import QSvgRenderer
 from qframelesswindow import FramelessMainWindow
 from zhdate import ZhDate
@@ -216,8 +216,10 @@ class WeekScheduleCard(QFrame):
 
 
 class WeekTimetableBoard(QFrame):
-    schedule_clicked = pyqtSignal(object)
+    schedule_clicked = pyqtSignal(object, object)
     schedule_context_requested = pyqtSignal(object, object)
+    empty_area_context_requested = pyqtSignal(object)
+    day_selected = pyqtSignal(QDate)
 
     DAY_COUNT = 7
     HOUR_ROWS = 7
@@ -261,6 +263,10 @@ class WeekTimetableBoard(QFrame):
         random.SystemRandom().shuffle(self._palette_order)
         self._next_color_index = 0
         self._hit_regions = []
+        self._visible_event_labels = []
+        self._visible_ddl_labels = []
+        self._occupied_label_rects = []
+        self.selected_day_index = None
         self._hovered_schedule = None
         self._pressed_schedule = None
         self._hover_preview = None
@@ -297,6 +303,20 @@ class WeekTimetableBoard(QFrame):
         self._ensure_schedule_colors(all_schedules)
         self.update()
 
+    def set_selected_day(self, qdate):
+        if qdate is None:
+            self.selected_day_index = None
+            self.update()
+            return
+        monday = self.current_monday.toPyDate()
+        target = qdate.toPyDate() if hasattr(qdate, "toPyDate") else qdate
+        day_index = (target - monday).days
+        if 0 <= day_index < self.DAY_COUNT:
+            self.selected_day_index = day_index
+        else:
+            self.selected_day_index = None
+        self.update()
+
     def _visible_anchor(self):
         return (
             self.current_monday.toPyDate(),
@@ -305,7 +325,10 @@ class WeekTimetableBoard(QFrame):
 
     def _reset_visible_start_hours(self):
         today = QDate.currentDate()
-        default_today_hour = self._default_visible_start_hour()
+        default_today_hour = min(
+            self._default_visible_start_hour(),
+            max(0, 24 - self.HOUR_ROWS),
+        )
         self._visible_start_hours = {}
         for day_index in range(self.DAY_COUNT):
             iter_date = self.current_monday.addDays(day_index)
@@ -335,7 +358,7 @@ class WeekTimetableBoard(QFrame):
 
         day_index = self._day_index_at_x(event.position().x())
         step = -1 if delta > 0 else 1
-        max_start_hour = 23
+        max_start_hour = max(0, 24 - self.HOUR_ROWS)
         current_hour = self._visible_start_hour_for_day(day_index)
         next_hour = min(max(current_hour + step, 0), max_start_hour)
         if next_hour != current_hour:
@@ -388,6 +411,23 @@ class WeekTimetableBoard(QFrame):
             self._schedule_colors[schedule_id] = color
         return QColor(color)
 
+    def set_schedule_color(self, schedule, color):
+        schedule_id = getattr(schedule, "id", None)
+        if schedule_id is None:
+            return QColor()
+
+        color_obj = QColor(color)
+        if not color_obj.isValid():
+            return QColor()
+
+        stored_color = color_obj.name()
+        display_color = QColor(stored_color)
+        display_color.setAlpha(218)
+        self._schedule_color_overrides[str(schedule_id)] = stored_color
+        self._schedule_colors[schedule_id] = display_color
+        self.update()
+        return QColor(display_color)
+
     @staticmethod
     def _is_completed(schedule):
         return int(getattr(schedule, "status", 0) or 0) == 1
@@ -411,6 +451,24 @@ class WeekTimetableBoard(QFrame):
             start_time, end_time = end_time, start_time
         now = datetime.now()
         return start_time <= now <= end_time
+
+    def _text_color_for_schedule(self, schedule):
+        if self._is_completed(schedule):
+            color = QColor(self._color_for_schedule(schedule))
+            color.setAlpha(230)
+            return color
+        return QColor(255, 255, 255, 235)
+
+    @staticmethod
+    def _format_schedule_time_text(schedule):
+        start_time = getattr(schedule, "start_time", None)
+        end_time = getattr(schedule, "end_time", None)
+        if start_time and end_time and start_time != end_time:
+            return f"{start_time:%H:%M}", f"{end_time:%H:%M}"
+        target_time = end_time or start_time
+        if target_time:
+            return None, f"{target_time:%H:%M}"
+        return None, None
 
     def _display_style_for_schedule(self, schedule):
         if self._is_completed(schedule):
@@ -588,6 +646,162 @@ class WeekTimetableBoard(QFrame):
                     "schedule": interval["schedule"],
                 }
             )
+            self._occupied_label_rects.append(event_rect)
+            self._visible_event_labels.append(
+                {
+                    "rect": event_rect,
+                    "schedule": interval["schedule"],
+                }
+            )
+
+    def _wrap_title_lines(self, title, available_width, font_metrics):
+        """将标题按宽度折行，返回行列表"""
+        if not title:
+            return []
+        lines = []
+        current_line = ""
+        for ch in title:
+            test = current_line + ch
+            if font_metrics.horizontalAdvance(test) <= available_width:
+                current_line = test
+            else:
+                if current_line:
+                    lines.append(current_line)
+                current_line = ch
+        if current_line:
+            lines.append(current_line)
+        return lines
+
+    def _draw_interval_labels(self, painter):
+        if not self._visible_event_labels:
+            return
+
+        title_font = painter.font()
+        title_font.setFamily("Microsoft YaHei")
+        title_font.setPixelSize(10)
+        title_font.setBold(True)
+        time_font = QFont(title_font)
+        time_font.setPixelSize(8)
+        time_font.setBold(False)
+        title_metrics = QFontMetrics(title_font)
+        time_metrics = QFontMetrics(time_font)
+        title_line_height = title_metrics.height()
+        time_height = time_metrics.height()
+        gap = 1
+
+        for item in self._visible_event_labels:
+            rect = item["rect"]
+            schedule = item["schedule"]
+            start_label, end_label = self._format_schedule_time_text(schedule)
+            text_color = self._text_color_for_schedule(schedule)
+
+            padded = rect.adjusted(3.0, 1.0, -3.0, -1.0)
+            if padded.width() < 22:
+                continue
+
+            # 时间标签固定占用高度
+            time_total = 0.0
+            if start_label:
+                time_total += time_height + gap
+            if end_label:
+                time_total += time_height + gap
+            if time_total > 0:
+                time_total -= gap  # 去掉最后一个 gap
+
+            title_available_height = padded.height() - time_total
+            if title_available_height < 0:
+                # 空间连时间都放不下，什么都不显示
+                continue
+
+            has_time = start_label or end_label
+            max_title_lines = max(0, int(title_available_height / (title_line_height + gap)))
+
+            # 绘制时间标签
+            painter.setPen(text_color)
+            if start_label:
+                painter.setFont(time_font)
+                painter.drawText(
+                    QRectF(padded.left(), padded.top(), padded.width(), time_height),
+                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+                    start_label,
+                )
+            if end_label:
+                painter.setFont(time_font)
+                painter.drawText(
+                    QRectF(padded.left(), padded.bottom() - time_height, padded.width(), time_height),
+                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom,
+                    end_label,
+                )
+
+            if max_title_lines <= 0:
+                # 空间只够显示时间，不显示标题
+                continue
+
+            title = str(getattr(schedule, "title", None) or "未命名日程")
+            all_wrapped = self._wrap_title_lines(title, padded.width(), title_metrics)
+            needed_lines = len(all_wrapped)
+            text_cap = min(max_title_lines, 3)
+
+            # 计算标题可用区域的顶部
+            title_top = padded.top()
+            if start_label:
+                title_top += time_height + gap
+            title_area_height = title_available_height
+
+            painter.setFont(title_font)
+
+            if needed_lines <= text_cap:
+                # 标题完整放得下，居中绘制
+                total_text_height = needed_lines * (title_line_height + gap) - gap
+                start_y = title_top + (title_area_height - total_text_height) / 2.0
+                for i, line in enumerate(all_wrapped[:text_cap]):
+                    line_y = start_y + i * (title_line_height + gap)
+                    elided = title_metrics.elidedText(
+                        line, Qt.TextElideMode.ElideRight, max(1, int(padded.width()))
+                    )
+                    painter.drawText(
+                        QRectF(padded.left(), line_y, padded.width(), title_line_height),
+                        Qt.AlignmentFlag.AlignCenter,
+                        elided,
+                    )
+            else:
+                # 放不下，需要截断
+                display_lines = min(max_title_lines, 4)  # 最多用 4 行（3 正文 + 1 省略号）
+                if display_lines == 1:
+                    # 1 行：首字 + ...
+                    short = title[0] + "..."
+                    elided = title_metrics.elidedText(
+                        short, Qt.TextElideMode.ElideRight, max(1, int(padded.width()))
+                    )
+                    line_y = title_top + (title_area_height - title_line_height) / 2.0
+                    painter.drawText(
+                        QRectF(padded.left(), line_y, padded.width(), title_line_height),
+                        Qt.AlignmentFlag.AlignCenter,
+                        elided,
+                    )
+                else:
+                    # 前 N-1 行放正文，最后一行放 "..."
+                    text_lines_count = display_lines - 1
+                    total_text_height = display_lines * (title_line_height + gap) - gap
+                    start_y = title_top + (title_area_height - total_text_height) / 2.0
+                    for i in range(text_lines_count):
+                        line_y = start_y + i * (title_line_height + gap)
+                        line_text = all_wrapped[i] if i < len(all_wrapped) else ""
+                        elided = title_metrics.elidedText(
+                            line_text, Qt.TextElideMode.ElideRight, max(1, int(padded.width()))
+                        )
+                        painter.drawText(
+                            QRectF(padded.left(), line_y, padded.width(), title_line_height),
+                            Qt.AlignmentFlag.AlignCenter,
+                            elided,
+                        )
+                    # 省略号行
+                    ellipsis_y = start_y + text_lines_count * (title_line_height + gap)
+                    painter.drawText(
+                        QRectF(padded.left(), ellipsis_y, padded.width(), title_line_height),
+                        Qt.AlignmentFlag.AlignCenter,
+                        "...",
+                    )
 
     def _draw_ddl_items(self, painter, ddl_points, visible_start, top, day_left, day_width, row_height):
         if not ddl_points:
@@ -623,6 +837,118 @@ class WeekTimetableBoard(QFrame):
                         "schedule": point["schedule"],
                     }
                 )
+                # 收集 DDL 时间标签
+                _, time_label = self._format_schedule_time_text(point["schedule"])
+                if time_label and line_width >= 22:
+                    self._visible_ddl_labels.append(
+                        {
+                            "rect": line_rect,
+                            "time_label": time_label,
+                            "schedule": point["schedule"],
+                        }
+                    )
+
+    def _draw_ddl_labels(self, painter):
+        if not self._visible_ddl_labels:
+            return
+
+        font = painter.font()
+        font.setFamily("Microsoft YaHei")
+        font.setPixelSize(8)
+        font.setBold(False)
+        metrics = QFontMetrics(font)
+        label_height = metrics.height()
+
+        for item in self._visible_ddl_labels:
+            line_rect = item["rect"]
+            if line_rect.width() < 22:
+                continue
+
+            label_bottom = line_rect.top() - 2.0
+            label_top = label_bottom - label_height
+            label_rect = QRectF(
+                line_rect.left(),
+                label_top,
+                line_rect.width(),
+                label_height,
+            )
+
+            # 避免与日程块重叠
+            overlaps = False
+            for occupied in self._occupied_label_rects:
+                if label_rect.adjusted(-1.0, -1.0, 1.0, 1.0).intersects(occupied):
+                    overlaps = True
+                    break
+            if overlaps:
+                continue
+
+            painter.save()
+            painter.setFont(font)
+            painter.setPen(QColor(140, 140, 140))
+            elided = metrics.elidedText(
+                item["time_label"],
+                Qt.TextElideMode.ElideRight,
+                max(1, int(label_rect.width())),
+            )
+            painter.drawText(
+                label_rect,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom,
+                elided,
+            )
+            painter.restore()
+
+    def _draw_hour_labels_for_selected_day(self, painter, board_rect, day_width, row_height):
+        """仅在选中的日列绘制整时标签（主题上沿色，自动随主题切换），避开日程块"""
+        if self.selected_day_index is None:
+            return
+        day_index = self.selected_day_index
+        if not (0 <= day_index < self.DAY_COUNT):
+            return
+
+        visible_start_hour = self._visible_start_hour_for_day(day_index)
+        day_left = board_rect.left() + day_index * day_width
+
+        painter.save()
+        font = painter.font()
+        font.setFamily("Microsoft YaHei")
+        font.setPixelSize(9)
+        painter.setFont(font)
+        hour_color = QColor(AppConfig.COLOR_GRADIENT_START)
+        hour_color = hour_color.lighter(155)
+        hour_color.setAlpha(210)
+        painter.setPen(hour_color)
+        metrics = QFontMetrics(font)
+        label_height = metrics.height()
+
+        for row_index in range(self.HOUR_ROWS):
+            hour_value = visible_start_hour + row_index
+            if hour_value >= 24:
+                continue
+
+            cell_top = board_rect.top() + row_index * row_height
+            # 标签放在每格左上角
+            label_rect = QRectF(
+                day_left + 4.0,
+                cell_top + 2.0,
+                day_width - 6.0,
+                label_height,
+            )
+
+            # 检查是否与任何已占用区域重叠
+            overlaps = False
+            for occupied in self._occupied_label_rects:
+                if label_rect.adjusted(-2.0, -2.0, 2.0, 2.0).intersects(occupied):
+                    overlaps = True
+                    break
+            if overlaps:
+                continue
+
+            painter.drawText(
+                label_rect,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+                f"{hour_value:02d}:00",
+            )
+        painter.restore()
 
     def _draw_day_schedules(self, painter, board_rect, day_index, day_width, row_height):
         day_left = board_rect.left() + day_index * day_width
@@ -669,7 +995,7 @@ class WeekTimetableBoard(QFrame):
         day_right = day_left + day_width
 
         painter.save()
-        pen = QPen(QColor(235, 238, 240, 215), 1)
+        pen = QPen(QColor(120, 120, 120, 200), 1)
         pen.setStyle(Qt.PenStyle.DashLine)
         pen.setDashPattern([4, 4])
         painter.setPen(pen)
@@ -692,10 +1018,26 @@ class WeekTimetableBoard(QFrame):
         day_width = board_rect.width() / self.DAY_COUNT
         row_height = board_rect.height() / self.HOUR_ROWS
 
+        # 选中日列浅灰高亮（先画，在日程下面）
+        if self.selected_day_index is not None and 0 <= self.selected_day_index < self.DAY_COUNT:
+            highlight_rect = QRectF(
+                board_rect.left() + self.selected_day_index * day_width,
+                0.0,
+                day_width,
+                float(height),
+            )
+            painter.save()
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.fillRect(highlight_rect, QColor(0, 0, 0, 15))
+            painter.restore()
+
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setClipRect(board_rect)
         self._hit_regions = []
+        self._visible_event_labels = []
+        self._visible_ddl_labels = []
+        self._occupied_label_rects = []
         for day_index in range(self.DAY_COUNT):
             self._draw_day_schedules(
                 painter,
@@ -704,43 +1046,46 @@ class WeekTimetableBoard(QFrame):
                 day_width,
                 row_height,
             )
+        # 在日程块上绘制文字标签
+        self._draw_interval_labels(painter)
+        # 在 DDL 线段上方绘制时间
+        self._draw_ddl_labels(painter)
         painter.restore()
         self._draw_current_time_line(painter, board_rect, day_width, row_height)
 
-        line_color = QColor(150, 150, 150, 185)
-        day_divider_width = 2
+        # 空日程占位文字
+        days_with_content = set()
+        for region in self._hit_regions:
+            day_idx = int(region["rect"].left() / day_width)
+            if 0 <= day_idx < self.DAY_COUNT:
+                days_with_content.add(day_idx)
+
+        empty_font = painter.font()
+        empty_font.setFamily("Microsoft YaHei")
+        empty_font.setPixelSize(11)
         painter.save()
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-        painter.setPen(Qt.PenStyle.NoPen)
-        for day_index in range(1, self.DAY_COUNT):
-            x = int(round(board_rect.left() + day_index * day_width)) - day_divider_width // 2
-            painter.fillRect(x, 0, day_divider_width, height, line_color)
+        painter.setFont(empty_font)
+        painter.setPen(QColor(185, 185, 185))
+        for day_index in range(self.DAY_COUNT):
+            if day_index in days_with_content:
+                continue
+            cell_rect = QRectF(
+                board_rect.left() + day_index * day_width,
+                0.0,
+                day_width,
+                float(height),
+            )
+            painter.drawText(
+                cell_rect,
+                Qt.AlignmentFlag.AlignCenter,
+                "空日程",
+            )
         painter.restore()
 
-        painter.save()
-        painter.setPen(line_color)
-        font = painter.font()
-        font.setFamily("Microsoft YaHei")
-        font.setPixelSize(9)
-        painter.setFont(font)
-        for day_index in range(self.DAY_COUNT):
-            visible_start_hour = self._visible_start_hour_for_day(day_index)
-            for row_index in range(self.HOUR_ROWS):
-                hour_value = visible_start_hour + row_index
-                if hour_value >= 24:
-                    continue
-                cell_rect = QRectF(
-                    board_rect.left() + day_index * day_width,
-                    board_rect.top() + row_index * row_height,
-                    day_width,
-                    row_height,
-                ).adjusted(4.0, 2.0, -2.0, -2.0)
-                painter.drawText(
-                    cell_rect,
-                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
-                    f"{hour_value:02d}:00",
-                )
-        painter.restore()
+        # 选中日列显示白色整时标签
+        self._draw_hour_labels_for_selected_day(
+            painter, board_rect, day_width, row_height
+        )
 
     def _projection_for_schedule(self, schedule):
         category = self.category_map.get(getattr(schedule, "category_id", None))
@@ -785,6 +1130,14 @@ class WeekTimetableBoard(QFrame):
             if self._pressed_schedule is not None:
                 event.accept()
                 return
+            day_index = self._day_index_at_x(event.position().x())
+            if 0 <= day_index < self.DAY_COUNT:
+                self.selected_day_index = day_index
+                selected_date = self.current_monday.addDays(day_index)
+                self.day_selected.emit(selected_date)
+                self.update()
+                event.accept()
+                return
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event):
@@ -795,7 +1148,10 @@ class WeekTimetableBoard(QFrame):
                 and released_schedule is self._pressed_schedule
             ):
                 self._hide_hover_preview()
-                self.schedule_clicked.emit(released_schedule)
+                self.schedule_clicked.emit(
+                    released_schedule,
+                    self._color_for_schedule(released_schedule),
+                )
                 self._pressed_schedule = None
                 event.accept()
                 return
@@ -805,7 +1161,8 @@ class WeekTimetableBoard(QFrame):
     def contextMenuEvent(self, event):
         schedule = self._schedule_at_position(QPointF(event.pos()))
         if schedule is None:
-            super().contextMenuEvent(event)
+            self.empty_area_context_requested.emit(event.globalPos())
+            event.accept()
             return
 
         self._hide_hover_preview()
@@ -827,6 +1184,7 @@ class WeekWindow(FramelessMainWindow):
     restore_requested = pyqtSignal()
     suspend_requested = pyqtSignal()
     request_schedule_detail = pyqtSignal(object)
+    request_timetable_schedule_detail = pyqtSignal(object, object)
     view_selected = pyqtSignal(str)
     schedule_updated = pyqtSignal(object)
     day_double_clicked = pyqtSignal(QDate)
@@ -1222,10 +1580,16 @@ class WeekWindow(FramelessMainWindow):
 
         self.page_week_timetable_placeholder = WeekTimetableBoard(self)
         self.page_week_timetable_placeholder.schedule_clicked.connect(
-            self.request_schedule_detail.emit
+            self.request_timetable_schedule_detail.emit
         )
         self.page_week_timetable_placeholder.schedule_context_requested.connect(
             self._show_timetable_schedule_context_menu
+        )
+        self.page_week_timetable_placeholder.empty_area_context_requested.connect(
+            self._show_timetable_empty_area_context_menu
+        )
+        self.page_week_timetable_placeholder.day_selected.connect(
+            self._on_day_clicked
         )
         self.body_stack.addWidget(self.page_week_timetable_placeholder)
         
@@ -1726,6 +2090,9 @@ class WeekWindow(FramelessMainWindow):
             week_timetable_schedules,
             category_map,
         )
+        self.page_week_timetable_placeholder.set_selected_day(
+            self.current_selected_date
+        )
         self._sync_panel_scroll_heights()
 
     def update_placeholder_visibility(self, has_any_schedule: bool):
@@ -1865,6 +2232,8 @@ class WeekWindow(FramelessMainWindow):
 
     def _on_day_clicked(self, qdate):
         self.current_selected_date = qdate
+        if hasattr(self, "page_week_timetable_placeholder"):
+            self.page_week_timetable_placeholder.set_selected_day(qdate)
         self.refresh_week_data()
 
     def _on_day_double_clicked(self, qdate):
@@ -1877,6 +2246,10 @@ class WeekWindow(FramelessMainWindow):
 
     def _handle_week_context_view(self, view_name):
         self._on_view_selected(view_name)
+
+    def _handle_week_context_mode(self, mode_id):
+        """右键菜单 → 模式切换（卡片/课表）"""
+        self.set_schedule_display_mode(mode_id)
 
     def mousePressEvent(self, event):
         # 如果视图选择器正开着，点窗口上半部分任何空白处都会关掉它
@@ -1907,6 +2280,7 @@ class WeekWindow(FramelessMainWindow):
                 menu = ActionContextMenu(self)
                 menu.action_requested.connect(self._handle_week_context_action)
                 menu.view_requested.connect(self._handle_week_context_view)
+                menu.mode_requested.connect(self._handle_week_context_mode)
                 menu.exec(obj.mapToGlobal(event.pos()))
                 return True
 
@@ -2036,20 +2410,58 @@ class WeekWindow(FramelessMainWindow):
             self.refresh_week_data()
             self.schedule_updated.emit(None)
 
+    def _handle_timetable_color_changed(self, schedule_data, color):
+        """课表模式下颜色变更：同步更新 board + 持久化"""
+        from ..utils.timetable_preferences import set_timetable_schedule_color
+
+        applied = self.page_week_timetable_placeholder.set_schedule_color(
+            schedule_data, color,
+        )
+        if not applied.isValid():
+            return
+        set_timetable_schedule_color(
+            getattr(schedule_data, "id", None),
+            QColor(color).name(),
+        )
+
+    def _show_timetable_empty_area_context_menu(self, global_pos):
+        """课表板空白区右键 → 页面级菜单"""
+        from .common.action_context_menu import ActionContextMenu
+
+        menu = ActionContextMenu(self)
+        menu.action_requested.connect(self._handle_week_context_action)
+        menu.view_requested.connect(self._handle_week_context_view)
+        menu.mode_requested.connect(self._handle_week_context_mode)
+        menu.exec(global_pos)
+
     def _show_timetable_schedule_context_menu(self, schedule_obj, global_pos):
         from .components import ScheduleContextMenu
 
         menu = ScheduleContextMenu(schedule_obj, self)
-        menu.setup_actions(
-            status_callback=lambda status: self._handle_schedule_status_change(
+        status = getattr(schedule_obj, "status", 0)
+        is_completed = status == 1
+        menu._add_centered_action(
+            "撤销完成" if is_completed else "完成日程",
+            "undo.svg" if is_completed else "check.svg",
+            "#333333",
+            lambda: self._handle_schedule_status_change(
                 schedule_obj.id,
-                status,
+                0 if is_completed else 1,
             ),
-            pin_callback=lambda is_pinned: self._handle_schedule_pin_change(
-                schedule_obj.id,
-                is_pinned,
-            ),
-            delete_callback=lambda: self._handle_schedule_delete(schedule_obj.id),
+        )
+        if status == 1:
+            menu._add_centered_action(
+                "隐藏日程",
+                "hide.svg",
+                "#333333",
+                lambda: self._handle_schedule_status_change(schedule_obj.id, 2),
+            )
+        menu.addSeparator()
+        menu._add_centered_action(
+            "删除日程",
+            "delete.svg",
+            "#333333",
+            lambda: self._handle_schedule_delete(schedule_obj.id),
         )
         menu.exec(global_pos)
 

@@ -108,8 +108,10 @@ class HeaderBar(QWidget):
     suspend_requested = pyqtSignal(bool)
     action_requested = pyqtSignal(str)
     req_open_calendar = pyqtSignal()
-    midnight_rollover = pyqtSignal() 
+    midnight_rollover = pyqtSignal()
     weather_updated = pyqtSignal(dict)
+    view_requested = pyqtSignal(str)
+    mode_requested = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -117,7 +119,10 @@ class HeaderBar(QWidget):
         self.drag_pos = None
         self.current_weather_data = {}
         self.setFixedHeight(160)
-        
+
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._show_header_context_menu)
+
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setObjectName("header_container") 
         self.setStyleSheet(StyleManager.get_header_container_style())
@@ -384,10 +389,19 @@ class HeaderBar(QWidget):
 
     def eventFilter(self, obj, event):
         # 拦截交互事件
-        from PyQt6.QtCore import QEvent 
+        from PyQt6.QtCore import QEvent
         if obj == getattr(self, 'lbl_date_info', None) and event.type() == QEvent.Type.MouseButtonPress:
             if event.button() == Qt.MouseButton.LeftButton:
                 self.req_open_calendar.emit()
                 return True
-                
+
         return super().eventFilter(obj, event)
+
+    def _show_header_context_menu(self, pos):
+        from .common.action_context_menu import ActionContextMenu
+
+        menu = ActionContextMenu(self)
+        menu.action_requested.connect(self.action_requested.emit)
+        menu.view_requested.connect(self.view_requested.emit)
+        menu.mode_requested.connect(self.mode_requested.emit)
+        menu.exec(self.mapToGlobal(pos))

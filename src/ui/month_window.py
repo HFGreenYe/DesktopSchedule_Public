@@ -1514,7 +1514,17 @@ class MonthWindow(FramelessMainWindow):
 
         left_vbox.addLayout(bottom_tools_vbox)
 
-        left_vbox.addStretch()
+        # 空白填充区 — 右键弹出上下文菜单
+        self.left_empty_area = QWidget()
+        self.left_empty_area.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu
+        )
+        self.left_empty_area.customContextMenuRequested.connect(
+            self._on_left_empty_area_context_menu
+        )
+        self.left_empty_area.setStyleSheet("background: transparent;")
+        left_vbox.addWidget(self.left_empty_area, stretch=1)
+
         content_layout.addWidget(left_panel)
 
         # --- 右侧面板 (大日历) ---
@@ -1878,7 +1888,16 @@ class MonthWindow(FramelessMainWindow):
         menu = ActionContextMenu(self)
         menu.action_requested.connect(self._handle_context_action)
         menu.view_requested.connect(self._handle_context_view)
+        menu.mode_requested.connect(self._handle_context_mode)
         menu.exec(global_pos)
+
+    def _on_left_empty_area_context_menu(self, pos):
+        """左侧空白区右键：复用日历格右键菜单，操作对象为当前选中日期"""
+        target_date = getattr(self, "user_selected_date", None)
+        if target_date is None or not target_date.isValid():
+            target_date = QDate.currentDate()
+        global_pos = self.left_empty_area.mapToGlobal(pos)
+        self._show_context_menu_for_date(target_date, global_pos)
 
     def _handle_context_action(self, action_name):
         if action_name != "add":
@@ -1923,6 +1942,10 @@ class MonthWindow(FramelessMainWindow):
 
         if view_name == "priority":
             return
+
+    def _handle_context_mode(self, mode_id):
+        """右键菜单 → 模式切换（卡片/课表）"""
+        self.set_schedule_display_mode(mode_id)
 
     # 绘制青色渐变背景与T形切割线
     def paintEvent(self, event):

@@ -123,6 +123,7 @@ class _MenuRow(QFrame):
 class ActionContextMenu(QMenu):
     action_requested = pyqtSignal(str)
     view_requested = pyqtSignal(str)
+    mode_requested = pyqtSignal(str)
 
     MAIN_MENU_WIDTH = 160
     VIEW_MENU_WIDTH = 150
@@ -142,9 +143,45 @@ class ActionContextMenu(QMenu):
         self._apply_menu_style(self.view_menu, self.VIEW_MENU_WIDTH)
         self.aboutToHide.connect(self.view_menu.close)
         self.view_menu.aboutToHide.connect(self._clear_view_row_hover)
+
+        # --- 模式 子菜单 ---
+        self.mode_menu = QMenu("模式", self)
+        self._mode_hover_timer = QTimer(self)
+        self._mode_hover_timer.setInterval(30)
+        self._mode_hover_timer.timeout.connect(
+            self._close_mode_menu_if_cursor_outside
+        )
+        self._mode_rows = {}
+        self._mode_widget_actions = {}
+        self._mode_row = None
+        self._mode_widget_action = None
+        self._apply_menu_style(self.mode_menu, self.VIEW_MENU_WIDTH)
+        self.aboutToHide.connect(self.mode_menu.close)
+        self.mode_menu.aboutToHide.connect(self._clear_mode_row_hover)
+
         self._build_menu()
 
     def _build_menu(self):
+        # --- 模式（仿"视图"子菜单结构） ---
+        self._create_mode_action("card", "卡片模式", ("schedule_card.svg",))
+        self._create_mode_action(
+            "timetable",
+            "课表模式",
+            ("timetable.svg",),
+            icon_inset=1,
+        )
+
+        self._create_main_action(
+            action_id="mode",
+            text="模式",
+            icon_names=("model_switch.svg",),
+            enabled=True,
+            arrow=True,
+            on_enter=self._show_mode_menu,
+            on_leave=self._hide_mode_menu_if_cursor_left,
+            on_click=self._show_mode_menu,
+        )
+
         self._create_main_action(
             action_id="skin",
             text="换肤",
@@ -251,6 +288,98 @@ class ActionContextMenu(QMenu):
 
     def _emit_view_requested(self, view_id):
         self.view_requested.emit(view_id)
+
+    # ── 模式子菜单（镜像视图） ──────────────────────────
+
+    def _create_mode_action(self, mode_id, text, icon_names, icon_inset=0):
+        action = QAction(text, self.mode_menu)
+        if icon_names:
+            path = self._first_existing_icon_path(icon_names)
+            if path:
+                pixmap = _MenuRow._load_menu_icon_pixmap(path)
+                if icon_inset and not pixmap.isNull():
+                    pixmap = pixmap.scaled(
+                        pixmap.width() - icon_inset * 2,
+                        pixmap.height() - icon_inset * 2,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+                action.setIcon(QIcon(pixmap))
+        action.setEnabled(True)
+        action.triggered.connect(
+            lambda _checked=False, mid=mode_id: self._emit_mode_requested(mid)
+        )
+
+        row = _MenuRow(
+            text=text,
+            icon_path=(
+                self._first_existing_icon_path(icon_names) if icon_names else None
+            ),
+            action=action,
+            width=self.VIEW_MENU_WIDTH - 12,
+            enabled=True,
+            on_click=lambda: (
+                self.mode_menu.close(),
+                self.close(),
+            ),
+        )
+        widget_action = QWidgetAction(self.mode_menu)
+        widget_action.setDefaultWidget(row)
+        self.mode_menu.addAction(widget_action)
+        self._mode_rows[mode_id] = row
+        self._mode_widget_actions[mode_id] = widget_action
+        return action
+
+    def _emit_mode_requested(self, mode_id):
+        self.mode_requested.emit(mode_id)
+
+    def _show_mode_menu(self):
+        wa = self.widget_actions_by_id.get("mode")
+        if not wa:
+            return
+        row = self.rows_by_id.get("mode")
+        if row:
+            row.set_forced_hovered(True)
+        action_rect = self.actionGeometry(wa)
+        popup_pos = self.mapToGlobal(QPoint(self.width(), action_rect.top()))
+        self.mode_menu.popup(popup_pos)
+        if not self._mode_hover_timer.isActive():
+            self._mode_hover_timer.start()
+
+    def _hide_mode_menu(self):
+        self._mode_hover_timer.stop()
+        self._clear_mode_row_hover()
+        self.mode_menu.close()
+
+    def _clear_mode_row_hover(self):
+        row = self.rows_by_id.get("mode")
+        if row:
+            row.set_hovered(False)
+            row.set_forced_hovered(False)
+
+    def _hide_mode_menu_if_cursor_left(self):
+        QTimer.singleShot(0, self._close_mode_menu_if_cursor_outside)
+
+    def _close_mode_menu_if_cursor_outside(self):
+        if not self.mode_menu.isVisible():
+            self._mode_hover_timer.stop()
+            self._clear_mode_row_hover()
+            return
+        cursor_pos = QCursor.pos()
+        mode_row = self.rows_by_id.get("mode")
+        mode_row_rect = QRect()
+        if mode_row:
+            mode_row_rect = QRect(
+                mode_row.mapToGlobal(QPoint(0, 0)), mode_row.size()
+            )
+        mode_rect = QRect(
+            self.mode_menu.mapToGlobal(QPoint(0, 0)), self.mode_menu.size()
+        )
+        if (
+            not mode_row_rect.contains(cursor_pos)
+            and not mode_rect.contains(cursor_pos)
+        ):
+            self._hide_mode_menu()
 
     def _show_view_menu(self):
         view_widget_action = self.widget_actions_by_id.get("view")

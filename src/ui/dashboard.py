@@ -484,6 +484,7 @@ class TimetablePlaceholderFrame(QFrame):
     day_offset_requested = pyqtSignal(int)
     schedule_clicked = pyqtSignal(object, object)
     schedule_context_requested = pyqtSignal(object, object)
+    empty_area_context_requested = pyqtSignal(object)
 
     BORDER_WIDTH = 2
     CORNER_RADIUS = 8
@@ -697,7 +698,7 @@ class TimetablePlaceholderFrame(QFrame):
             return {
                 "fill": QColor(255, 255, 255, 238),
                 "line": QColor(255, 255, 255, 245),
-                "text": QColor(AppConfig.COLOR_GRADIENT_START),
+                "text": QColor(self._color_for_schedule(schedule)),
                 "shadow": QColor(255, 255, 255, 0),
                 "border": None,
             }
@@ -1184,7 +1185,8 @@ class TimetablePlaceholderFrame(QFrame):
     def contextMenuEvent(self, event):
         schedule = self._schedule_at_position(QPointF(event.pos()))
         if schedule is None:
-            super().contextMenuEvent(event)
+            self.empty_area_context_requested.emit(event.globalPos())
+            event.accept()
             return
 
         self._hide_hover_preview()
@@ -1361,6 +1363,7 @@ class DashboardView(QWidget):
     req_refresh_all = pyqtSignal()
     context_action_requested = pyqtSignal(str)
     context_view_requested = pyqtSignal(str)
+    context_mode_requested = pyqtSignal(str)
     date_change_requested = pyqtSignal(object)
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1427,6 +1430,9 @@ class DashboardView(QWidget):
         self.timetable_placeholder.schedule_context_requested.connect(
             self._show_timetable_context_menu
         )
+        self.timetable_placeholder.empty_area_context_requested.connect(
+            self._show_dashboard_context_menu
+        )
         self.timetable_placeholder.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
@@ -1489,6 +1495,13 @@ class DashboardView(QWidget):
                 0 if is_completed else 1,
             ),
         )
+        if is_completed:
+            menu._add_centered_action(
+                "隐藏日程",
+                "hide.svg",
+                "#333333",
+                lambda: self._handle_timetable_status_change(schedule_data, 2),
+            )
         menu.addSeparator()
         menu._add_centered_action(
             "删除日程",
@@ -1576,6 +1589,7 @@ class DashboardView(QWidget):
         menu = ActionContextMenu(self)
         menu.action_requested.connect(self.context_action_requested.emit)
         menu.view_requested.connect(self.context_view_requested.emit)
+        menu.mode_requested.connect(self.context_mode_requested.emit)
         menu.exec(global_pos)
 
     def refresh_data(self):
@@ -1636,6 +1650,7 @@ class DashboardView(QWidget):
         source_view="dashboard",
         initial_pinned=None,
         timetable_color=None,
+        on_timetable_color_changed=None,
     ):
         for p in self.open_popups:
             if p.data.id == schedule_data.id:
@@ -1662,7 +1677,10 @@ class DashboardView(QWidget):
         pop.req_edit_alarm.connect(lambda data, sv=source_view: self.req_edit_alarm.emit(data, sv)) 
         pop.req_edit_list.connect(lambda data, sv=source_view: self.req_edit_list.emit(data, sv))
         if hasattr(pop, "timetable_color_changed"):
-            pop.timetable_color_changed.connect(self._handle_timetable_color_changed)
+            if on_timetable_color_changed is not None:
+                pop.timetable_color_changed.connect(on_timetable_color_changed)
+            else:
+                pop.timetable_color_changed.connect(self._handle_timetable_color_changed)
         pop.popup_closed.connect(self._remove_detail_popup)
         self.open_popups.append(pop)
         
