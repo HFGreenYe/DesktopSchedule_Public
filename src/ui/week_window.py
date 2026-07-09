@@ -273,7 +273,7 @@ class WeekTimetableBoard(QFrame):
         try:
             from .popups.schedule_axis_board import _AxisSchedulePreview
 
-            self._hover_preview = _AxisSchedulePreview(False)
+            self._hover_preview = _AxisSchedulePreview(False, outer_frame=False)
         except Exception:
             self._hover_preview = None
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -1334,7 +1334,9 @@ class WeekWindow(FramelessMainWindow):
                 self.btn_view_toggle.clicked.connect(self.toggle_view_selector)
             elif icon_name == "add.svg":
                 btn.clicked.connect(self.switch_to_add_page)
-                
+            elif icon_name == "sort.svg":
+                btn.clicked.connect(self._on_refresh_clicked)
+
             icons_row.addWidget(btn)
         icons_row.addStretch()
         tools_layout.addLayout(icons_row)
@@ -2335,6 +2337,12 @@ class WeekWindow(FramelessMainWindow):
         else:
             # 如果鼠标在下方列表区，把事件还给父类，让 QScrollArea 正常处理上下滑动
             super().wheelEvent(event)
+
+    def _on_refresh_clicked(self):
+        """课表模式：重置可见范围到当前时间；卡片模式：占位（排序未实现）"""
+        if getattr(self, "schedule_display_mode", "card") == "timetable":
+            self.page_week_timetable_placeholder.reset_to_current_time()
+            self.refresh_week_data()
 
     def toggle_view_selector(self):
         """点击视图图标时，自动判断是展开还是收起"""

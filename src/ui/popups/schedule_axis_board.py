@@ -81,12 +81,13 @@ class _AxisSchedulePreview(QFrame):
     INNER_MARGIN = 6.0
     INNER_RADIUS = 6.0
 
-    def __init__(self, persistent=False, parent=None):
+    def __init__(self, persistent=False, parent=None, outer_frame=True):
         flags = Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint
         if not persistent:
             flags = Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint
         super().__init__(parent, flags)
         self.persistent = persistent
+        self._outer_frame = outer_frame
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, not persistent)
         if not persistent:
@@ -95,7 +96,10 @@ class _AxisSchedulePreview(QFrame):
         self.setMaximumWidth(280)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(17, 15, 17, 15)
+        if outer_frame:
+            layout.setContentsMargins(17, 15, 17, 15)
+        else:
+            layout.setContentsMargins(18, 16, 18, 16)
         layout.setSpacing(5)
 
         header = QHBoxLayout()
@@ -207,33 +211,89 @@ class _AxisSchedulePreview(QFrame):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         outer_rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        outer_path = QPainterPath()
-        outer_path.addRoundedRect(
-            outer_rect,
-            self.OUTER_RADIUS,
-            self.OUTER_RADIUS,
-        )
-        gradient = QLinearGradient(outer_rect.topLeft(), outer_rect.bottomLeft())
-        gradient.setColorAt(0.0, QColor(AppConfig.COLOR_GRADIENT_START))
-        gradient.setColorAt(1.0, QColor(AppConfig.COLOR_GRADIENT_END))
-        painter.fillPath(outer_path, QBrush(gradient))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.setPen(QPen(QColor(0, 0, 0, 28), 1))
-        painter.drawPath(outer_path)
 
-        inner_rect = outer_rect.adjusted(
-            self.INNER_MARGIN,
-            self.INNER_MARGIN,
-            -self.INNER_MARGIN,
-            -self.INNER_MARGIN,
-        )
-        painter.setPen(QPen(QColor("#ffffff"), 2.0))
-        painter.setBrush(QColor(255, 255, 255, 190))
-        painter.drawRoundedRect(
-            inner_rect,
-            self.INNER_RADIUS,
-            self.INNER_RADIUS,
-        )
+        if getattr(self, "_outer_frame", True):
+            outer_path = QPainterPath()
+            outer_path.addRoundedRect(
+                outer_rect,
+                self.OUTER_RADIUS,
+                self.OUTER_RADIUS,
+            )
+            gradient = QLinearGradient(outer_rect.topLeft(), outer_rect.bottomLeft())
+            gradient.setColorAt(0.0, QColor(AppConfig.COLOR_GRADIENT_START))
+            gradient.setColorAt(1.0, QColor(AppConfig.COLOR_GRADIENT_END))
+            painter.fillPath(outer_path, QBrush(gradient))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(QColor(0, 0, 0, 28), 1))
+            painter.drawPath(outer_path)
+
+            inner_rect = outer_rect.adjusted(
+                self.INNER_MARGIN,
+                self.INNER_MARGIN,
+                -self.INNER_MARGIN,
+                -self.INNER_MARGIN,
+            )
+        else:
+            # 三层外框：灰线(1px) → 白边(4px) → 主题上沿色(2px) → 渐变+遮罩
+            edge_rect = outer_rect
+            white_rect = outer_rect.adjusted(3.0, 3.0, -3.0, -3.0)
+            theme_rect = outer_rect.adjusted(6.0, 6.0, -6.0, -6.0)
+            gradient_rect = outer_rect.adjusted(7.0, 7.0, -7.0, -7.0)
+
+            # 渐变背景
+            gradient_path = QPainterPath()
+            gradient_path.addRoundedRect(
+                gradient_rect, self.INNER_RADIUS, self.INNER_RADIUS,
+            )
+            gradient = QLinearGradient(
+                gradient_rect.topLeft(), gradient_rect.bottomLeft(),
+            )
+            gradient.setColorAt(0.0, QColor(AppConfig.COLOR_GRADIENT_START))
+            gradient.setColorAt(1.0, QColor(AppConfig.COLOR_GRADIENT_END))
+            painter.fillPath(gradient_path, QBrush(gradient))
+
+            # 半透明白色遮罩
+            painter.setPen(QPen(QColor("#ffffff"), 2.0))
+            painter.setBrush(QColor(255, 255, 255, 190))
+            painter.drawRoundedRect(
+                gradient_rect, self.INNER_RADIUS, self.INNER_RADIUS,
+            )
+
+            # 主题上沿色框 2px
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(QColor(AppConfig.COLOR_GRADIENT_START), 2.0))
+            theme_path = QPainterPath()
+            theme_path.addRoundedRect(
+                theme_rect, self.OUTER_RADIUS, self.OUTER_RADIUS,
+            )
+            painter.drawPath(theme_path)
+
+            # 白边 4px
+            painter.setPen(QPen(QColor("#ffffff"), 4.0))
+            white_path = QPainterPath()
+            white_path.addRoundedRect(
+                white_rect, self.OUTER_RADIUS, self.OUTER_RADIUS,
+            )
+            painter.drawPath(white_path)
+
+            # 灰色边缘线 1px
+            painter.setPen(QPen(QColor(0, 0, 0, 30), 1.0))
+            edge_path = QPainterPath()
+            edge_path.addRoundedRect(
+                edge_rect, self.OUTER_RADIUS, self.OUTER_RADIUS,
+            )
+            painter.drawPath(edge_path)
+
+            inner_rect = gradient_rect
+
+        if getattr(self, "_outer_frame", True):
+            painter.setPen(QPen(QColor("#ffffff"), 2.0))
+            painter.setBrush(QColor(255, 255, 255, 190))
+            painter.drawRoundedRect(
+                inner_rect,
+                self.INNER_RADIUS,
+                self.INNER_RADIUS,
+            )
         super().paintEvent(event)
 
 
@@ -1358,6 +1418,8 @@ class _AxisCategoryGrid(QWidget):
             )
             line.show()
 
+        self.setFixedSize(width, height)
+
 
 class _AxisColorPanel(QWidget):
     MODE_ROW_HEIGHT = 22
@@ -1482,7 +1544,7 @@ class _AxisColorPanel(QWidget):
             2 * _AxisCategoryGrid.ROW_HEIGHT + _AxisCategoryGrid.ROW_GAP
         )
         self.axis_grid.reflow(
-            self.width(),
+            column_width,
             axis_grid_height,
             1,
             column_width,

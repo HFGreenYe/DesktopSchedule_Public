@@ -123,6 +123,9 @@ class ScheduleDetailPop(QWidget):
         if self.source_view == "week":
             self.c_desc_bg = "#FFFFFF"
             self.c_desc_border = "#FFFFFF"
+            grid_end = AppConfig.COLOR_GRADIENT_END
+            self._grid_text_color = grid_end
+            self._grid_icon_color = grid_end
         else:
             self.c_desc_bg = StyleManager.derive_surface_rgba(
                 AppConfig.COLOR_GRADIENT_START,
@@ -130,6 +133,8 @@ class ScheduleDetailPop(QWidget):
                 alpha=0.9,
             )
             self.c_desc_border = "rgba(255, 255, 255, 0.6)"
+            self._grid_text_color = "rgba(255,255,255,0.9)"
+            self._grid_icon_color = "#FFFFFF"
 
         self.setFixedWidth(320)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool)
@@ -231,9 +236,9 @@ class ScheduleDetailPop(QWidget):
         return pixmap
 
     def _setup_ui(self):
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(20, 20, 20, 20)
-        main_layout.setSpacing(15)
+        self._main_layout = QVBoxLayout(self)
+        self._main_layout.setContentsMargins(20, 20, 20, 20)
+        self._main_layout.setSpacing(15)
 
         # === 顶部控制栏 (标题 + 输入框切换) ===
         top_row = QHBoxLayout()
@@ -287,7 +292,7 @@ class ScheduleDetailPop(QWidget):
         top_row.addWidget(self.timetable_color_holder, 0, Qt.AlignmentFlag.AlignVCenter)
         top_row.addWidget(self.lbl_title, stretch=1)
         top_row.addWidget(self.edit_title, 1, Qt.AlignmentFlag.AlignVCenter)
-        main_layout.addLayout(top_row)
+        self._main_layout.addLayout(top_row)
 
         # 固钉按钮
         # 固钉按钮
@@ -319,11 +324,11 @@ class ScheduleDetailPop(QWidget):
         self.btn_close.move(self.width() - 30, 0)
 
         # === 详情内容框 (强制存在，无内容时提示添加) ===
-        desc_frame = QFrame()
-        desc_frame.setStyleSheet(f"""
+        self.desc_frame = QFrame()
+        self.desc_frame.setStyleSheet(f"""
             QFrame {{ border: 1px solid {self.c_desc_border}; border-radius: 8px; background-color: {self.c_desc_bg}; }}
         """)
-        desc_layout = QVBoxLayout(desc_frame)
+        desc_layout = QVBoxLayout(self.desc_frame)
         desc_layout.setContentsMargins(12, 12, 12, 12)
         
         # 详情显示标签
@@ -352,12 +357,12 @@ class ScheduleDetailPop(QWidget):
         
         desc_layout.addWidget(self.lbl_desc)
         desc_layout.addWidget(self.edit_desc)
-        main_layout.addWidget(desc_frame)
+        self._main_layout.addWidget(self.desc_frame)
 
         # === 3. 底部信息网格 ===
         grid = QGridLayout()
         grid.setSpacing(10)
-        grid.setContentsMargins(0, 5, 0, 0)
+        grid.setContentsMargins(0, 8, 0, 0)
 
         def create_info_item(icon_source, content):
             # 加上 self，防止我们后面隐藏它时，它变成游离的幽灵窗口
@@ -370,15 +375,18 @@ class ScheduleDetailPop(QWidget):
             if isinstance(icon_source, str):
                 icon_lbl = QLabel()
                 icon_lbl.setFixedSize(16, 16)
-                pix = self._get_icon(icon_source, "#FFFFFF", 16)
+                pix = self._get_icon(icon_source, self._grid_icon_color, 16)
                 if not pix.isNull(): icon_lbl.setPixmap(pix)
                 l.addWidget(icon_lbl)
             else:
                 l.addWidget(icon_source)
-            
+
             if isinstance(content, str):
                 text_lbl = QLabel(content)
-                text_lbl.setStyleSheet("color: rgba(255,255,255,0.9); font-size: 12px; font-family: 'Microsoft YaHei';")
+                text_lbl.setStyleSheet(
+                    f"color: {self._grid_text_color}; font-size: 12px; "
+                    "font-family: 'Microsoft YaHei';"
+                )
                 l.addWidget(text_lbl)
             else:
                 l.addWidget(content)
@@ -389,7 +397,10 @@ class ScheduleDetailPop(QWidget):
         # 数据准备
         # (1) 将时间做成独立 Label 并监听双击
         self.lbl_time_info = QLabel()
-        self.lbl_time_info.setStyleSheet("color: rgba(255,255,255,0.9); font-size: 12px; font-family: 'Microsoft YaHei';")
+        self.lbl_time_info.setStyleSheet(
+            f"color: {self._grid_text_color}; font-size: 12px; "
+            "font-family: 'Microsoft YaHei';"
+        )
         self.lbl_time_info.setCursor(Qt.CursorShape.PointingHandCursor)
         self.lbl_time_info.setToolTip("双击修改时间")
         self.lbl_time_info.installEventFilter(self)
@@ -397,7 +408,10 @@ class ScheduleDetailPop(QWidget):
 
         # (2) 将提醒做成独立 Label 并监听双击
         self.lbl_alarm_info = QLabel()
-        self.lbl_alarm_info.setStyleSheet("color: rgba(255,255,255,0.9); font-size: 12px; font-family: 'Microsoft YaHei';")
+        self.lbl_alarm_info.setStyleSheet(
+            f"color: {self._grid_text_color}; font-size: 12px; "
+            "font-family: 'Microsoft YaHei';"
+        )
         self.lbl_alarm_info.setCursor(Qt.CursorShape.PointingHandCursor)
         self.lbl_alarm_info.setToolTip("双击修改提醒")
         self.lbl_alarm_info.installEventFilter(self)
@@ -405,21 +419,27 @@ class ScheduleDetailPop(QWidget):
 
         # (3) 将清单做成独立 Label 并监听双击
         self.lbl_list_info = QLabel()
-        self.lbl_list_info.setStyleSheet("color: rgba(255,255,255,0.9); font-size: 12px; font-family: 'Microsoft YaHei';")
+        self.lbl_list_info.setStyleSheet(
+            f"color: {self._grid_text_color}; font-size: 12px; "
+            "font-family: 'Microsoft YaHei';"
+        )
         self.lbl_list_info.setCursor(Qt.CursorShape.PointingHandCursor)
         self.lbl_list_info.setToolTip("双击修改所属清单")
         self.lbl_list_info.installEventFilter(self)
         self.refresh_list_display()
 
         self.lbl_created_info = QLabel()
-        self.lbl_created_info.setStyleSheet("color: rgba(255,255,255,0.9); font-size: 12px; font-family: 'Microsoft YaHei';")
+        self.lbl_created_info.setStyleSheet(
+            f"color: {self._grid_text_color}; font-size: 12px; "
+            "font-family: 'Microsoft YaHei';"
+        )
         self.lbl_created_info.setToolTip("最后修改时间")
         self.refresh_created_display()
 
         # --- (4) 重要性标签；编辑时使用独立菜单，避免内嵌下拉框重排窗口 ---
         self.lbl_priority = QLabel()
         self.lbl_priority.setStyleSheet(
-            "color: rgba(255,255,255,0.9); background: transparent; "
+            f"color: {self._grid_text_color}; background: transparent; "
             "border: none; padding: 0px; font-size: 12px; "
             "font-family: 'Microsoft YaHei';"
         )
@@ -443,7 +463,7 @@ class ScheduleDetailPop(QWidget):
         # --- (5) 重复标签；编辑时使用独立菜单 ---
         self.lbl_repeat = QLabel()
         self.lbl_repeat.setStyleSheet(
-            "color: rgba(255,255,255,0.9); background: transparent; "
+            f"color: {self._grid_text_color}; background: transparent; "
             "border: none; padding: 0px; font-size: 12px; "
             "font-family: 'Microsoft YaHei';"
         )
@@ -499,7 +519,7 @@ class ScheduleDetailPop(QWidget):
             grid.addWidget(w_priority, 2, 0)
             grid.addWidget(w_repeat, 2, 1)
 
-        main_layout.addLayout(grid)
+        self._main_layout.addLayout(grid)
         
         # 1. 将原本单一的文本标签替换为 图标+文字 的组合容器
         self.adjustSize()
@@ -550,10 +570,10 @@ class ScheduleDetailPop(QWidget):
         rep = self.data.repeat_rule.strip()
         if not rep or rep in ("none", "无"):
             self.lbl_repeat.setText("不重复")
-            pix = self._get_icon("repeat_off.svg", "#FFFFFF", 16)
+            pix = self._get_icon("repeat_off.svg", self._grid_icon_color, 16)
         else:
             self.lbl_repeat.setText(rep)
-            pix = self._get_icon("repeat.svg", "#FFFFFF", 16)
+            pix = self._get_icon("repeat.svg", self._grid_icon_color, 16)
         
         if hasattr(self, 'icon_repeat'):
             self.icon_repeat.setPixmap(pix)
@@ -809,11 +829,37 @@ class ScheduleDetailPop(QWidget):
         path = QPainterPath()
         rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
         path.addRoundedRect(rect, 10.0, 10.0)
-        
-        gradient = QLinearGradient(0, 0, 0, self.height())
-        gradient.setColorAt(0.0, QColor(AppConfig.COLOR_GRADIENT_START))
-        gradient.setColorAt(1.0, QColor(AppConfig.COLOR_GRADIENT_END))
-        painter.fillPath(path, QBrush(gradient))
+
+        if self.source_view == "week":
+            # 白色背景
+            painter.fillPath(path, QBrush(QColor("#FFFFFF")))
+
+            # 渐变头部区：裁剪到与上方间距等距处
+            if hasattr(self, "desc_frame"):
+                gap = getattr(self, "_main_layout", None)
+                gap = gap.spacing() if gap else 15
+                header_bottom = self.desc_frame.geometry().bottom() + gap
+            else:
+                header_bottom = self.height() // 2
+            painter.save()
+            painter.setClipRect(
+                QRectF(0, 0, float(self.width()), float(header_bottom))
+            )
+            gradient = QLinearGradient(0, 0, 0, header_bottom)
+            gradient.setColorAt(0.0, QColor(AppConfig.COLOR_GRADIENT_START))
+            gradient.setColorAt(1.0, QColor(AppConfig.COLOR_GRADIENT_END))
+            painter.fillPath(path, QBrush(gradient))
+            painter.restore()
+
+            # 灰色边线，区分白色周背景
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(QColor(0, 0, 0, 30), 1.0))
+            painter.drawPath(path)
+        else:
+            gradient = QLinearGradient(0, 0, 0, self.height())
+            gradient.setColorAt(0.0, QColor(AppConfig.COLOR_GRADIENT_START))
+            gradient.setColorAt(1.0, QColor(AppConfig.COLOR_GRADIENT_END))
+            painter.fillPath(path, QBrush(gradient))
         
     def mousePressEvent(self, event):
         if hasattr(self, 'edit_title') and self.edit_title.isVisible():
