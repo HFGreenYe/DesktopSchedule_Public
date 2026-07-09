@@ -136,6 +136,7 @@ class MainWindow(FramelessMainWindow):
                     self.week_window.windowFlags()
                     & Qt.WindowType.WindowStaysOnTopHint
                 ),
+                dark_mode=self.week_window.dark_mode(),
             )
         )
         self.week_window.request_timetable_schedule_detail.connect(
@@ -150,6 +151,7 @@ class MainWindow(FramelessMainWindow):
                 on_timetable_color_changed=(
                     self.week_window._handle_timetable_color_changed
                 ),
+                dark_mode=self.week_window.dark_mode(),
             )
         )
         self.week_window.day_double_clicked.connect(self.jump_to_date)

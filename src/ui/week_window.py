@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                              QPushButton, QFrame, QToolButton, QLineEdit, QSizePolicy, QStackedWidget, QScrollArea)
-from PyQt6.QtCore import Qt, pyqtSignal, QDate, QTime, QTimer, QPointF, QRectF, QSize
+from PyQt6.QtCore import Qt, pyqtSignal, QDate, QTime, QTimer, QPointF, QRectF, QSize, QSettings
 from PyQt6.QtGui import QPainter, QPainterPath, QColor, QBrush, QLinearGradient, QIcon, QPixmap, QCursor, QPen, QFont, QFontMetrics
 from PyQt6.QtSvg import QSvgRenderer
 from qframelesswindow import FramelessMainWindow
@@ -265,6 +265,7 @@ class WeekTimetableBoard(QFrame):
         self._hit_regions = []
         self._visible_event_labels = []
         self._visible_ddl_labels = []
+        self._dark_mode = False
         self._occupied_label_rects = []
         self.selected_day_index = None
         self._hovered_schedule = None
@@ -279,6 +280,11 @@ class WeekTimetableBoard(QFrame):
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setMouseTracking(True)
         self.setStyleSheet("background: transparent; border: none;")
+
+    def set_dark_mode(self, dark):
+        """切换暗色模式并触发重绘"""
+        self._dark_mode = dark
+        self.update()
 
     def _default_visible_start_hour(self):
         return min(max(datetime.now().hour, 0), 23)
@@ -472,6 +478,12 @@ class WeekTimetableBoard(QFrame):
 
     def _display_style_for_schedule(self, schedule):
         if self._is_completed(schedule):
+            if self._dark_mode:
+                return {
+                    "fill": QColor(58, 58, 58, 230),
+                    "line": QColor(80, 80, 80, 230),
+                    "border": QColor(100, 100, 100, 180),
+                }
             return {
                 "fill": QColor(255, 255, 255, 238),
                 "line": QColor(255, 255, 255, 245),
@@ -884,7 +896,10 @@ class WeekTimetableBoard(QFrame):
 
             painter.save()
             painter.setFont(font)
-            painter.setPen(QColor(140, 140, 140))
+            if self._dark_mode:
+                painter.setPen(QColor(190, 190, 190))
+            else:
+                painter.setPen(QColor(140, 140, 140))
             elided = metrics.elidedText(
                 item["time_label"],
                 Qt.TextElideMode.ElideRight,
@@ -913,9 +928,12 @@ class WeekTimetableBoard(QFrame):
         font.setFamily("Microsoft YaHei")
         font.setPixelSize(9)
         painter.setFont(font)
-        hour_color = QColor(AppConfig.COLOR_GRADIENT_START)
-        hour_color = hour_color.lighter(155)
-        hour_color.setAlpha(210)
+        if self._dark_mode:
+            hour_color = QColor(255, 255, 255, 210)
+        else:
+            hour_color = QColor(AppConfig.COLOR_GRADIENT_START)
+            hour_color = hour_color.lighter(155)
+            hour_color.setAlpha(210)
         painter.setPen(hour_color)
         metrics = QFontMetrics(font)
         label_height = metrics.height()
@@ -995,7 +1013,11 @@ class WeekTimetableBoard(QFrame):
         day_right = day_left + day_width
 
         painter.save()
-        pen = QPen(QColor(120, 120, 120, 200), 1)
+        if self._dark_mode:
+            line_color = QColor(200, 200, 200, 200)
+        else:
+            line_color = QColor(120, 120, 120, 200)
+        pen = QPen(line_color, 1)
         pen.setStyle(Qt.PenStyle.DashLine)
         pen.setDashPattern([4, 4])
         painter.setPen(pen)
@@ -1018,7 +1040,7 @@ class WeekTimetableBoard(QFrame):
         day_width = board_rect.width() / self.DAY_COUNT
         row_height = board_rect.height() / self.HOUR_ROWS
 
-        # 选中日列浅灰高亮（先画，在日程下面）
+        # 选中日列高亮（暗色模式用白色半透明，亮色用黑色半透明）
         if self.selected_day_index is not None and 0 <= self.selected_day_index < self.DAY_COUNT:
             highlight_rect = QRectF(
                 board_rect.left() + self.selected_day_index * day_width,
@@ -1028,7 +1050,10 @@ class WeekTimetableBoard(QFrame):
             )
             painter.save()
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.fillRect(highlight_rect, QColor(0, 0, 0, 15))
+            if self._dark_mode:
+                painter.fillRect(highlight_rect, QColor(255, 255, 255, 18))
+            else:
+                painter.fillRect(highlight_rect, QColor(0, 0, 0, 15))
             painter.restore()
 
         painter.save()
@@ -1065,7 +1090,10 @@ class WeekTimetableBoard(QFrame):
         empty_font.setPixelSize(11)
         painter.save()
         painter.setFont(empty_font)
-        painter.setPen(QColor(185, 185, 185))
+        if self._dark_mode:
+            painter.setPen(QColor(220, 220, 220))
+        else:
+            painter.setPen(QColor(185, 185, 185))
         for day_index in range(self.DAY_COUNT):
             if day_index in days_with_content:
                 continue
@@ -1220,9 +1248,14 @@ class WeekWindow(FramelessMainWindow):
         self._drag_edge_timer.setInterval(60)
         self._drag_edge_timer.timeout.connect(self._check_drag_week_edge)
         # 编辑模式状态位，控制背景渲染！
-        self.is_edit_mode = False 
+        self.is_edit_mode = False
+        # 暗色模式
+        self._dark_mode = QSettings("Lankor", "DesktopSchedule").value(
+            "week/dark_mode", False, type=bool
+        )
 
         self._setup_ui()
+        self._apply_dark_mode()  # 应用初始暗色模式状态
         self._window_drag_controller = WindowDragController(
             self,
             drag_started=self._on_window_drag_started,
@@ -1405,7 +1438,13 @@ class WeekWindow(FramelessMainWindow):
         status_row.addWidget(self.weather_container, alignment=Qt.AlignmentFlag.AlignVCenter)
         status_row.addSpacing(0)
         status_row.addWidget(self.tools_container, alignment=Qt.AlignmentFlag.AlignVCenter)
-        status_row.addStretch() # 顶满左侧区域
+        # 暗色模式双击热区（搜索框右侧空白区域）
+        self._dark_mode_trigger = QWidget()
+        self._dark_mode_trigger.setStyleSheet("background: transparent;")
+        self._dark_mode_trigger.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._dark_mode_trigger.setToolTip("双击切换暗色模式")
+        self._dark_mode_trigger.installEventFilter(self)
+        status_row.addWidget(self._dark_mode_trigger, stretch=1)
 
         self.btn_suspend = QPushButton(self.top_container)
         self.btn_suspend.setIcon(QIcon("assets/icons/hang_up.png"))
@@ -2270,8 +2309,14 @@ class WeekWindow(FramelessMainWindow):
         self.close_view_selector()
 
     def eventFilter(self, obj, event):
-        from PyQt6.QtCore import QEvent 
-        
+        from PyQt6.QtCore import QEvent
+
+        # 暗色模式双击热区
+        if hasattr(self, '_dark_mode_trigger') and obj is self._dark_mode_trigger:
+            if event.type() == QEvent.Type.MouseButtonDblClick and event.button() == Qt.MouseButton.LeftButton:
+                self._toggle_dark_mode()
+                return True
+
         # 拦截底层 7 个面板的鼠标事件
         if hasattr(self, 'bottom_panels') and obj in self.bottom_panels:
             if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.RightButton:
@@ -2343,6 +2388,48 @@ class WeekWindow(FramelessMainWindow):
         if getattr(self, "schedule_display_mode", "card") == "timetable":
             self.page_week_timetable_placeholder.reset_to_current_time()
             self.refresh_week_data()
+
+    def _toggle_dark_mode(self):
+        """切换暗色模式并持久化"""
+        self._dark_mode = not self._dark_mode
+        QSettings("Lankor", "DesktopSchedule").setValue(
+            "week/dark_mode", self._dark_mode
+        )
+        self._apply_dark_mode()
+
+    def _apply_dark_mode(self):
+        """根据 _dark_mode 状态更新所有 UI 元素"""
+        dark = self._dark_mode
+        bg = "#2b2b2b" if dark else "#FFFFFF"
+        border_color = "rgba(255,255,255,0.08)" if dark else "rgba(0,0,0,0.1)"
+
+        # content_area 背景
+        self.content_area.setStyleSheet(f"""
+            QWidget#week_content_surface {{
+                background-color: {bg};
+                border-left: 1px solid {border_color};
+                border-right: 1px solid {border_color};
+                border-bottom: 1px solid {border_color};
+                border-bottom-left-radius: 8px;
+                border-bottom-right-radius: 8px;
+            }}
+        """)
+
+        # 卡片模式面板
+        if hasattr(self, 'bottom_panels'):
+            for panel in self.bottom_panels:
+                panel.setStyleSheet(f"background-color: {bg};")
+
+        # 课表模式
+        if hasattr(self, 'page_week_timetable_placeholder'):
+            self.page_week_timetable_placeholder.set_dark_mode(dark)
+
+        # 强制刷新
+        self.update()
+
+    def dark_mode(self):
+        """供外部查询当前暗色模式状态"""
+        return self._dark_mode
 
     def toggle_view_selector(self):
         """点击视图图标时，自动判断是展开还是收起"""

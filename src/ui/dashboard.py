@@ -1651,6 +1651,7 @@ class DashboardView(QWidget):
         initial_pinned=None,
         timetable_color=None,
         on_timetable_color_changed=None,
+        dark_mode=False,
     ):
         for p in self.open_popups:
             if p.data.id == schedule_data.id:
@@ -1660,9 +1661,9 @@ class DashboardView(QWidget):
                 p.raise_()
                 p.activateWindow()
                 return
-        
+
         # 把参数传给弹窗实例
-        pop = ScheduleDetailPop(schedule_data, source_view=source_view)
+        pop = ScheduleDetailPop(schedule_data, source_view=source_view, dark_mode=dark_mode)
         if timetable_color is not None and hasattr(pop, "set_timetable_color"):
             pop.set_timetable_color(timetable_color)
         if initial_pinned is None:

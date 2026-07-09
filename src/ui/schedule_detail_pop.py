@@ -103,10 +103,11 @@ class ScheduleDetailPop(QWidget):
     popup_closed = pyqtSignal(object)
     timetable_color_changed = pyqtSignal(object, object)
 
-    def __init__(self, schedule_data, source_view="dashboard", parent=None):
+    def __init__(self, schedule_data, source_view="dashboard", dark_mode=False, parent=None):
         super().__init__(parent)
         self.data = schedule_data
         self.source_view = source_view
+        self.dark_mode = dark_mode
         self.is_pinned = False
         self.drag_pos = None
         self.timetable_color = None
@@ -121,11 +122,17 @@ class ScheduleDetailPop(QWidget):
         self.c_icon_pin_off = QColor(255, 255, 255, 150)
 
         if self.source_view == "week":
-            self.c_desc_bg = "#FFFFFF"
-            self.c_desc_border = "#FFFFFF"
-            grid_end = AppConfig.COLOR_GRADIENT_END
-            self._grid_text_color = grid_end
-            self._grid_icon_color = grid_end
+            if self.dark_mode:
+                self.c_desc_bg = "#3a3a3a"
+                self.c_desc_border = "rgba(255,255,255,0.1)"
+                self._grid_text_color = "rgba(255,255,255,0.85)"
+                self._grid_icon_color = "rgba(255,255,255,0.85)"
+            else:
+                self.c_desc_bg = "#FFFFFF"
+                self.c_desc_border = "#FFFFFF"
+                grid_end = AppConfig.COLOR_GRADIENT_END
+                self._grid_text_color = grid_end
+                self._grid_icon_color = grid_end
         else:
             self.c_desc_bg = StyleManager.derive_surface_rgba(
                 AppConfig.COLOR_GRADIENT_START,
@@ -147,6 +154,8 @@ class ScheduleDetailPop(QWidget):
     def _get_desc_color(self, has_text):
         """动态获取详情框里文字的颜色"""
         if self.source_view == "week":
+            if self.dark_mode:
+                return "rgba(255,255,255,0.85)" if has_text else "rgba(255,255,255,0.45)"
             return "#666666" if has_text else "#999999"
         return "rgba(255, 255, 255, 0.9)" if has_text else "rgba(255, 255, 255, 0.6)"
 
@@ -831,8 +840,13 @@ class ScheduleDetailPop(QWidget):
         path.addRoundedRect(rect, 10.0, 10.0)
 
         if self.source_view == "week":
-            # 白色背景
-            painter.fillPath(path, QBrush(QColor("#FFFFFF")))
+            if self.dark_mode:
+                bg_color = QColor("#2b2b2b")
+                border_color = QColor(255, 255, 255, 25)
+            else:
+                bg_color = QColor("#FFFFFF")
+                border_color = QColor(0, 0, 0, 30)
+            painter.fillPath(path, QBrush(bg_color))
 
             # 渐变头部区：裁剪到与上方间距等距处
             if hasattr(self, "desc_frame"):
@@ -851,9 +865,9 @@ class ScheduleDetailPop(QWidget):
             painter.fillPath(path, QBrush(gradient))
             painter.restore()
 
-            # 灰色边线，区分白色周背景
+            # 边线
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.setPen(QPen(QColor(0, 0, 0, 30), 1.0))
+            painter.setPen(QPen(border_color, 1.0))
             painter.drawPath(path)
         else:
             gradient = QLinearGradient(0, 0, 0, self.height())
