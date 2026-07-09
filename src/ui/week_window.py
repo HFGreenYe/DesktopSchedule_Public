@@ -2059,11 +2059,18 @@ class WeekWindow(FramelessMainWindow):
                         widget.deleteLater()
             panel.current_drag_widget = active_drag_card
 
-        # 2. 遍历本周 7 天，向数据库查询
+        # 2. 一次查询全量日程，按日期分发到 7 天（替代 7 次全表扫描）
+        all_schedules = db_manager.get_all_schedules()
         for day_index in range(7):
             target_date = self.current_monday.addDays(day_index).toPyDate()
-            daily_schedules = db_manager.get_schedules_for_date(target_date)
-            valid_schedules =[s for s in daily_schedules if ScheduleQueryService.is_schedule(s) and getattr(s, 'status', 0) != 2]
+            daily_schedules = ScheduleQueryService.filter_for_date(
+                all_schedules, target_date
+            )
+            valid_schedules = [
+                s for s in daily_schedules
+                if ScheduleQueryService.is_schedule(s)
+                and getattr(s, "status", 0) != 2
+            ]
             week_timetable_schedules[day_index] = list(valid_schedules)
 
             if valid_schedules:

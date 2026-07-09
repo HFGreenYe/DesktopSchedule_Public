@@ -51,8 +51,12 @@ class ScheduleRepository:
             self._schedule_model.select().order_by(self._schedule_model.created_at.desc())
         )
 
+    def get_all_schedules(self):
+        """返回全部日程（单次全表扫描），供调用方自行分发过滤。"""
+        return list(self._schedule_model.select())
+
     def get_schedules_for_date(self, target_date: datetime.date):
-        all_data = list(self._schedule_model.select())
+        all_data = self.get_all_schedules()
         filtered = ScheduleQueryService.filter_for_date(all_data, target_date)
 
         now = datetime.datetime.now()

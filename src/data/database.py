@@ -210,6 +210,9 @@ class DatabaseManager:
     def get_schedules_for_date(self, target_date: datetime.date):
         return self.schedule_repository.get_schedules_for_date(target_date)
 
+    def get_all_schedules(self):
+        return self.schedule_repository.get_all_schedules()
+
     def get_active_categories(self, list_type=None):
         return self.category_repository.get_active_categories(list_type)
     
