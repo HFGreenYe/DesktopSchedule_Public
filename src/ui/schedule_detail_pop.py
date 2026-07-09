@@ -138,7 +138,8 @@ class ScheduleDetailPop(QWidget):
                 self.c_desc_bg = "#3a3a3a"
                 self.c_desc_border = "rgba(255,255,255,0.1)"
                 self._grid_text_color = "rgba(255,255,255,0.85)"
-                self._grid_icon_color = "rgba(255,255,255,0.85)"
+                # QColor 不支持 rgba() 字符串，必须用对象
+                self._grid_icon_color = QColor(255, 255, 255, 217)
             else:
                 self.c_desc_bg = "#FFFFFF"
                 self.c_desc_border = "#FFFFFF"
