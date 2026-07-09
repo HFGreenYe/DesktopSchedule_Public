@@ -19,6 +19,7 @@ class DayBlock(QFrame):
         self.date = QDate.currentDate()
         self.is_today = False
         self.is_selected = False
+        self._dark_mode = False
 
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedHeight(44)
@@ -83,12 +84,21 @@ class DayBlock(QFrame):
         self._tooltip_filter = ToolTipFilter(tooltip_text, self)
         self.installEventFilter(self._tooltip_filter)
 
+    def set_dark_mode(self, dark):
+        self._dark_mode = dark
+        self.update_style()
+
     def set_selected(self, selected):
         self.is_selected = selected
         self.update_style()
 
     def update_style(self):
-        text_color = "#FFD700" if self.is_today else "#FFFFFF"
+        if self.is_today:
+            text_color = "#FFD700"
+        elif self._dark_mode:
+            text_color = "#999999"
+        else:
+            text_color = "#FFFFFF"
         self.lbl_day.setStyleSheet(f"color: {text_color}; font-size: 12px; font-weight: bold; font-family: 'Microsoft YaHei'; background: transparent;")
         self.lbl_lunar.setStyleSheet(f"color: {text_color}; font-size: 9px; font-family: 'Microsoft YaHei'; background: transparent;")
 

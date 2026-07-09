@@ -53,20 +53,21 @@ class WeekScheduleCard(QFrame):
         self.setProperty("windowDragDisabled", True)
         self.data = schedule_obj
         self.schedule_obj = schedule_obj
-        
+        self._dark_mode = False
+
         self.setStyleSheet("""
             WeekScheduleCard {
-                background-color: transparent; 
+                background-color: transparent;
                 border: none;
                 border-radius: 0px;
             }
             WeekScheduleCard:hover {
-                background-color: rgba(0, 0, 0, 0.04); 
+                background-color: rgba(0, 0, 0, 0.04);
             }
         """)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedHeight(46) 
-        
+        self.setFixedHeight(46)
+
         # 开启右键菜单策略
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
@@ -83,24 +84,17 @@ class WeekScheduleCard(QFrame):
         # 优先级圆点
         self.dot = QWidget()
         self.dot.setFixedSize(8, 8)
-        
+
         # 根据是否已完成动态调整标题和圆点样式
         self.lbl_title = AdaptiveLabel(schedule_obj.title, max_size=11, min_size=10)
+        self._is_completed = getattr(self.schedule_obj, 'status', 0) == 1
+        self._priority = schedule_obj.priority
 
-        # 2. 设置状态样式
-        is_completed = getattr(self.schedule_obj, 'status', 0) == 1
-        if is_completed:
-            self.dot.setStyleSheet("background-color: #cccccc; border-radius: 4px;")
-            self.lbl_title.setStyleSheet("color: rgba(51, 51, 51, 0.5); font-weight: bold; border: none; background: transparent;")
-            self.lbl_title.setStrikeOut(True)
-        else:
-            p_color = {2: "#FF4D4F", 1: "#FAAD14", 0: "#52C41A"}.get(schedule_obj.priority, "#52C41A")
-            self.dot.setStyleSheet(f"background-color: {p_color}; border-radius: 4px;")
-            self.lbl_title.setStyleSheet("color: #333333; font-weight: bold; border: none; background: transparent;")
-            
+        self._apply_card_style()
+
         top_layout.addWidget(self.dot)
-        top_layout.addWidget(self.lbl_title, stretch=1) 
-        
+        top_layout.addWidget(self.lbl_title, stretch=1)
+
         # 3. 排版防遮挡。如果置顶了，就强制给右上角留出 16px 空白；否则使用弹簧顶到最右侧
         is_pinned = getattr(self.schedule_obj, 'is_pinned', False)
         if is_pinned:
@@ -110,7 +104,7 @@ class WeekScheduleCard(QFrame):
 
         # --- 下半部分：时间 ---
         self.lbl_time = QLabel()
-        self.lbl_time.setStyleSheet("color: #888888;padding-left: 10px; font-size: 9px; border: none; background: transparent;")
+        self._apply_time_style()
         
         st = schedule_obj.start_time
         et = schedule_obj.end_time
@@ -135,6 +129,70 @@ class WeekScheduleCard(QFrame):
             self.icon_pin.setPixmap(pixmap)
             #self.icon_pin.setScaledContents(True)
             self.icon_pin.setStyleSheet("background: transparent;")
+
+    def set_dark_mode(self, dark):
+        """切换卡片暗色模式 — 更新标题/时间/悬停样式"""
+        self._dark_mode = dark
+        self._apply_card_style()
+        self._apply_time_style()
+        if dark:
+            self.setStyleSheet("""
+                WeekScheduleCard {
+                    background-color: transparent;
+                    border: none;
+                    border-radius: 0px;
+                }
+                WeekScheduleCard:hover {
+                    background-color: rgba(255, 255, 255, 0.06);
+                }
+            """)
+        else:
+            self.setStyleSheet("""
+                WeekScheduleCard {
+                    background-color: transparent;
+                    border: none;
+                    border-radius: 0px;
+                }
+                WeekScheduleCard:hover {
+                    background-color: rgba(0, 0, 0, 0.04);
+                }
+            """)
+
+    def _apply_card_style(self):
+        """根据完成状态和暗色模式设置圆点+标题样式"""
+        if self._is_completed:
+            self.dot.setStyleSheet("background-color: #cccccc; border-radius: 4px;")
+            if self._dark_mode:
+                self.lbl_title.setStyleSheet(
+                    "color: rgba(255, 255, 255, 0.4); font-weight: bold; border: none; background: transparent;"
+                )
+            else:
+                self.lbl_title.setStyleSheet(
+                    "color: rgba(51, 51, 51, 0.5); font-weight: bold; border: none; background: transparent;"
+                )
+            self.lbl_title.setStrikeOut(True)
+        else:
+            p_color = {2: "#FF4D4F", 1: "#FAAD14", 0: "#52C41A"}.get(self._priority, "#52C41A")
+            self.dot.setStyleSheet(f"background-color: {p_color}; border-radius: 4px;")
+            if self._dark_mode:
+                self.lbl_title.setStyleSheet(
+                    "color: #FFFFFF; font-weight: bold; border: none; background: transparent;"
+                )
+            else:
+                self.lbl_title.setStyleSheet(
+                    "color: #333333; font-weight: bold; border: none; background: transparent;"
+                )
+
+    def _apply_time_style(self):
+        """根据暗色模式设置时间标签颜色"""
+        if self._dark_mode:
+            self.lbl_time.setStyleSheet(
+                "color: #AAAAAA; padding-left: 10px; font-size: 9px; border: none; background: transparent;"
+            )
+        else:
+            self.lbl_time.setStyleSheet(
+                "color: #888888; padding-left: 10px; font-size: 9px; border: none; background: transparent;"
+            )
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -2124,6 +2182,8 @@ class WeekWindow(FramelessMainWindow):
                     if active_drag_id is not None and sched_obj.id == active_drag_id:
                         continue
                     card = WeekScheduleCard(sched_obj)
+                    if self._dark_mode:
+                        card.set_dark_mode(True)
                     card.clicked.connect(self.request_schedule_detail.emit)
                     card.req_status.connect(self._handle_schedule_status_change)
                     card.req_pin.connect(self._handle_schedule_pin_change)
@@ -2423,6 +2483,17 @@ class WeekWindow(FramelessMainWindow):
         # 课表模式
         if hasattr(self, 'page_week_timetable_placeholder'):
             self.page_week_timetable_placeholder.set_dark_mode(dark)
+
+        # DayBlock 头部日期文字
+        if hasattr(self, 'day_blocks'):
+            for block in self.day_blocks:
+                block.set_dark_mode(dark)
+
+        # 卡片模式日程卡片
+        if hasattr(self, 'bottom_panels'):
+            for panel in self.bottom_panels:
+                for card in panel.findChildren(WeekScheduleCard):
+                    card.set_dark_mode(dark)
 
         # 强制刷新
         self.update()
