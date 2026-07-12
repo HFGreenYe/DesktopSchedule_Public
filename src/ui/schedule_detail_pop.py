@@ -135,7 +135,7 @@ class ScheduleDetailPop(QWidget):
         """根据 _popup_dark_mode 和 source_view 计算所有动态颜色"""
         if self.source_view == "week":
             if self._popup_dark_mode:
-                self.c_desc_bg = "#3a3a3a"
+                self.c_desc_bg = "#2b2b2b"
                 self.c_desc_border = "rgba(255,255,255,0.1)"
                 self._grid_text_color = "rgba(255,255,255,0.85)"
                 # QColor 不支持 rgba() 字符串，必须用对象
@@ -216,12 +216,14 @@ class ScheduleDetailPop(QWidget):
             self.timetable_color = None
             if hasattr(self, "timetable_color_holder"):
                 self.timetable_color_holder.hide()
+            self._refresh_title_layout()
             return
         color_obj = QColor(color)
         if not color_obj.isValid():
             self.timetable_color = None
             if hasattr(self, "timetable_color_holder"):
                 self.timetable_color_holder.hide()
+            self._refresh_title_layout()
             return
 
         self.timetable_color = color_obj
@@ -238,6 +240,46 @@ class ScheduleDetailPop(QWidget):
             self.lbl_timetable_color.show()
         if hasattr(self, "timetable_color_holder"):
             self.timetable_color_holder.show()
+        self._refresh_title_layout()
+
+    def _available_title_width(self):
+        if not hasattr(self, "_main_layout") or not hasattr(self, "_title_row"):
+            return 180
+
+        main_margins = self._main_layout.contentsMargins()
+        row_margins = self._title_row.contentsMargins()
+        width = (
+            self.width()
+            - main_margins.left()
+            - main_margins.right()
+            - row_margins.left()
+            - row_margins.right()
+        )
+        spacing = self._title_row.spacing()
+
+        if hasattr(self, "lbl_source_icon") and self.lbl_source_icon.isVisible():
+            width -= self.lbl_source_icon.width() + spacing
+        if hasattr(self, "timetable_color_holder") and self.timetable_color_holder.isVisible():
+            width -= self.timetable_color_holder.width() + spacing
+
+        return max(80, width)
+
+    def _refresh_title_layout(self):
+        if not hasattr(self, "lbl_title"):
+            return
+
+        title_width = self._available_title_width()
+        self.lbl_title.setFixedWidth(title_width)
+        title_height = self.lbl_title.heightForWidth(title_width)
+        if title_height <= 0:
+            title_height = self.lbl_title.sizeHint().height()
+        self.lbl_title.setFixedHeight(max(1, title_height))
+
+        if hasattr(self, "edit_title"):
+            self.edit_title.setFixedWidth(title_width)
+
+        self.updateGeometry()
+        self.adjustSize()
 
     def _handle_timetable_color_chip_clicked(self):
         if self.timetable_color is None:
@@ -305,7 +347,8 @@ class ScheduleDetailPop(QWidget):
         top_row = QHBoxLayout()
         top_row.setContentsMargins(0, 0, 60, 0)
         top_row.setSpacing(5)
-        top_row.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        top_row.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self._title_row = top_row
 
         # 如果是从“待办看板”打开的弹窗，加一个便签图标以示区分
         if self.source_view == "todo_board":
@@ -333,7 +376,8 @@ class ScheduleDetailPop(QWidget):
 
         self.lbl_title = QLabel(self.data.title)
         self.lbl_title.setStyleSheet("color: white; font-size: 20px; font-weight: bold; font-family: 'Microsoft YaHei';")
-        self.lbl_title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.lbl_title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.lbl_title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.lbl_title.setWordWrap(True)
         self.lbl_title.installEventFilter(self) # 监听双击
 
@@ -346,13 +390,13 @@ class ScheduleDetailPop(QWidget):
                 font-size: 20px; font-weight: bold; font-family: 'Microsoft YaHei'; padding: 0px;
             }
         """)
-        self.edit_title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.edit_title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.edit_title.hide()
         self.edit_title.installEventFilter(self)
 
-        top_row.addWidget(self.timetable_color_holder, 0, Qt.AlignmentFlag.AlignVCenter)
+        top_row.addWidget(self.timetable_color_holder, 0, Qt.AlignmentFlag.AlignTop)
         top_row.addWidget(self.lbl_title, stretch=1)
-        top_row.addWidget(self.edit_title, 1, Qt.AlignmentFlag.AlignVCenter)
+        top_row.addWidget(self.edit_title, 1, Qt.AlignmentFlag.AlignTop)
         self._main_layout.addLayout(top_row)
 
         # 固钉按钮
@@ -587,7 +631,7 @@ class ScheduleDetailPop(QWidget):
         self._main_layout.addLayout(grid)
         
         # 1. 将原本单一的文本标签替换为 图标+文字 的组合容器
-        self.adjustSize()
+        self._refresh_title_layout()
 
     def _adjust_desc_height(self):
         """终极精准高度计算：抛弃不稳定的测算，使用绝对宽度"""
@@ -847,7 +891,7 @@ class ScheduleDetailPop(QWidget):
 
         self.edit_title.hide()
         self.lbl_title.show()
-        QTimer.singleShot(0, lambda: self.adjustSize())
+        QTimer.singleShot(0, self._refresh_title_layout)
 
     # 结束详情编辑并保存
     def _finish_edit_desc(self):

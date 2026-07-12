@@ -178,3 +178,26 @@
 - 每个整时标签与 `_occupied_label_rects`（已收集的日程块矩形）做 `intersects` 碰撞检测，重叠则跳过不绘制。
 - `paintEvent` 中在空日程占位之后调用该方法，确保标签在日程块之上但不产生重叠文字。
 - 验证：`python -m py_compile src\ui\week_window.py` 通过。
+
+### 2026-07-11：周界面暗色模式头部前景统一
+- 用户要求：周界面暗色模式下，头部时间、天气、工具栏图标、搜索框边框、星期文本、日期块文本、左右切周按钮、挂起/更多/同步/关闭图标均使用与底部内容区一致的灰黑色，不再保留白色或不一致灰色；卡片模式和课表模式都要生效。
+- 实现：新增 `WeekWindow._apply_week_header_foreground()` 统一入口，集中刷新头部标签、搜索框、视图选择器、SVG 工具栏图标和 PNG 窗口控制图标；`_set_toolbar_button_icon()` 同步记录当前 `sort.svg` / `refresh.svg`，确保卡片/课表模式切换后仍按当前暗色状态重染色。
+- 日期块：`DayBlock.update_style()` 在暗色模式下优先使用 `#2b2b2b`，覆盖今天黄色和非今天灰色，避免日期文字与底部背景色不一致。
+- 天气图标：`WeatherIconLabel` 增加当前图标路径记录和 `set_icon_color()`，暗色切换时可立即重染加载图标或天气 SVG，不必等待天气刷新。
+- 影响范围：未修改周窗口 `paintEvent` 渐变背景绘制逻辑，不新增任何头部灰色遮罩；只调整前景色、边框色、图标 mask 与悬停样式。
+- 验证：AST 解析通过 `src/ui/week_window.py`、`src/ui/common/week_day_block.py`、`src/ui/common/weather_icon_label.py`；`.venv` 验证 `QImage.Format_ARGB32` 与 `QPainter.CompositionMode_SourceIn` 可用。
+- 追补：周界面暗色详情弹窗的详情框背景从 `#3a3a3a` 改为 `#2b2b2b`，与下方信息区底色保持一致；该规则仅作用于 `source_view == "week"` 且 `dark_mode=True` 的详情弹窗。
+- 追补：修复课表颜色块在长标题换行时按整块标题垂直居中的问题；详情弹窗标题行、颜色块和标题编辑框统一改为顶部对齐，使颜色块固定在第一行正前方。
+- 追补修正：颜色块显示会压缩标题可用宽度，原逻辑只 `adjustSize()` 没有重算 `QLabel` 换行高度，导致第二行被裁剪；新增标题可用宽度/高度刷新逻辑，并在颜色块显示/隐藏、标题编辑完成后调用。
+- 追补修正：上一轮将暗色头部前景临时改为 `#F2F2F2` 属于误判，已恢复 `#2b2b2b`；真正问题是 `refresh_week_data()` 在左右切周时把选中空列强制设为 `#F5F5F5`，未判断暗色模式，导致暗色内容区出现白色色块。现已在暗色模式下保持底部列背景 `#2b2b2b`。
+
+### 2026-07-12：周界面卡片模式选中列高光承载层修复
+- 问题原因：周界面卡片模式的底部选中列高光此前写在 `TodoListContainer` 内部内容面板上，而该面板高度受日程卡片、占位提示和 `layout.sizeHint()` 影响；当某列内容较少或为空时，背景只覆盖内容高度，表现为高光被截断或下方完全没有高光。
+- 修复方案：新增 `bottom_scroll_areas` 记录 7 个 `QScrollArea`，将选中列/普通列/暗色模式背景统一写到 `scroll_area.viewport()`，内部 `TodoListContainer` 改为透明，仅负责卡片和拖拽承载。
+- 同步修复：`refresh_week_data()` 和 `_apply_dark_mode()` 都改为调用统一的 `_apply_week_board_column_background()`，避免暗色模式或刷新流程再次把背景写回内容面板。
+- 验证：`D:\CodeProjects\DesktopSchedule\DesktopSchedule\.venv\Scripts\python.exe -m py_compile src\ui\week_window.py` 通过。
+
+### 2026-07-12：周界面卡片模式选中列高亮补齐
+- 问题原因：上一轮已将卡片模式底部列背景移到 `QScrollArea.viewport()`，但暗色模式下选中列仍返回普通底色 `#2b2b2b`，因此卡片模式下看不出与课表模式一致的选中日显示板高亮。
+- 修复方案：`_week_board_column_background()` 改为按选中态返回预混合高亮色；暗色选中列使用 `#3A3A3A`，等效于课表模式在 `#2b2b2b` 上叠加白色 alpha 18；亮色选中列使用 `#F0F0F0`，等效于白底叠加黑色 alpha 15。
+- 影响范围：仅调整周界面卡片模式底部 7 列的选中列背景色，不改变顶部 `DayBlock` 高亮、课表模式绘制逻辑和日程卡片内容。

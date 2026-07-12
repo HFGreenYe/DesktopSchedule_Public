@@ -93,10 +93,10 @@ class DayBlock(QFrame):
         self.update_style()
 
     def update_style(self):
-        if self.is_today:
+        if self._dark_mode:
+            text_color = "#2b2b2b"
+        elif self.is_today:
             text_color = "#FFD700"
-        elif self._dark_mode:
-            text_color = "#999999"
         else:
             text_color = "#FFFFFF"
         self.lbl_day.setStyleSheet(f"color: {text_color}; font-size: 12px; font-weight: bold; font-family: 'Microsoft YaHei'; background: transparent;")

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                              QPushButton, QFrame, QToolButton, QLineEdit, QSizePolicy, QStackedWidget, QScrollArea)
 from PyQt6.QtCore import Qt, pyqtSignal, QDate, QTime, QTimer, QPointF, QRectF, QSize, QSettings
-from PyQt6.QtGui import QPainter, QPainterPath, QColor, QBrush, QLinearGradient, QIcon, QPixmap, QCursor, QPen, QFont, QFontMetrics
+from PyQt6.QtGui import QPainter, QPainterPath, QColor, QBrush, QLinearGradient, QIcon, QPixmap, QCursor, QPen, QFont, QFontMetrics, QImage
 from PyQt6.QtSvg import QSvgRenderer
 from qframelesswindow import FramelessMainWindow
 from zhdate import ZhDate
@@ -1405,6 +1405,7 @@ class WeekWindow(FramelessMainWindow):
         icons_row = QHBoxLayout()
         icons_row.setSpacing(6) 
         self.toolbar_buttons = {}
+        self._toolbar_icon_names = {}
         for icon_name in ["skin.svg", "view.svg", "add.svg", "sort.svg", "filter.svg"]:
             btn = QPushButton()
             btn.setIcon(QIcon(f"assets/icons/{icon_name}"))
@@ -1419,6 +1420,7 @@ class WeekWindow(FramelessMainWindow):
             btn._tooltip_filter = ToolTipFilter(tip_map[icon_name], btn)
             btn.installEventFilter(btn._tooltip_filter)
             self.toolbar_buttons[icon_name.split(".")[0]] = btn
+            self._toolbar_icon_names[icon_name.split(".")[0]] = icon_name
             
             if icon_name == "view.svg":
                 self.btn_view_toggle = btn 
@@ -1457,6 +1459,7 @@ class WeekWindow(FramelessMainWindow):
         vs_layout = QHBoxLayout(self.view_selector_container)
         vs_layout.setContentsMargins(2, 2, 2, 2) 
         vs_layout.setSpacing(2)
+        self.view_selector_buttons = {}
         
         views = {"day": "日", "week": "周", "month": "月", "todo": "待办"}
         for vid, vname in views.items():
@@ -1468,6 +1471,7 @@ class WeekWindow(FramelessMainWindow):
                 
             v_btn.clicked.connect(lambda _, v=vid: self._on_view_selected(v))
             vs_layout.addWidget(v_btn, 1)
+            self.view_selector_buttons[vid] = v_btn
             
         self.view_selector_container.hide()
         self.bottom_action_container = QWidget()
@@ -1560,6 +1564,7 @@ class WeekWindow(FramelessMainWindow):
         
         week_names = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
         self.day_blocks = []
+        self.weekday_labels = []
         
         for i in range(7):
             col_widget = QWidget()
@@ -1572,6 +1577,7 @@ class WeekWindow(FramelessMainWindow):
             lbl_week = QLabel(week_names[i])
             lbl_week.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl_week.setStyleSheet("color: white; font-size: 10px; font-weight: bold; font-family: 'Microsoft YaHei';")
+            self.weekday_labels.append(lbl_week)
             
             block = DayBlock()
             block.clicked.connect(self._on_day_clicked)
@@ -1631,6 +1637,7 @@ class WeekWindow(FramelessMainWindow):
         week_board_layout.setSpacing(0)
         
         self.bottom_panels = []
+        self.bottom_scroll_areas = []
         self.placeholder_labels = [] 
         
         # 给每一列配置专属的“文字”和“对齐方式”
@@ -1646,10 +1653,16 @@ class WeekWindow(FramelessMainWindow):
             scroll_area.setFrameShape(QFrame.Shape.NoFrame) 
             scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
             scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff) 
-            scroll_area.setStyleSheet("background: transparent; border: none;")
+            scroll_area.setObjectName(f"week_day_scroll_area_{i}")
+            scroll_area.setStyleSheet(
+                f"QScrollArea#{scroll_area.objectName()} {{ background: transparent; border: none; }}"
+            )
+            scroll_area.viewport().setAutoFillBackground(True)
+            scroll_area.viewport().setStyleSheet("background-color: #FFFFFF;")
 
             panel = TodoListContainer(self)
-            panel.setStyleSheet("background-color: #FFFFFF;")
+            panel.setObjectName(f"week_day_panel_{i}")
+            panel.setStyleSheet(f"QWidget#{panel.objectName()} {{ background-color: transparent; }}")
             panel.installEventFilter(self)
             panel.card_dropped.connect(lambda d_id, t_idx, col=i: self._handle_card_drop(d_id, t_idx, col))
             p_layout = QVBoxLayout(panel)
@@ -1673,6 +1686,7 @@ class WeekWindow(FramelessMainWindow):
             
             scroll_area.setWidget(panel)
             self.bottom_panels.append(panel)
+            self.bottom_scroll_areas.append(scroll_area)
             week_board_layout.addWidget(scroll_area, stretch=1)
             
         self.body_stack.addWidget(self.page_week_board)
@@ -1717,15 +1731,211 @@ class WeekWindow(FramelessMainWindow):
             return self.page_week_timetable_placeholder
         return self.page_week_board
 
+    def _header_foreground_color(self):
+        return "#2b2b2b" if getattr(self, "_dark_mode", False) else "#FFFFFF"
+
+    def _header_hover_background(self):
+        if getattr(self, "_dark_mode", False):
+            return "rgba(43, 43, 43, 0.18)"
+        return "rgba(255, 255, 255, 0.2)"
+
+    def _toolbar_button_style(self, active=False):
+        bg = "rgba(43, 43, 43, 0.22)" if getattr(self, "_dark_mode", False) else "rgba(255,255,255,0.3)"
+        if not active:
+            bg = "transparent"
+        return (
+            "QPushButton { "
+            f"background: {bg}; color: {self._header_foreground_color()}; "
+            "border: none; border-radius: 3px; "
+            "} "
+            f"QPushButton:hover {{ background: {self._header_hover_background()}; border-radius: 3px; }}"
+        )
+
+    def _search_input_style(self):
+        foreground = self._header_foreground_color()
+        placeholder = "rgba(43, 43, 43, 0.65)" if getattr(self, "_dark_mode", False) else "rgba(255, 255, 255, 0.7)"
+        return f"""
+            QLineEdit {{
+                background-color: rgba(255, 255, 255, 0.16);
+                border: 2px solid {foreground};
+                border-radius: 6px;
+                color: {foreground};
+                placeholder-text-color: {placeholder};
+                padding: 0px 4px;
+                font-family: "Microsoft YaHei UI";
+                font-size: 10px;
+            }}
+            QLineEdit:hover {{
+                background-color: rgba(255, 255, 255, 0.12);
+                border: 2px solid {foreground};
+            }}
+            QLineEdit:focus {{
+                background-color: rgba(255, 255, 255, 0.16);
+                border: 2px solid {foreground};
+            }}
+        """
+
+    def _view_selector_style(self):
+        foreground = self._header_foreground_color()
+        hover = self._header_hover_background()
+        return f"""
+            QFrame {{
+                background-color: rgba(255, 255, 255, 0.16);
+                border-radius: 4px;
+            }}
+            QPushButton {{
+                background: transparent;
+                color: {foreground};
+                font-family: 'Microsoft YaHei';
+                font-size: 11px;
+                font-weight: bold;
+                border-radius: 4px;
+                border: none;
+                padding: 2px 5px;
+            }}
+            QPushButton:hover {{
+                background-color: {hover};
+            }}
+        """
+
+    def _view_selector_button_style(self, selected=False):
+        foreground = self._header_foreground_color()
+        background = "rgba(43, 43, 43, 0.18)" if selected else "transparent"
+        return (
+            "QPushButton { "
+            f"background-color: {background}; color: {foreground}; "
+            "font-family: 'Microsoft YaHei'; font-size: 11px; font-weight: bold; "
+            "border-radius: 4px; border: none; padding: 2px 5px; "
+            "} "
+            f"QPushButton:hover {{ background-color: {self._header_hover_background()}; }}"
+        )
+
+    def _nav_button_style(self, side):
+        foreground = self._header_foreground_color()
+        text_align = "left" if side == "left" else "right"
+        padding = "padding-left: 6px;" if side == "left" else "padding-right: 6px;"
+        return (
+            "QPushButton { "
+            f"color: {foreground}; font-size: 14px; font-weight: bold; "
+            "border: none; background: transparent; "
+            f"text-align: {text_align}; {padding} "
+            "} "
+            f"QPushButton:hover {{ background: {self._header_hover_background()}; border-radius: 4px; }}"
+        )
+
+    def _window_control_style(self, is_close=False):
+        hover = "#ff4d4f" if is_close else self._header_hover_background()
+        pressed = "#d9363e" if is_close else (
+            "rgba(43, 43, 43, 0.26)" if getattr(self, "_dark_mode", False) else "rgba(255, 255, 255, 0.3)"
+        )
+        return f"""
+            QToolButton {{
+                background-color: transparent;
+                border: none;
+                border-radius: 6px;
+                margin: 0px;
+                padding: 0px;
+            }}
+            QToolButton:hover {{
+                background-color: {hover};
+            }}
+            QToolButton:pressed {{
+                background-color: {pressed};
+            }}
+        """
+
+    def _tinted_pixmap(self, icon_path, color_hex, icon_size):
+        source = QPixmap(icon_path)
+        if source.isNull():
+            return QPixmap()
+        ratio = self.devicePixelRatio()
+        pixmap = source.scaled(
+            int(icon_size * ratio),
+            int(icon_size * ratio),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        image = pixmap.toImage().convertToFormat(QImage.Format.Format_ARGB32)
+        painter = QPainter(image)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+        painter.fillRect(image.rect(), QColor(color_hex))
+        painter.end()
+        tinted = QPixmap.fromImage(image)
+        tinted.setDevicePixelRatio(ratio)
+        return tinted
+
+    def _set_tinted_png_icon(self, button, icon_path, icon_size):
+        pixmap = self._tinted_pixmap(icon_path, self._header_foreground_color(), icon_size)
+        button.setIcon(QIcon(pixmap) if not pixmap.isNull() else QIcon(icon_path))
+
+    def _apply_view_selector_button_styles(self):
+        for vid, button in getattr(self, "view_selector_buttons", {}).items():
+            button.setStyleSheet(self._view_selector_button_style(selected=(vid == "week")))
+
+    def _apply_week_header_foreground(self):
+        foreground = self._header_foreground_color()
+
+        if hasattr(self, "lbl_time"):
+            self.lbl_time.setStyleSheet(f'color: {foreground}; font-family: "Segoe UI Variable Display"; font-size: 26px; font-weight: 200;')
+        if hasattr(self, "lbl_week_num"):
+            self.lbl_week_num.setStyleSheet(f"color: {foreground}; font-size: 10px;")
+        if hasattr(self, "lbl_temp"):
+            self.lbl_temp.setStyleSheet(f"color: {foreground}; font-size: 10px;")
+        if hasattr(self, "lbl_weather_icon"):
+            self.lbl_weather_icon.setStyleSheet(f"color: {foreground}; font-size: 18px;")
+            if hasattr(self.lbl_weather_icon, "set_icon_color"):
+                self.lbl_weather_icon.set_icon_color(foreground)
+            else:
+                self.lbl_weather_icon.icon_color = foreground
+
+        for label in getattr(self, "weekday_labels", []):
+            label.setStyleSheet(f"color: {foreground}; font-size: 10px; font-weight: bold; font-family: 'Microsoft YaHei';")
+
+        for key, button in getattr(self, "toolbar_buttons", {}).items():
+            icon_name = getattr(self, "_toolbar_icon_names", {}).get(key)
+            if icon_name:
+                pixmap = get_colored_icon(icon_name, foreground, 16)
+                button.setIcon(QIcon(pixmap) if not pixmap.isNull() else QIcon(f"assets/icons/{icon_name}"))
+            button.setStyleSheet(self._toolbar_button_style(active=(key == "view" and self.view_selector_container.isVisible())))
+
+        if hasattr(self, "search_box"):
+            self.search_box.setStyleSheet(self._search_input_style())
+        if hasattr(self, "view_selector_container"):
+            self.view_selector_container.setStyleSheet(self._view_selector_style())
+            self._apply_view_selector_button_styles()
+
+        if hasattr(self, "btn_suspend"):
+            self._set_tinted_png_icon(self.btn_suspend, "assets/icons/hang_up.png", 14)
+            self.btn_suspend.setStyleSheet(
+                "QPushButton { background: transparent; border: none; border-radius: 12px; } "
+                f"QPushButton:hover {{ background: {self._header_hover_background()}; border-radius: 12px; }}"
+            )
+        if hasattr(self, "btn_more"):
+            self._set_tinted_png_icon(self.btn_more, "assets/icons/more.png", 12)
+            self.btn_more.setStyleSheet(self._window_control_style(is_close=False))
+        if hasattr(self, "btn_sync"):
+            self._set_tinted_png_icon(self.btn_sync, "assets/icons/sync.png", 12)
+            self.btn_sync.setStyleSheet(self._window_control_style(is_close=False))
+        if hasattr(self, "btn_close"):
+            self._set_tinted_png_icon(self.btn_close, "assets/icons/close.png", 12)
+            self.btn_close.setStyleSheet(self._window_control_style(is_close=True))
+
+        if hasattr(self, "btn_prev"):
+            self.btn_prev.setStyleSheet(self._nav_button_style("left"))
+        if hasattr(self, "btn_next"):
+            self.btn_next.setStyleSheet(self._nav_button_style("right"))
+
     def _set_toolbar_button_icon(self, button_key, icon_name, tooltip):
         button = getattr(self, "toolbar_buttons", {}).get(button_key)
         if button is None:
             return
+        self._toolbar_icon_names[button_key] = icon_name
         old_filter = getattr(button, "_tooltip_filter", None)
         if old_filter is not None:
             button.removeEventFilter(old_filter)
-        pixmap = get_colored_icon(icon_name, "#FFFFFF", 16)
+        pixmap = get_colored_icon(icon_name, self._header_foreground_color(), 16)
         button.setIcon(QIcon(pixmap) if not pixmap.isNull() else QIcon(f"assets/icons/{icon_name}"))
+        button.setStyleSheet(self._toolbar_button_style(active=(button_key == "view" and self.view_selector_container.isVisible())))
         button._tooltip_filter = ToolTipFilter(tooltip, button)
         button.installEventFilter(button._tooltip_filter)
 
@@ -2108,6 +2318,26 @@ class WeekWindow(FramelessMainWindow):
             print(f"农历转换错误: {e}")
             return "未知"
 
+    def _week_board_column_background(self, is_selected: bool) -> str:
+        if self._dark_mode:
+            return "#3A3A3A" if is_selected else "#2b2b2b"
+        return "#F0F0F0" if is_selected else "#FFFFFF"
+
+    def _apply_week_board_column_background(self, index: int, is_selected: bool):
+        bg_color = self._week_board_column_background(is_selected)
+
+        if hasattr(self, 'bottom_scroll_areas') and index < len(self.bottom_scroll_areas):
+            scroll_area = self.bottom_scroll_areas[index]
+            scroll_area.setStyleSheet(
+                f"QScrollArea#{scroll_area.objectName()} {{ background: transparent; border: none; }}"
+            )
+            scroll_area.viewport().setAutoFillBackground(True)
+            scroll_area.viewport().setStyleSheet(f"background-color: {bg_color};")
+
+        if hasattr(self, 'bottom_panels') and index < len(self.bottom_panels):
+            panel = self.bottom_panels[index]
+            panel.setStyleSheet(f"QWidget#{panel.objectName()} {{ background-color: transparent; }}")
+
     def refresh_week_data(self):
         for i in range(7):
             iter_date = self.current_monday.addDays(i)
@@ -2117,13 +2347,7 @@ class WeekWindow(FramelessMainWindow):
             is_selected = (iter_date == self.current_selected_date)
             block.set_selected(is_selected)
             
-            if hasattr(self, 'bottom_panels') and i < len(self.bottom_panels):
-                if is_selected:
-                    # 选中时变非常浅的灰色
-                    self.bottom_panels[i].setStyleSheet("background-color: #F5F5F5;") 
-                else:
-                    # 未选中恢复纯白
-                    self.bottom_panels[i].setStyleSheet("background-color: #FFFFFF;")
+            self._apply_week_board_column_background(i, is_selected)
 
         month = self.current_monday.month()    
         week_num = self.current_monday.weekNumber()[0]
@@ -2477,8 +2701,12 @@ class WeekWindow(FramelessMainWindow):
 
         # 卡片模式面板
         if hasattr(self, 'bottom_panels'):
-            for panel in self.bottom_panels:
-                panel.setStyleSheet(f"background-color: {bg};")
+            for i in range(len(self.bottom_panels)):
+                iter_date = self.current_monday.addDays(i)
+                self._apply_week_board_column_background(
+                    i,
+                    iter_date == self.current_selected_date,
+                )
 
         # 课表模式
         if hasattr(self, 'page_week_timetable_placeholder'):
@@ -2496,6 +2724,7 @@ class WeekWindow(FramelessMainWindow):
                     card.set_dark_mode(dark)
 
         # 强制刷新
+        self._apply_week_header_foreground()
         self.update()
 
     def dark_mode(self):
@@ -2513,15 +2742,13 @@ class WeekWindow(FramelessMainWindow):
         """隐藏搜索框，显示视图选择器，并高亮顶部视图图标"""
         self.search_box.hide()
         self.view_selector_container.show()
-        if hasattr(self, 'btn_view_toggle'):
-            self.btn_view_toggle.setStyleSheet("QPushButton { background: rgba(255,255,255,0.3); border-radius: 3px; }")
+        self._apply_week_header_foreground()
 
     def close_view_selector(self):
         """隐藏视图选择器，恢复搜索框，并取消图标高亮"""
         self.view_selector_container.hide()
         self.search_box.show()
-        if hasattr(self, 'btn_view_toggle'):
-            self.btn_view_toggle.setStyleSheet("QPushButton { background: transparent; border: none; } QPushButton:hover { background: rgba(255,255,255,0.2); border-radius: 3px; }")
+        self._apply_week_header_foreground()
 
     def _on_view_selected(self, vid):
         """处理视图点击事件"""

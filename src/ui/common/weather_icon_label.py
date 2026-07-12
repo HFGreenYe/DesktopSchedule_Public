@@ -27,6 +27,8 @@ class WeatherIconLabel(QWidget):
         self.loading_icon_scale = loading_icon_scale
         self._phase = 0
         self._loading_base = QPixmap()
+        self._loading_icon_path = "assets/icons/hourglass.svg"
+        self._current_icon_path = None
         self._alignment = Qt.AlignmentFlag.AlignCenter
         self._active_layer = "weather"
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -67,7 +69,7 @@ class WeatherIconLabel(QWidget):
         self._frame_interval_ms = frame_interval_ms
 
     def start_loading(self):
-        self._loading_base = self._load_svg("assets/icons/hourglass.svg")
+        self._loading_base = self._load_svg(self._loading_icon_path)
         if self._loading_base.isNull():
             self.set_unavailable_icon()
             return
@@ -88,6 +90,7 @@ class WeatherIconLabel(QWidget):
             self.set_unavailable_icon()
             return False
 
+        self._current_icon_path = icon_path
         self._weather_label.setText("")
         self._weather_label.setPixmap(pixmap)
         self._show_weather_layer()
@@ -95,16 +98,40 @@ class WeatherIconLabel(QWidget):
 
     def set_unavailable_icon(self):
         self._stop_loading()
-        pixmap = self._load_svg("assets/weather/999-fill.svg")
+        icon_path = "assets/weather/999-fill.svg"
+        pixmap = self._load_svg(icon_path)
         if pixmap.isNull():
+            self._current_icon_path = None
             self._weather_label.clear()
             self._show_weather_layer()
             return False
 
+        self._current_icon_path = icon_path
         self._weather_label.setText("")
         self._weather_label.setPixmap(pixmap)
         self._show_weather_layer()
         return True
+
+    def set_icon_color(self, color):
+        if self.icon_color == color:
+            return
+
+        self.icon_color = color
+        if self._active_layer == "loading":
+            self._loading_base = self._load_svg(self._loading_icon_path)
+            if not self._loading_base.isNull():
+                self._render_loading_frame()
+            return
+
+        if not self._current_icon_path:
+            return
+
+        pixmap = self._load_svg(self._current_icon_path)
+        if pixmap.isNull():
+            return
+
+        self._weather_label.setText("")
+        self._weather_label.setPixmap(pixmap)
 
     def setAlignment(self, alignment):
         self._alignment = alignment
