@@ -5,8 +5,8 @@ import random
 from types import SimpleNamespace
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                              QScrollArea, QFrame, QSizePolicy,
-                             QPushButton)
-from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QTimer, QPointF, QRectF
+                             QPushButton, QApplication)
+from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QTimer, QPointF, QRectF, QEvent
 from PyQt6.QtGui import (QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen)
 
 from ..data.database import db_manager
@@ -500,6 +500,7 @@ class TimetablePlaceholderFrame(QFrame):
     GRID_RIGHT_INSET = 2.0
     EVENT_RADIUS = 3.0
     DDL_LINE_HEIGHT = 3.0
+    SELECTION_COLOR = QColor("#FFD700")
     EVENT_PALETTE = (
         "#ff6b6b",
         "#4d96ff",
@@ -536,6 +537,9 @@ class TimetablePlaceholderFrame(QFrame):
         self._visible_event_labels = []
         self._visible_ddl_labels = []
         self._occupied_label_rects = []
+        self._selected_interval_rects = []
+        self._selected_ddl_rects = []
+        self._selected_schedule_id = None
         self._hovered_schedule = None
         self._pressed_schedule = None
         self._hover_preview = None
@@ -547,6 +551,10 @@ class TimetablePlaceholderFrame(QFrame):
             self._hover_preview = None
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setMouseTracking(True)
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
+            self.destroyed.connect(lambda: app.removeEventFilter(self))
 
     def _default_visible_start_minutes(self):
         now = datetime.datetime.now()
@@ -561,6 +569,12 @@ class TimetablePlaceholderFrame(QFrame):
         self.schedules = list(schedules or [])
         self.category_map = dict(category_map or {})
         self._ensure_schedule_colors(self.schedules)
+        if (
+            self._selected_schedule_id is not None
+            and self._selected_schedule_id
+            not in {self._schedule_id(schedule) for schedule in self.schedules}
+        ):
+            self._selected_schedule_id = None
         self._hide_hover_preview()
         self.update()
 
@@ -692,6 +706,25 @@ class TimetablePlaceholderFrame(QFrame):
             start_time, end_time = end_time, start_time
         now = datetime.datetime.now()
         return start_time <= now <= end_time
+
+    @staticmethod
+    def _schedule_id(schedule):
+        return getattr(schedule, "id", None)
+
+    def _is_schedule_selected(self, schedule):
+        schedule_id = self._schedule_id(schedule)
+        return schedule_id is not None and schedule_id == self._selected_schedule_id
+
+    def _set_selected_schedule(self, schedule):
+        selected_id = self._schedule_id(schedule)
+        if selected_id != self._selected_schedule_id:
+            self._selected_schedule_id = selected_id
+            self.update()
+
+    def _clear_selected_schedule(self):
+        if self._selected_schedule_id is not None:
+            self._selected_schedule_id = None
+            self.update()
 
     def _display_style_for_schedule(self, schedule):
         if self._is_completed(schedule):
@@ -897,10 +930,13 @@ class TimetablePlaceholderFrame(QFrame):
                 painter.setPen(QPen(display_style["border"], 1))
                 painter.drawPath(event_path)
                 painter.restore()
+            if self._is_schedule_selected(interval["schedule"]):
+                self._selected_interval_rects.append(event_rect)
             self._hit_regions.append(
                 {
                     "rect": event_rect,
                     "schedule": interval["schedule"],
+                    "kind": "interval",
                 }
             )
             self._occupied_label_rects.append(event_rect)
@@ -1035,14 +1071,14 @@ class TimetablePlaceholderFrame(QFrame):
                     self.DDL_LINE_HEIGHT,
                 )
                 display_style = self._display_style_for_schedule(ddl_point["schedule"])
-                painter.fillRect(
-                    line_rect,
-                    display_style["line"],
-                )
+                painter.fillRect(line_rect, display_style["line"])
+                if self._is_schedule_selected(ddl_point["schedule"]):
+                    self._selected_ddl_rects.append(line_rect)
                 self._hit_regions.append(
                     {
                         "rect": line_rect.adjusted(0.0, -4.0, 0.0, 4.0),
                         "schedule": ddl_point["schedule"],
+                        "kind": "ddl",
                     }
                 )
                 self._queue_ddl_label(
@@ -1134,6 +1170,58 @@ class TimetablePlaceholderFrame(QFrame):
         )
         painter.restore()
 
+    def _draw_selected_schedule_overlays(self, painter):
+        if self._selected_schedule_id is None:
+            return
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(self.SELECTION_COLOR, 2))
+        for rect in self._selected_interval_rects:
+            painter.drawRoundedRect(rect, self.EVENT_RADIUS, self.EVENT_RADIUS)
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(self.SELECTION_COLOR)
+        for rect in self._selected_ddl_rects:
+            painter.drawRect(rect)
+        painter.restore()
+
+    def _global_pos_from_mouse_event(self, obj, event):
+        if hasattr(event, "globalPosition"):
+            return event.globalPosition().toPoint()
+        if isinstance(obj, QWidget) and hasattr(event, "position"):
+            return obj.mapToGlobal(event.position().toPoint())
+        return None
+
+    def _is_schedule_region_at_global_pos(self, global_pos):
+        local_pos = self.mapFromGlobal(global_pos)
+        if not self.rect().contains(local_pos):
+            return False
+        return self._schedule_at_position(QPointF(local_pos)) is not None
+
+    def _event_targets_timetable(self, obj):
+        while isinstance(obj, QWidget):
+            if obj is self:
+                return True
+            obj = obj.parentWidget()
+        return False
+
+    def eventFilter(self, obj, event):
+        if (
+            event.type() == QEvent.Type.MouseButtonPress
+            and event.button() == Qt.MouseButton.LeftButton
+            and self._selected_schedule_id is not None
+            and self.isVisible()
+        ):
+            global_pos = self._global_pos_from_mouse_event(obj, event)
+            if global_pos is not None and not (
+                self._event_targets_timetable(obj)
+                and self._is_schedule_region_at_global_pos(global_pos)
+            ):
+                self._clear_selected_schedule()
+        return super().eventFilter(obj, event)
+
     def _schedule_at_position(self, position):
         for region in reversed(self._hit_regions):
             if region["rect"].contains(position):
@@ -1160,8 +1248,10 @@ class TimetablePlaceholderFrame(QFrame):
         if event.button() == Qt.MouseButton.LeftButton:
             self._pressed_schedule = self._schedule_at_position(event.position())
             if self._pressed_schedule is not None:
+                self._set_selected_schedule(self._pressed_schedule)
                 event.accept()
                 return
+            self._clear_selected_schedule()
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event):
@@ -1171,24 +1261,35 @@ class TimetablePlaceholderFrame(QFrame):
                 released_schedule is not None
                 and released_schedule is self._pressed_schedule
             ):
-                self._hide_hover_preview()
-                self.schedule_clicked.emit(
-                    released_schedule,
-                    self._color_for_schedule(released_schedule),
-                )
                 self._pressed_schedule = None
                 event.accept()
                 return
             self._pressed_schedule = None
         super().mouseReleaseEvent(event)
 
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            schedule = self._schedule_at_position(event.position())
+            if schedule is not None:
+                self._set_selected_schedule(schedule)
+                self._hide_hover_preview()
+                self.schedule_clicked.emit(
+                    schedule,
+                    self._color_for_schedule(schedule),
+                )
+                event.accept()
+                return
+        super().mouseDoubleClickEvent(event)
+
     def contextMenuEvent(self, event):
         schedule = self._schedule_at_position(QPointF(event.pos()))
         if schedule is None:
+            self._clear_selected_schedule()
             self.empty_area_context_requested.emit(event.globalPos())
             event.accept()
             return
 
+        self._set_selected_schedule(schedule)
         self._hide_hover_preview()
         self.schedule_context_requested.emit(schedule, event.globalPos())
         event.accept()
@@ -1257,6 +1358,8 @@ class TimetablePlaceholderFrame(QFrame):
         self._visible_event_labels = []
         self._visible_ddl_labels = []
         self._occupied_label_rects = []
+        self._selected_interval_rects = []
+        self._selected_ddl_rects = []
         intervals, ddl_points = self._build_visible_items(
             visible_start_minutes,
             last_visible_minutes,
@@ -1300,6 +1403,7 @@ class TimetablePlaceholderFrame(QFrame):
             grid_width,
             top,
         )
+        self._draw_selected_schedule_overlays(painter)
         self._draw_ddl_labels(painter)
         self._draw_interval_labels(painter)
         painter.restore()
