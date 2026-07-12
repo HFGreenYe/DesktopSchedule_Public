@@ -9,6 +9,7 @@ _APPLICATION = "DesktopSchedule"
 _SETTINGS_KEY = "timetable/display_settings"
 _HEX_COLOR_PATTERN = re.compile(r"^#[0-9a-fA-F]{6}$")
 _DISPLAY_MODES = {"card", "timetable"}
+_DRAG_SNAP_MINUTES = {1, 5}
 
 
 def _normalize_color(value):
@@ -21,6 +22,14 @@ def _normalize_color(value):
 def _normalize_display_mode(value):
     mode = str(value or "").strip().lower()
     return mode if mode in _DISPLAY_MODES else "card"
+
+
+def _normalize_drag_snap_minutes(value):
+    try:
+        minutes = int(value)
+    except (TypeError, ValueError):
+        return 1
+    return minutes if minutes in _DRAG_SNAP_MINUTES else 1
 
 
 def normalize_timetable_preferences(value):
@@ -44,6 +53,9 @@ def normalize_timetable_preferences(value):
     return {
         "version": 1,
         "display_mode": _normalize_display_mode(value.get("display_mode")),
+        "drag_snap_minutes": _normalize_drag_snap_minutes(
+            value.get("drag_snap_minutes")
+        ),
         "schedule_colors": normalized_schedule_colors,
     }
 
@@ -94,5 +106,12 @@ def set_timetable_schedule_color(schedule_id, color):
 def set_timetable_display_mode(mode_id):
     preferences = get_timetable_preferences()
     preferences["display_mode"] = _normalize_display_mode(mode_id)
+    set_timetable_preferences(preferences)
+    return preferences
+
+
+def set_timetable_drag_snap_minutes(minutes):
+    preferences = get_timetable_preferences()
+    preferences["drag_snap_minutes"] = _normalize_drag_snap_minutes(minutes)
     set_timetable_preferences(preferences)
     return preferences

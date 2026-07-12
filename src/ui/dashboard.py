@@ -15,6 +15,7 @@ from ..services.schedule_query_service import ScheduleQueryService
 from ..services.schedule_sort_service import ScheduleSortService
 from ..utils.timetable_preferences import (
     get_timetable_preferences,
+    set_timetable_drag_snap_minutes,
     set_timetable_schedule_color,
 )
 from .schedule_detail_pop import ScheduleDetailPop
@@ -485,6 +486,7 @@ class TimetablePlaceholderFrame(QFrame):
     schedule_clicked = pyqtSignal(object, object)
     schedule_context_requested = pyqtSignal(object, object)
     empty_area_context_requested = pyqtSignal(object)
+    schedule_time_changed = pyqtSignal(object, object, object)
 
     BORDER_WIDTH = 2
     CORNER_RADIUS = 8
@@ -500,6 +502,12 @@ class TimetablePlaceholderFrame(QFrame):
     GRID_RIGHT_INSET = 2.0
     EVENT_RADIUS = 3.0
     DDL_LINE_HEIGHT = 3.0
+    EDIT_EDGE_HANDLE_PX = 10.0
+    EDIT_SNAP_MINUTES = 1
+    EDIT_MIN_DURATION_MINUTES = 5
+    EDIT_AUTO_SCROLL_MARGIN_PX = 24.0
+    EDIT_AUTO_SCROLL_STEP_MINUTES = 1
+    EDIT_AUTO_SCROLL_INTERVAL_MS = 120
     SELECTION_COLOR = QColor("#FFD700")
     EVENT_PALETTE = (
         "#ff6b6b",
@@ -526,9 +534,13 @@ class TimetablePlaceholderFrame(QFrame):
         self.current_date = datetime.date.today()
         self.schedules = []
         self.category_map = {}
+        preferences = get_timetable_preferences()
         self._schedule_colors = {}
         self._schedule_color_overrides = dict(
-            get_timetable_preferences().get("schedule_colors", {})
+            preferences.get("schedule_colors", {})
+        )
+        self.edit_snap_minutes = self._normalize_edit_snap_minutes(
+            preferences.get("drag_snap_minutes", self.EDIT_SNAP_MINUTES)
         )
         self._palette_order = list(self.EVENT_PALETTE)
         random.SystemRandom().shuffle(self._palette_order)
@@ -542,7 +554,11 @@ class TimetablePlaceholderFrame(QFrame):
         self._selected_schedule_id = None
         self._hovered_schedule = None
         self._pressed_schedule = None
+        self._pending_time_edit = None
+        self._active_time_edit = None
+        self._last_time_edit_pos = None
         self._hover_preview = None
+        self._time_edit_hint = self._create_time_edit_hint()
         try:
             from .popups.schedule_axis_board import _AxisSchedulePreview
 
@@ -551,6 +567,11 @@ class TimetablePlaceholderFrame(QFrame):
             self._hover_preview = None
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setMouseTracking(True)
+        self._time_edit_scroll_timer = QTimer(self)
+        self._time_edit_scroll_timer.setInterval(self.EDIT_AUTO_SCROLL_INTERVAL_MS)
+        self._time_edit_scroll_timer.timeout.connect(
+            self._handle_time_edit_auto_scroll
+        )
         app = QApplication.instance()
         if app is not None:
             app.installEventFilter(self)
@@ -563,6 +584,17 @@ class TimetablePlaceholderFrame(QFrame):
     def reset_to_current_time(self):
         self.visible_start_minutes = self._default_visible_start_minutes()
         self.update()
+
+    @staticmethod
+    def _normalize_edit_snap_minutes(minutes):
+        try:
+            normalized = int(minutes)
+        except (TypeError, ValueError):
+            return 1
+        return normalized if normalized in {1, 5} else 1
+
+    def set_drag_snap_minutes(self, minutes):
+        self.edit_snap_minutes = self._normalize_edit_snap_minutes(minutes)
 
     def set_schedule_data(self, current_date, schedules, category_map=None):
         self.current_date = current_date
@@ -722,9 +754,297 @@ class TimetablePlaceholderFrame(QFrame):
             self.update()
 
     def _clear_selected_schedule(self):
+        self._pending_time_edit = None
+        self._active_time_edit = None
+        self._last_time_edit_pos = None
+        self._time_edit_scroll_timer.stop()
+        self._hide_time_edit_hint()
         if self._selected_schedule_id is not None:
             self._selected_schedule_id = None
             self.update()
+
+    def _schedule_region_at_position(self, position):
+        for region in reversed(self._hit_regions):
+            if region["rect"].contains(position):
+                return region
+        return None
+
+    @staticmethod
+    def _interval_times_for_edit(schedule):
+        start_time = getattr(schedule, "start_time", None)
+        end_time = getattr(schedule, "end_time", None)
+        if start_time is None or end_time is None or start_time == end_time:
+            return None, None
+        if start_time > end_time:
+            start_time, end_time = end_time, start_time
+        return start_time, end_time
+
+    def _time_edit_action_for_region(self, region, position):
+        if region is None or region.get("kind") != "interval":
+            return None
+        schedule = region.get("schedule")
+        if not self._is_schedule_selected(schedule):
+            return None
+        start_time, end_time = self._interval_times_for_edit(schedule)
+        if start_time is None or end_time is None:
+            return None
+
+        rect = region["rect"]
+        if position.y() <= rect.top() + self.EDIT_EDGE_HANDLE_PX:
+            return "resize_start"
+        if position.y() >= rect.bottom() - self.EDIT_EDGE_HANDLE_PX:
+            return "resize_end"
+        return "move"
+
+    def _set_cursor_for_time_edit_action(self, action):
+        if action in {"resize_start", "resize_end"}:
+            self.setCursor(Qt.CursorShape.SizeVerCursor)
+        elif action == "move":
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+        else:
+            self.unsetCursor()
+
+    def _create_time_edit_hint(self):
+        hint = QLabel()
+        hint.setWindowFlags(
+            Qt.WindowType.ToolTip
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+        )
+        hint.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        hint.setStyleSheet(
+            """
+            QLabel {
+                background: rgba(43, 43, 43, 235);
+                color: white;
+                border: 1px solid rgba(255, 255, 255, 220);
+                border-radius: 6px;
+                padding: 6px 8px;
+                font-family: 'Microsoft YaHei';
+                font-size: 12px;
+            }
+            """
+        )
+        return hint
+
+    def _hide_time_edit_hint(self):
+        if self._time_edit_hint is not None:
+            self._time_edit_hint.hide()
+
+    @staticmethod
+    def _format_time_edit_point(date_time):
+        return date_time.strftime("%m-%d %H:%M")
+
+    @staticmethod
+    def _format_time_edit_range(start_time, end_time):
+        return f"{start_time.strftime('%H:%M')} - {end_time.strftime('%H:%M')}"
+
+    def _show_time_edit_hint(self, edit_state, start_time, end_time, position):
+        if self._time_edit_hint is None:
+            return
+
+        action_text = {
+            "resize_start": f"开始 {self._format_time_edit_point(start_time)}",
+            "resize_end": f"结束 {self._format_time_edit_point(end_time)}",
+            "move": "移动日程",
+        }.get(edit_state.get("action"), "调整日程")
+        self._time_edit_hint.setText(
+            f"{action_text}\n{self._format_time_edit_range(start_time, end_time)}"
+        )
+        self._time_edit_hint.adjustSize()
+
+        global_pos = self.mapToGlobal(position.toPoint())
+        window_left = self.window().frameGeometry().left()
+        target_x = window_left - self._time_edit_hint.width() - 8
+        target_y = global_pos.y() - self._time_edit_hint.height() // 2
+
+        screen = QApplication.screenAt(global_pos)
+        if screen is not None:
+            available = screen.availableGeometry()
+            target_x = max(
+                available.left() + 4,
+                min(target_x, available.right() - self._time_edit_hint.width() - 4),
+            )
+            target_y = max(
+                available.top() + 4,
+                min(target_y, available.bottom() - self._time_edit_hint.height() - 4),
+            )
+
+        self._time_edit_hint.move(int(target_x), int(target_y))
+        self._time_edit_hint.show()
+
+    def _build_time_edit_state(self, region, position):
+        action = self._time_edit_action_for_region(region, position)
+        if action is None:
+            return None
+        start_time, end_time = self._interval_times_for_edit(region["schedule"])
+        if start_time is None or end_time is None:
+            return None
+        rect = region["rect"]
+        return {
+            "schedule": region["schedule"],
+            "action": action,
+            "press_pos": QPointF(position),
+            "locked_left": float(rect.left()),
+            "locked_width": float(rect.width()),
+            "original_start": start_time,
+            "original_end": end_time,
+            "preview_start": start_time,
+            "preview_end": end_time,
+            "visible_start_minutes": self.visible_start_minutes,
+            "changed": False,
+        }
+
+    def _snap_minutes(self, raw_minutes):
+        snap = max(1, int(getattr(self, "edit_snap_minutes", self.EDIT_SNAP_MINUTES)))
+        return int(round(raw_minutes / snap) * snap)
+
+    def _snapped_delta_minutes(self, delta_pixels, scroll_delta_minutes=0.0):
+        raw_minutes = (
+            delta_pixels / max(1.0, self.HOUR_ROW_HEIGHT) * 60.0
+            + scroll_delta_minutes
+        )
+        return self._snap_minutes(raw_minutes)
+
+    def _apply_time_edit_preview(self, edit_state, position):
+        if edit_state is None:
+            return
+
+        schedule = edit_state["schedule"]
+        scroll_delta = self.visible_start_minutes - edit_state["visible_start_minutes"]
+        delta_minutes = self._snapped_delta_minutes(
+            position.y() - edit_state["press_pos"].y(),
+            scroll_delta,
+        )
+        min_duration = datetime.timedelta(minutes=self.EDIT_MIN_DURATION_MINUTES)
+        original_start = edit_state["original_start"]
+        original_end = edit_state["original_end"]
+
+        if edit_state["action"] == "move":
+            delta = datetime.timedelta(minutes=delta_minutes)
+            next_start = original_start + delta
+            next_end = original_end + delta
+        elif edit_state["action"] == "resize_start":
+            next_start = original_start + datetime.timedelta(minutes=delta_minutes)
+            next_end = original_end
+            if next_end - next_start < min_duration:
+                next_start = next_end - min_duration
+        elif edit_state["action"] == "resize_end":
+            next_start = original_start
+            next_end = original_end + datetime.timedelta(minutes=delta_minutes)
+            if next_end - next_start < min_duration:
+                next_end = next_start + min_duration
+        else:
+            return
+
+        self._show_time_edit_hint(edit_state, next_start, next_end, position)
+
+        if (
+            next_start == edit_state["preview_start"]
+            and next_end == edit_state["preview_end"]
+        ):
+            return
+
+        schedule.start_time = next_start
+        schedule.end_time = next_end
+        edit_state["preview_start"] = next_start
+        edit_state["preview_end"] = next_end
+        edit_state["changed"] = True
+
+    def _time_edit_auto_scroll_direction(self, position):
+        if position.y() < self.EDIT_AUTO_SCROLL_MARGIN_PX:
+            return -1
+        if position.y() > self.height() - self.EDIT_AUTO_SCROLL_MARGIN_PX:
+            return 1
+        return 0
+
+    def _update_time_edit_auto_scroll(self, position):
+        self._last_time_edit_pos = QPointF(position)
+        if self._active_time_edit is None:
+            self._time_edit_scroll_timer.stop()
+            return
+        if self._time_edit_auto_scroll_direction(position):
+            if not self._time_edit_scroll_timer.isActive():
+                self._time_edit_scroll_timer.start()
+        else:
+            self._time_edit_scroll_timer.stop()
+
+    def _handle_time_edit_auto_scroll(self):
+        if self._active_time_edit is None or self._last_time_edit_pos is None:
+            self._time_edit_scroll_timer.stop()
+            return
+
+        direction = self._time_edit_auto_scroll_direction(self._last_time_edit_pos)
+        if direction == 0:
+            self._time_edit_scroll_timer.stop()
+            return
+
+        next_start = self.visible_start_minutes + (
+            direction * self.EDIT_AUTO_SCROLL_STEP_MINUTES
+        )
+        next_start = max(-self.DAY_MINUTES, min(self.DAY_MINUTES * 2, next_start))
+        if next_start == self.visible_start_minutes:
+            return
+
+        self.visible_start_minutes = next_start
+        self._apply_time_edit_preview(
+            self._active_time_edit,
+            self._last_time_edit_pos,
+        )
+        self.update()
+
+    def _restore_time_edit_original(self, edit_state):
+        if edit_state is None:
+            return
+        schedule = edit_state["schedule"]
+        schedule.start_time = edit_state["original_start"]
+        schedule.end_time = edit_state["original_end"]
+
+    def _finish_time_edit(self, commit):
+        edit_state = self._active_time_edit or self._pending_time_edit
+        self._time_edit_scroll_timer.stop()
+        self._hide_time_edit_hint()
+        self._pending_time_edit = None
+        self._active_time_edit = None
+        self._last_time_edit_pos = None
+        self._pressed_schedule = None
+        self.unsetCursor()
+
+        if edit_state is None:
+            return
+        if not commit or not edit_state.get("changed"):
+            self._restore_time_edit_original(edit_state)
+            self.update()
+            return
+        self.schedule_time_changed.emit(
+            edit_state["schedule"],
+            edit_state["preview_start"],
+            edit_state["preview_end"],
+        )
+
+    def _maybe_activate_pending_time_edit(self, position):
+        if self._pending_time_edit is None or self._active_time_edit is not None:
+            return False
+        drag_distance = (
+            position - self._pending_time_edit["press_pos"]
+        ).manhattanLength()
+        if drag_distance < QApplication.startDragDistance():
+            return False
+
+        self._active_time_edit = self._pending_time_edit
+        self._pending_time_edit = None
+        self._hide_hover_preview()
+        self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        self._update_time_edit_auto_scroll(position)
+        self._apply_time_edit_preview(self._active_time_edit, position)
+        self.update()
+        return True
+
+    def _is_active_time_edit_schedule(self, schedule):
+        return (
+            self._active_time_edit is not None
+            and self._active_time_edit.get("schedule") is schedule
+        )
 
     def _display_style_for_schedule(self, schedule):
         if self._is_completed(schedule):
@@ -896,7 +1216,11 @@ class TimetablePlaceholderFrame(QFrame):
         grid_left,
         grid_width,
     ):
-        for interval in intervals:
+        ordered_intervals = sorted(
+            intervals,
+            key=lambda item: self._is_active_time_edit_schedule(item["schedule"]),
+        )
+        for interval in ordered_intervals:
             column_count = interval["column_count"]
             column_gap = self.EVENT_BLOCK_COLUMN_GAP
             available_width = max(
@@ -907,6 +1231,9 @@ class TimetablePlaceholderFrame(QFrame):
             rect_x = grid_left + column_gap + interval["column"] * (
                 rect_width + column_gap
             )
+            if self._is_active_time_edit_schedule(interval["schedule"]):
+                rect_x = self._active_time_edit["locked_left"]
+                rect_width = self._active_time_edit["locked_width"]
             rect_y = self._minute_to_y(interval["visible_start"], visible_start, top)
             rect_bottom = self._minute_to_y(interval["visible_end"], visible_start, top)
             rect_y = max(top + self.EVENT_GAP, rect_y + self.EVENT_GAP)
@@ -1198,7 +1525,7 @@ class TimetablePlaceholderFrame(QFrame):
         local_pos = self.mapFromGlobal(global_pos)
         if not self.rect().contains(local_pos):
             return False
-        return self._schedule_at_position(QPointF(local_pos)) is not None
+        return self._schedule_region_at_position(QPointF(local_pos)) is not None
 
     def _event_targets_timetable(self, obj):
         while isinstance(obj, QWidget):
@@ -1223,13 +1550,25 @@ class TimetablePlaceholderFrame(QFrame):
         return super().eventFilter(obj, event)
 
     def _schedule_at_position(self, position):
-        for region in reversed(self._hit_regions):
-            if region["rect"].contains(position):
-                return region["schedule"]
-        return None
+        region = self._schedule_region_at_position(position)
+        return region["schedule"] if region is not None else None
 
     def mouseMoveEvent(self, event):
-        schedule = self._schedule_at_position(event.position())
+        if self._active_time_edit is not None:
+            self._apply_time_edit_preview(self._active_time_edit, event.position())
+            self._update_time_edit_auto_scroll(event.position())
+            self.update()
+            event.accept()
+            return
+
+        if self._maybe_activate_pending_time_edit(event.position()):
+            event.accept()
+            return
+
+        region = self._schedule_region_at_position(event.position())
+        action = self._time_edit_action_for_region(region, event.position())
+        self._set_cursor_for_time_edit_action(action)
+        schedule = region["schedule"] if region is not None else None
         if schedule is None:
             self._hide_hover_preview()
             super().mouseMoveEvent(event)
@@ -1246,9 +1585,19 @@ class TimetablePlaceholderFrame(QFrame):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self._pressed_schedule = self._schedule_at_position(event.position())
+            self._pending_time_edit = None
+            region = self._schedule_region_at_position(event.position())
+            self._pressed_schedule = region["schedule"] if region is not None else None
             if self._pressed_schedule is not None:
                 self._set_selected_schedule(self._pressed_schedule)
+                self._pending_time_edit = self._build_time_edit_state(
+                    region,
+                    event.position(),
+                )
+                if self._pending_time_edit is not None:
+                    self._set_cursor_for_time_edit_action(
+                        self._pending_time_edit["action"]
+                    )
                 event.accept()
                 return
             self._clear_selected_schedule()
@@ -1256,6 +1605,15 @@ class TimetablePlaceholderFrame(QFrame):
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
+            if self._active_time_edit is not None:
+                self._apply_time_edit_preview(self._active_time_edit, event.position())
+                self._finish_time_edit(True)
+                event.accept()
+                return
+            if self._pending_time_edit is not None:
+                self._finish_time_edit(False)
+                event.accept()
+                return
             released_schedule = self._schedule_at_position(event.position())
             if (
                 released_schedule is not None
@@ -1269,6 +1627,7 @@ class TimetablePlaceholderFrame(QFrame):
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
+            self._finish_time_edit(False)
             schedule = self._schedule_at_position(event.position())
             if schedule is not None:
                 self._set_selected_schedule(schedule)
@@ -1295,9 +1654,18 @@ class TimetablePlaceholderFrame(QFrame):
         event.accept()
 
     def leaveEvent(self, event):
+        if self._active_time_edit is not None or self._pending_time_edit is not None:
+            super().leaveEvent(event)
+            return
         self._pressed_schedule = None
         self._hide_hover_preview()
         super().leaveEvent(event)
+
+    def hideEvent(self, event):
+        if self._active_time_edit is not None or self._pending_time_edit is not None:
+            self._finish_time_edit(False)
+        self._hide_time_edit_hint()
+        super().hideEvent(event)
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -1531,6 +1899,9 @@ class DashboardView(QWidget):
         self.timetable_placeholder.schedule_clicked.connect(
             self._show_timetable_detail_popup
         )
+        self.timetable_placeholder.schedule_time_changed.connect(
+            self._handle_timetable_time_changed
+        )
         self.timetable_placeholder.schedule_context_requested.connect(
             self._show_timetable_context_menu
         )
@@ -1623,6 +1994,45 @@ class DashboardView(QWidget):
             self.refresh_data()
             self.req_refresh_all.emit()
 
+    def _handle_timetable_time_changed(self, schedule_data, start_time, end_time):
+        schedule_id = getattr(schedule_data, "id", None)
+        if schedule_id is None:
+            self.refresh_data()
+            return
+
+        if getattr(schedule_data, "group_id", None):
+            success = db_manager.update_schedule_with_repeat(
+                schedule_id,
+                {
+                    "start_time": start_time,
+                    "end_time": end_time,
+                },
+                update_future=False,
+            )
+            if success:
+                schedule_data.group_id = None
+        else:
+            success = db_manager.update_schedule_fields(
+                schedule_id,
+                start_time=start_time,
+                end_time=end_time,
+            )
+
+        if not success:
+            self.refresh_data()
+            return
+
+        schedule_data.start_time = start_time
+        schedule_data.end_time = end_time
+        for popup in self.open_popups:
+            if getattr(getattr(popup, "data", None), "id", None) == schedule_id:
+                popup.data.start_time = start_time
+                popup.data.end_time = end_time
+                if hasattr(popup, "refresh_time_display"):
+                    popup.refresh_time_display()
+        self.refresh_data()
+        self.req_refresh_all.emit()
+
     def _handle_timetable_delete(self, schedule_data):
         schedule_id = getattr(schedule_data, "id", None)
         if schedule_id is None:
@@ -1690,11 +2100,20 @@ class DashboardView(QWidget):
         return False
 
     def _show_dashboard_context_menu(self, global_pos):
-        menu = ActionContextMenu(self)
+        menu = ActionContextMenu(
+            self,
+            show_drag_options=self.schedule_display_mode == "timetable",
+            drag_snap_minutes=self.timetable_placeholder.edit_snap_minutes,
+        )
         menu.action_requested.connect(self.context_action_requested.emit)
         menu.view_requested.connect(self.context_view_requested.emit)
         menu.mode_requested.connect(self.context_mode_requested.emit)
+        menu.drag_snap_requested.connect(self._handle_timetable_drag_snap_change)
         menu.exec(global_pos)
+
+    def _handle_timetable_drag_snap_change(self, minutes):
+        self.timetable_placeholder.set_drag_snap_minutes(minutes)
+        set_timetable_drag_snap_minutes(minutes)
 
     def refresh_data(self):
         while self.list_layout.count() > 1:

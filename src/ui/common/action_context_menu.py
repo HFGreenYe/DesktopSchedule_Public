@@ -124,12 +124,15 @@ class ActionContextMenu(QMenu):
     action_requested = pyqtSignal(str)
     view_requested = pyqtSignal(str)
     mode_requested = pyqtSignal(str)
+    drag_snap_requested = pyqtSignal(int)
 
     MAIN_MENU_WIDTH = 160
     VIEW_MENU_WIDTH = 150
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, show_drag_options=False, drag_snap_minutes=1):
         super().__init__(parent)
+        self.show_drag_options = show_drag_options
+        self.drag_snap_minutes = self._normalize_drag_snap_minutes(drag_snap_minutes)
         self.actions_by_id = {}
         self.widget_actions_by_id = {}
         self.rows_by_id = {}
@@ -159,7 +162,28 @@ class ActionContextMenu(QMenu):
         self.aboutToHide.connect(self.mode_menu.close)
         self.mode_menu.aboutToHide.connect(self._clear_mode_row_hover)
 
+        # --- 拖拉 子菜单（仅日课表模式使用） ---
+        self.drag_menu = QMenu("拖拉", self)
+        self._drag_hover_timer = QTimer(self)
+        self._drag_hover_timer.setInterval(30)
+        self._drag_hover_timer.timeout.connect(
+            self._close_drag_menu_if_cursor_outside
+        )
+        self._drag_rows = {}
+        self._drag_widget_actions = {}
+        self._apply_menu_style(self.drag_menu, self.VIEW_MENU_WIDTH)
+        self.aboutToHide.connect(self.drag_menu.close)
+        self.drag_menu.aboutToHide.connect(self._clear_drag_row_hover)
+
         self._build_menu()
+
+    @staticmethod
+    def _normalize_drag_snap_minutes(value):
+        try:
+            minutes = int(value)
+        except (TypeError, ValueError):
+            return 1
+        return minutes if minutes in {1, 5} else 1
 
     def _build_menu(self):
         # --- 模式（仿"视图"子菜单结构） ---
@@ -181,6 +205,20 @@ class ActionContextMenu(QMenu):
             on_leave=self._hide_mode_menu_if_cursor_left,
             on_click=self._show_mode_menu,
         )
+
+        if self.show_drag_options:
+            self._create_drag_action(1, "1分钟刻度", ("1.svg",))
+            self._create_drag_action(5, "5分钟刻度", ("5.svg",))
+            self._create_main_action(
+                action_id="drag",
+                text="拖拉",
+                icon_names=("drag.svg",),
+                enabled=True,
+                arrow=True,
+                on_enter=self._show_drag_menu,
+                on_leave=self._hide_drag_menu_if_cursor_left,
+                on_click=self._show_drag_menu,
+            )
 
         self._create_main_action(
             action_id="skin",
@@ -333,10 +371,115 @@ class ActionContextMenu(QMenu):
     def _emit_mode_requested(self, mode_id):
         self.mode_requested.emit(mode_id)
 
+    # ── 拖拉子菜单 ──────────────────────────
+
+    def _create_drag_action(self, snap_minutes, text, icon_names):
+        snap_minutes = self._normalize_drag_snap_minutes(snap_minutes)
+        action = QAction(text, self.drag_menu)
+        action.setIcon(self._load_icon(icon_names))
+        action.setEnabled(True)
+        action.triggered.connect(
+            lambda _checked=False, minutes=snap_minutes: self._emit_drag_snap_requested(minutes)
+        )
+
+        row = _MenuRow(
+            text=text,
+            icon_path=self._first_existing_icon_path(icon_names),
+            action=action,
+            width=self.VIEW_MENU_WIDTH - 12,
+            enabled=True,
+            on_enter=lambda minutes=snap_minutes: self._set_drag_option_style(
+                minutes,
+                hovered=True,
+            ),
+            on_leave=lambda minutes=snap_minutes: self._set_drag_option_style(
+                minutes,
+                hovered=False,
+            ),
+            on_click=lambda: (
+                self.drag_menu.close(),
+                self.close(),
+            ),
+        )
+        widget_action = QWidgetAction(self.drag_menu)
+        widget_action.setDefaultWidget(row)
+        self.drag_menu.addAction(widget_action)
+        self._drag_rows[snap_minutes] = row
+        self._drag_widget_actions[snap_minutes] = widget_action
+        self._set_drag_option_style(snap_minutes, hovered=False)
+        return action
+
+    def _emit_drag_snap_requested(self, minutes):
+        self.drag_snap_requested.emit(self._normalize_drag_snap_minutes(minutes))
+
+    def _set_drag_option_style(self, minutes, hovered=False):
+        row = self._drag_rows.get(self._normalize_drag_snap_minutes(minutes))
+        if not row:
+            return
+        is_current = self.drag_snap_minutes == self._normalize_drag_snap_minutes(minutes)
+        if is_current:
+            row.setStyleSheet("background-color: rgba(12, 192, 223, 0.16); border-radius: 8px;")
+        elif hovered:
+            row.setStyleSheet("background-color: rgba(12, 192, 223, 0.1); border-radius: 8px;")
+        else:
+            row.setStyleSheet("background-color: transparent; border-radius: 8px;")
+
+    def _show_drag_menu(self):
+        wa = self.widget_actions_by_id.get("drag")
+        if not wa:
+            return
+        self.mode_menu.close()
+        self.view_menu.close()
+        row = self.rows_by_id.get("drag")
+        if row:
+            row.set_forced_hovered(True)
+        action_rect = self.actionGeometry(wa)
+        popup_pos = self.mapToGlobal(QPoint(self.width(), action_rect.top()))
+        self.drag_menu.popup(popup_pos)
+        if not self._drag_hover_timer.isActive():
+            self._drag_hover_timer.start()
+
+    def _hide_drag_menu(self):
+        self._drag_hover_timer.stop()
+        self._clear_drag_row_hover()
+        self.drag_menu.close()
+
+    def _clear_drag_row_hover(self):
+        row = self.rows_by_id.get("drag")
+        if row:
+            row.set_hovered(False)
+            row.set_forced_hovered(False)
+
+    def _hide_drag_menu_if_cursor_left(self):
+        QTimer.singleShot(0, self._close_drag_menu_if_cursor_outside)
+
+    def _close_drag_menu_if_cursor_outside(self):
+        if not self.drag_menu.isVisible():
+            self._drag_hover_timer.stop()
+            self._clear_drag_row_hover()
+            return
+        cursor_pos = QCursor.pos()
+        drag_row = self.rows_by_id.get("drag")
+        drag_row_rect = QRect()
+        if drag_row:
+            drag_row_rect = QRect(
+                drag_row.mapToGlobal(QPoint(0, 0)), drag_row.size()
+            )
+        drag_rect = QRect(
+            self.drag_menu.mapToGlobal(QPoint(0, 0)), self.drag_menu.size()
+        )
+        if (
+            not drag_row_rect.contains(cursor_pos)
+            and not drag_rect.contains(cursor_pos)
+        ):
+            self._hide_drag_menu()
+
     def _show_mode_menu(self):
         wa = self.widget_actions_by_id.get("mode")
         if not wa:
             return
+        self.drag_menu.close()
+        self.view_menu.close()
         row = self.rows_by_id.get("mode")
         if row:
             row.set_forced_hovered(True)
@@ -385,6 +528,8 @@ class ActionContextMenu(QMenu):
         view_widget_action = self.widget_actions_by_id.get("view")
         if not view_widget_action:
             return
+        self.mode_menu.close()
+        self.drag_menu.close()
         view_row = self.rows_by_id.get("view")
         if view_row:
             view_row.set_forced_hovered(True)
