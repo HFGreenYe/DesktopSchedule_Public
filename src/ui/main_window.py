@@ -345,6 +345,7 @@ class MainWindow(FramelessMainWindow):
                 panel.options_changed.connect(self._handle_search_options_previewed)
                 panel.applied.connect(self._handle_search_options_applied)
             else:
+                panel.options_changed.connect(self._handle_filter_options_previewed)
                 panel.applied.connect(self._handle_filter_options_applied)
             setattr(self, attribute_name, panel)
         return panel
@@ -361,6 +362,9 @@ class MainWindow(FramelessMainWindow):
         self.page_dashboard.apply_filter_options(options)
         if self.day_filter_panel is not None:
             self.day_filter_panel.close()
+
+    def _handle_filter_options_previewed(self, options):
+        self.page_dashboard.apply_filter_options(options)
 
     def _handle_search_text_changed(self, text):
         self.page_dashboard.set_search_keyword(text)

@@ -273,7 +273,7 @@ class WeekQueryOptionsPanel(QWidget):
         hint_text = (
             "搜索条件会即时作用于本周关键词；清空关键词后恢复原筛选结果。"
             if self.panel_mode == "search"
-            else "筛选仅作用于当前周；搜索清空后会回到这里。"
+            else "筛选条件会即时作用于当前周；搜索清空后会回到这里。"
         )
         hint = QLabel(hint_text)
         hint.setWordWrap(True)

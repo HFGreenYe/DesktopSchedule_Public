@@ -3211,6 +3211,7 @@ class WeekWindow(FramelessMainWindow):
                 panel.options_changed.connect(self.apply_search_options)
                 panel.applied.connect(self._handle_search_options_applied)
             else:
+                panel.options_changed.connect(self.apply_filter_options)
                 panel.applied.connect(self._handle_filter_options_applied)
             setattr(self, attribute_name, panel)
         return panel
