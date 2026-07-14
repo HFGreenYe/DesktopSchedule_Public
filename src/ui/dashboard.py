@@ -21,6 +21,10 @@ from ..utils.timetable_preferences import (
     set_timetable_drag_snap_minutes,
     set_timetable_schedule_color,
 )
+from ..utils.schedule_sort_preferences import (
+    get_schedule_sort_options,
+    set_schedule_sort_options,
+)
 from .schedule_detail_pop import ScheduleDetailPop
 from .common.action_context_menu import ActionContextMenu
 
@@ -1908,6 +1912,7 @@ class DashboardView(QWidget):
         self._search_keyword = ""
         self._last_search_scope = "title"
         self._last_match_mode = "fuzzy"
+        self._sort_options = get_schedule_sort_options("day")
         self._card_schedule_source = []
         self._timetable_schedule_source = []
         self._schedule_category_map = {}
@@ -2050,6 +2055,37 @@ class DashboardView(QWidget):
     def has_active_query(self):
         return bool(self._search_keyword) or self.has_active_filter()
 
+    def sort_options(self):
+        return self._sort_options
+
+    def apply_sort_options(self, options):
+        self._sort_options = options
+        set_schedule_sort_options("day", options)
+        self._render_card_query_results()
+
+    def has_active_sort(self):
+        return not self._sort_options.is_default()
+
+    def freeze_current_card_order(self):
+        schedules = []
+        for index in range(self.list_layout.count() - 1):
+            item = self.list_layout.itemAt(index)
+            widget = item.widget() if item is not None else None
+            if isinstance(widget, ScheduleCard):
+                schedules.append(widget.data)
+        self._write_manual_sort_order(schedules)
+
+    @staticmethod
+    def _write_manual_sort_order(schedules):
+        base_order = datetime.datetime.now().timestamp()
+        for index, schedule in enumerate(schedules):
+            schedule_id = getattr(schedule, "id", None)
+            if schedule_id is None:
+                continue
+            new_order = base_order - index * 100.0
+            schedule.sort_order = new_order
+            db_manager.update_schedule_fields(schedule_id, sort_order=new_order)
+
     def _apply_schedule_query(self, schedules):
         if self._search_keyword:
             options = self._search_options or self.search_options_for_panel()
@@ -2072,7 +2108,10 @@ class DashboardView(QWidget):
     def _render_card_query_results(self):
         self._clear_schedule_cards()
         dashboard_schedules = self._apply_schedule_query(self._card_schedule_source)
-        dashboard_schedules = ScheduleSortService.sort_for_day_view(dashboard_schedules)
+        dashboard_schedules = ScheduleSortService.sort_for_day_view(
+            dashboard_schedules,
+            self._sort_options,
+        )
 
         for index, item in enumerate(dashboard_schedules):
             card = ScheduleCard(item)

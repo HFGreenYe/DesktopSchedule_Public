@@ -1,4 +1,9 @@
 # src/utils/styles.py
+import os
+import re
+import tempfile
+from pathlib import Path
+
 from ..config import AppConfig
 from PyQt6.QtGui import QColor
 
@@ -19,6 +24,49 @@ class StyleManager:
             round(primary_color.green() * ratio + secondary_color.green() * inverse),
             round(primary_color.blue() * ratio + secondary_color.blue() * inverse),
         ).name()
+
+    @staticmethod
+    def theme_accent_color():
+        color = QColor(AppConfig.COLOR_GRADIENT_START)
+        if not color.isValid():
+            color = QColor("#0cc0df")
+        return color.name()
+
+    @staticmethod
+    def color_to_rgba(color_hex, alpha):
+        color = QColor(color_hex)
+        if not color.isValid():
+            color = QColor(AppConfig.COLOR_GRADIENT_START)
+        alpha = max(0.0, min(float(alpha), 1.0))
+        return f"rgba({color.red()}, {color.green()}, {color.blue()}, {alpha:.2f})"
+
+    @classmethod
+    def theme_overlay_rgba(cls, alpha=0.10):
+        return cls.color_to_rgba(cls.theme_accent_color(), alpha)
+
+    @classmethod
+    def get_tinted_svg_icon_path(cls, icon_name, color_hex=None):
+        color = QColor(color_hex or cls.theme_accent_color())
+        if not color.isValid():
+            color = QColor(cls.theme_accent_color())
+        source_path = Path(os.getcwd()) / "assets" / "icons" / icon_name
+        if not source_path.exists():
+            return str(source_path).replace("\\", "/")
+
+        safe_color = color.name().lstrip("#")
+        cache_dir = Path(tempfile.gettempdir()) / "desktop_schedule_tinted_icons"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        target_path = cache_dir / f"{source_path.stem}_{safe_color}{source_path.suffix}"
+        if target_path.exists() and target_path.stat().st_mtime >= source_path.stat().st_mtime:
+            return str(target_path).replace("\\", "/")
+
+        text = source_path.read_text(encoding="utf-8")
+        if re.search(r'fill="[^"]*"', text):
+            text = re.sub(r'fill="[^"]*"', f'fill="{color.name()}"', text)
+        else:
+            text = text.replace("<path ", f'<path fill="{color.name()}" ', 1)
+        target_path.write_text(text, encoding="utf-8")
+        return str(target_path).replace("\\", "/")
 
     @staticmethod
     def derive_surface_rgba(base_color=None, dark_factor=115, alpha=0.9):
@@ -107,15 +155,15 @@ class StyleManager:
     @staticmethod
     def get_menu_style():
         """获取菜单样式 (浅色/深色磨砂)"""
-        import os
-        base_path = os.getcwd().replace('\\', '/')
-        # 计算 check.svg 的绝对路径
-        icon_path = f"{base_path}/assets/icons/check.svg" 
+        icon_path = StyleManager.get_tinted_svg_icon_path(
+            "check.svg",
+            AppConfig.COLOR_GRADIENT_START,
+        )
         bg_color = "rgba(255, 255, 255, 0.95)"
         text_color = "#333333"
         border_color = "rgba(0, 0, 0, 0.1)"
-        hover_bg = "rgba(12, 192, 223, 0.1)"
-        hover_text = "#0cc0df"
+        hover_bg = StyleManager.theme_overlay_rgba(0.10)
+        hover_text = StyleManager.theme_accent_color()
 
         return f"""
             QMenu {{

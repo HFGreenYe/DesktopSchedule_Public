@@ -13,6 +13,7 @@ from src.utils.window_preferences import (
     set_window_pin_state,
 )
 from src.utils.startup_manager import is_startup_enabled, set_startup_enabled
+from src.utils.styles import StyleManager
 
 # =================================================================
 class IOSSwitch(QWidget):
@@ -44,6 +45,12 @@ class IOSSwitch(QWidget):
         self._thumb_x = 25.0 if checked else 3.0
         self.update()
 
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            e.accept()
+            return
+        super().mousePressEvent(e)
+
     def mouseReleaseEvent(self, e):
         if e.button() == Qt.MouseButton.LeftButton:
             self._checked = not self._checked
@@ -52,6 +59,9 @@ class IOSSwitch(QWidget):
             self.anim.setEndValue(end_val)
             self.anim.start()
             self.toggled.emit(self._checked)
+            e.accept()
+            return
+        super().mouseReleaseEvent(e)
 
     def paintEvent(self, e):
         p = QPainter(self)
@@ -306,9 +316,12 @@ class SharedMoreMenu(QMenu):
         self.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint | Qt.WindowType.NoDropShadowWindowHint)
         self.setStyleSheet(StyleManager.get_menu_style())
 
-        text_color = "#333333" 
-        hover_bg = "rgba(12, 192, 223, 0.1)" 
+        text_color = "#333333"
+        accent_color = StyleManager.theme_accent_color()
+        hover_bg = StyleManager.theme_overlay_rgba(0.10)
+        active_bg = StyleManager.theme_overlay_rgba(0.16)
         self._more_hover_bg = hover_bg
+        self._more_active_bg = active_bg
         self._mode_row = None
         self._mode_widget_action = None
         self._mode_menu_locked = False
@@ -392,7 +405,7 @@ class SharedMoreMenu(QMenu):
             if arrow:
                 arrow_label = QLabel("›")
                 arrow_label.setStyleSheet(
-                    "color: #0cc0df; font-family: 'Microsoft YaHei UI'; "
+                    f"color: {accent_color}; font-family: 'Microsoft YaHei UI'; "
                     "font-size: 18px; font-weight: bold; background: transparent; border: none;"
                 )
                 arrow_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -586,7 +599,7 @@ class SharedMoreMenu(QMenu):
             return
         if hovered:
             self._mode_row.setStyleSheet(
-                f"background-color: {getattr(self, '_more_hover_bg', 'rgba(12, 192, 223, 0.1)')}; border-radius: 4px;"
+                f"background-color: {getattr(self, '_more_hover_bg', StyleManager.theme_overlay_rgba(0.10))}; border-radius: 4px;"
             )
         else:
             self._mode_row.setStyleSheet("background-color: transparent;")
@@ -597,9 +610,15 @@ class SharedMoreMenu(QMenu):
             return
         is_current = self.__class__._schedule_display_mode == mode_id
         if is_current:
-            row.setStyleSheet("background-color: rgba(12, 192, 223, 0.16); border-radius: 4px;")
+            row.setStyleSheet(
+                f"background-color: {getattr(self, '_more_active_bg', StyleManager.theme_overlay_rgba(0.16))}; "
+                "border-radius: 4px;"
+            )
         elif hovered:
-            row.setStyleSheet("background-color: rgba(12, 192, 223, 0.1); border-radius: 4px;")
+            row.setStyleSheet(
+                f"background-color: {getattr(self, '_more_hover_bg', StyleManager.theme_overlay_rgba(0.10))}; "
+                "border-radius: 4px;"
+            )
         else:
             row.setStyleSheet("background-color: transparent;")
 
@@ -675,7 +694,7 @@ class SharedMoreMenu(QMenu):
             return
         if hovered:
             self._help_row.setStyleSheet(
-                f"background-color: {getattr(self, '_more_hover_bg', 'rgba(12, 192, 223, 0.1)')}; border-radius: 4px;"
+                f"background-color: {getattr(self, '_more_hover_bg', StyleManager.theme_overlay_rgba(0.10))}; border-radius: 4px;"
             )
         else:
             self._help_row.setStyleSheet("background-color: transparent;")
@@ -819,7 +838,22 @@ class SharedMoreMenu(QMenu):
         print(f"[{self.parent_window.__class__.__name__}] 点击了导出日程")
 
     def _on_show_history(self):
-        print(f"[{self.parent_window.__class__.__name__}] 点击了全部日程")
+        from src.ui.popups.all_schedules_panel import AllSchedulesPanel
+
+        if (
+            not hasattr(self.parent_window, "all_schedules_panel")
+            or self.parent_window.all_schedules_panel is None
+        ):
+            self.parent_window.all_schedules_panel = AllSchedulesPanel(self.parent_window)
+
+        panel = self.parent_window.all_schedules_panel
+        if panel.isVisible():
+            panel.hide()
+            return
+        panel.reset_geometry_for_parent()
+        panel.show()
+        panel.raise_()
+        panel.activateWindow()
 
     def _on_show_axis(self):
         global_signals.axis_board_requested.emit(self.parent_window)

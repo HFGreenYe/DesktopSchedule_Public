@@ -95,6 +95,8 @@ class DayQueryOptionsPanel(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         if self.view_scope == "todo":
             panel_height = 270 if panel_mode == "search" else 212
+        elif self.view_scope == "day":
+            panel_height = 410 if panel_mode == "search" else 334
         else:
             panel_height = 346 if panel_mode == "search" else 270
         self.setFixedSize(252, panel_height)
@@ -189,12 +191,27 @@ class DayQueryOptionsPanel(QWidget):
         )
         self.status_combo = None
         self.time_kind_combo = None
+        self.reminder_combo = None
+        self.repeat_combo = None
         if self.view_scope != "todo":
             self.status_combo = self._create_combo(
                 (("不限", None), ("未完成", 0), ("已完成", 1))
             )
             self.time_kind_combo = self._create_combo(
                 (("不限", "all"), ("时间段", "interval"), ("DDL / 单时间", "point"))
+            )
+        if self.view_scope == "day":
+            self.reminder_combo = self._create_combo(
+                (("不限", "all"), ("提醒", "with"), ("无提醒", "without"))
+            )
+            self.repeat_combo = self._create_combo(
+                (
+                    ("不限", "all"),
+                    ("重复", "repeated"),
+                    ("日重复", "daily"),
+                    ("周重复", "weekly"),
+                    ("月重复", "monthly"),
+                )
             )
 
         row = 0
@@ -207,6 +224,12 @@ class DayQueryOptionsPanel(QWidget):
             row += 1
         if self.time_kind_combo is not None:
             self._add_option_row(option_grid, row, "时间形式", self.time_kind_combo)
+            row += 1
+        if self.reminder_combo is not None:
+            self._add_option_row(option_grid, row, "提醒", self.reminder_combo)
+            row += 1
+        if self.repeat_combo is not None:
+            self._add_option_row(option_grid, row, "重复", self.repeat_combo)
             row += 1
 
         self.scope_combo = None
@@ -351,6 +374,16 @@ class DayQueryOptionsPanel(QWidget):
                 self._set_combo_data(self.status_combo, options.status)
             if self.time_kind_combo is not None:
                 self._set_combo_data(self.time_kind_combo, options.time_kind)
+            if self.reminder_combo is not None:
+                self._set_combo_data(
+                    self.reminder_combo,
+                    getattr(options, "reminder_state", "all"),
+                )
+            if self.repeat_combo is not None:
+                self._set_combo_data(
+                    self.repeat_combo,
+                    getattr(options, "repeat_kind", "all"),
+                )
             if self.scope_combo is not None:
                 self._set_combo_data(self.scope_combo, options.search_scope)
             if self.match_combo is not None:
@@ -370,6 +403,16 @@ class DayQueryOptionsPanel(QWidget):
             time_kind=(
                 self.time_kind_combo.currentData() or "all"
                 if self.time_kind_combo is not None
+                else "all"
+            ),
+            reminder_state=(
+                self.reminder_combo.currentData() or "all"
+                if self.reminder_combo is not None
+                else "all"
+            ),
+            repeat_kind=(
+                self.repeat_combo.currentData() or "all"
+                if self.repeat_combo is not None
                 else "all"
             ),
             search_scope=(
@@ -401,6 +444,8 @@ class DayQueryOptionsPanel(QWidget):
                 self.priority_combo,
                 self.status_combo,
                 self.time_kind_combo,
+                self.reminder_combo,
+                self.repeat_combo,
                 self.scope_combo,
                 self.match_combo,
             )

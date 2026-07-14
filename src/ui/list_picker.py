@@ -59,7 +59,8 @@ class CategoryCard(QFrame):
         self.dot = QLabel()
         self.dot.setFixedSize(8, 8)
         self.dot.setStyleSheet(
-            f"background-color: {AppConfig.COLOR_GRADIENT_START}; border-radius: 4px;"
+            f"background-color: {AppConfig.COLOR_GRADIENT_START}; "
+            "border: 1px solid white; border-radius: 4px;"
         )
         
         # UI 渲染：包括三位数编号

@@ -10,6 +10,10 @@ from ..services.schedule_query_service import (
     ScheduleQueryService,
 )
 from ..services.schedule_sort_service import ScheduleSortService
+from ..utils.schedule_sort_preferences import (
+    get_schedule_sort_options,
+    set_schedule_sort_options,
+)
 from .schedule_detail_pop import ScheduleDetailPop
 
 # 复用主界面的组件
@@ -325,6 +329,7 @@ class TodoView(QWidget):
         self._search_keyword = ""
         self._last_search_scope = "title"
         self._last_match_mode = "fuzzy"
+        self._sort_options = get_schedule_sort_options("todo")
         
         self._setup_ui()
         
@@ -463,6 +468,37 @@ class TodoView(QWidget):
     def has_active_query(self):
         return bool(self._search_keyword) or self.has_active_filter()
 
+    def sort_options(self):
+        return self._sort_options
+
+    def apply_sort_options(self, options):
+        self._sort_options = options
+        set_schedule_sort_options("todo", options)
+        self._render_query_results()
+
+    def has_active_sort(self):
+        return not self._sort_options.is_default()
+
+    def freeze_current_card_order(self):
+        schedules = []
+        for index in range(self.list_layout.count() - 1):
+            item = self.list_layout.itemAt(index)
+            widget = item.widget() if item is not None else None
+            if isinstance(widget, TodoCard):
+                schedules.append(widget.data)
+        self._write_manual_sort_order(schedules)
+
+    @staticmethod
+    def _write_manual_sort_order(schedules):
+        base_order = datetime.datetime.now().timestamp()
+        for index, schedule in enumerate(schedules):
+            schedule_id = getattr(schedule, "id", None)
+            if schedule_id is None:
+                continue
+            new_order = base_order - index * 100.0
+            schedule.sort_order = new_order
+            db_manager.update_schedule_fields(schedule_id, sort_order=new_order)
+
     def _active_query_options(self):
         if self._search_keyword:
             return self._search_options or self.search_options_for_panel()
@@ -484,7 +520,8 @@ class TodoView(QWidget):
     def _render_query_results(self):
         self._clear_todo_cards()
         visible_todos = ScheduleSortService.sort_for_todo_list(
-            self._filtered_todos()
+            self._filtered_todos(),
+            self._sort_options,
         )
         self.current_todos = visible_todos
 

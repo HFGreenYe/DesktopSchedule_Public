@@ -144,7 +144,7 @@ class WeekQueryOptionsPanel(QWidget):
         self._synchronizing_options = False
         self._categories = []
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setFixedSize(292, 422 if panel_mode == "search" else 346)
+        self.setFixedSize(292, 486 if panel_mode == "search" else 410)
         self._setup_ui()
 
     def _setup_ui(self):
@@ -232,6 +232,18 @@ class WeekQueryOptionsPanel(QWidget):
         self.time_kind_combo = self._create_combo(
             (("不限", "all"), ("时间段", "interval"), ("DDL / 单时间", "point"))
         )
+        self.reminder_combo = self._create_combo(
+            (("不限", "all"), ("提醒", "with"), ("无提醒", "without"))
+        )
+        self.repeat_combo = self._create_combo(
+            (
+                ("不限", "all"),
+                ("重复", "repeated"),
+                ("日重复", "daily"),
+                ("周重复", "weekly"),
+                ("月重复", "monthly"),
+            )
+        )
 
         row = 0
         self._add_option_row(option_grid, row, "清单", self.category_combo)
@@ -241,6 +253,10 @@ class WeekQueryOptionsPanel(QWidget):
         self._add_option_row(option_grid, row, "状态", self.status_combo)
         row += 1
         self._add_option_row(option_grid, row, "时间形式", self.time_kind_combo)
+        row += 1
+        self._add_option_row(option_grid, row, "提醒", self.reminder_combo)
+        row += 1
+        self._add_option_row(option_grid, row, "重复", self.repeat_combo)
         content_layout.addLayout(option_grid)
 
         range_label = QLabel("时间范围")
@@ -350,6 +366,14 @@ class WeekQueryOptionsPanel(QWidget):
                 self.time_kind_combo,
                 options.time_kind,
             )
+            DayQueryOptionsPanel._set_combo_data(
+                self.reminder_combo,
+                getattr(options, "reminder_state", "all"),
+            )
+            DayQueryOptionsPanel._set_combo_data(
+                self.repeat_combo,
+                getattr(options, "repeat_kind", "all"),
+            )
             self.weekday_selector.set_selected_weekdays(options.weekdays)
             if self.scope_combo is not None:
                 DayQueryOptionsPanel._set_combo_data(
@@ -370,6 +394,8 @@ class WeekQueryOptionsPanel(QWidget):
             priority=self.priority_combo.currentData(),
             status=self.status_combo.currentData(),
             time_kind=self.time_kind_combo.currentData() or "all",
+            reminder_state=self.reminder_combo.currentData() or "all",
+            repeat_kind=self.repeat_combo.currentData() or "all",
             search_scope=(
                 self.scope_combo.currentData()
                 if self.scope_combo is not None
@@ -398,6 +424,8 @@ class WeekQueryOptionsPanel(QWidget):
                 self.priority_combo,
                 self.status_combo,
                 self.time_kind_combo,
+                self.reminder_combo,
+                self.repeat_combo,
                 self.scope_combo,
                 self.match_combo,
             )

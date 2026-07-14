@@ -11,6 +11,7 @@ from ..data.database import db_manager
 from ..services.category_policy_service import CategoryDeleteAction, CategoryPolicyService
 from ..services.schedule_query_service import ScheduleQueryService
 from ..services.schedule_sort_service import ScheduleSortService
+from ..utils.styles import StyleManager
 from ..utils.window_preferences import set_window_pin_state
 from .list_picker import ListPickerView
 from .common.todo_board_add_folder_card import AddFolderCard
@@ -828,7 +829,10 @@ class ManageCategoryCard(QFrame):
         
         dot = QLabel()
         dot.setFixedSize(8, 8)
-        dot.setStyleSheet("background-color: #0cc0df; border-radius: 4px;")
+        dot.setStyleSheet(
+            f"background-color: {AppConfig.COLOR_GRADIENT_START}; "
+            "border: 1px solid white; border-radius: 4px;"
+        )
         
         lbl_name = QLabel(f"#{self.cat_id:03d}  {self.cat_name}")
         lbl_name.setStyleSheet("color: white; font-size: 13px; font-weight: bold; font-family: 'Microsoft YaHei'; background: transparent; border: none;")
@@ -844,10 +848,10 @@ class ManageCategoryCard(QFrame):
         
     def _show_menu(self, pos):
         menu = QMenu(self)
-        menu.setStyleSheet("""
-            QMenu { background-color: rgba(255, 255, 255, 0.95); border: 1px solid rgba(0, 0, 0, 0.1); border-radius: 5px; padding: 6px; color: #333333; }
-            QMenu::item { background-color: transparent; padding: 6px 20px; border-radius: 4px; font-family: "Microsoft YaHei UI"; font-size: 12px; }
-            QMenu::item:selected { background-color: rgba(12, 192, 223, 0.1); color: #0cc0df; }
+        menu.setStyleSheet(f"""
+            QMenu {{ background-color: rgba(255, 255, 255, 0.95); border: 1px solid rgba(0, 0, 0, 0.1); border-radius: 5px; padding: 6px; color: #333333; }}
+            QMenu::item {{ background-color: transparent; padding: 6px 20px; border-radius: 4px; font-family: "Microsoft YaHei UI"; font-size: 12px; }}
+            QMenu::item:selected {{ background-color: {StyleManager.theme_overlay_rgba(0.10)}; color: {StyleManager.theme_accent_color()}; }}
         """)
         del_action = QAction("删除清单", self)
         del_action.triggered.connect(lambda: self.delete_requested.emit(self.cat_id, self.cat_name))
@@ -919,7 +923,7 @@ class ManageListView(QWidget):
                 background-color: #FFFFFF; /* 纯白实心背景 */
                 border: none;
                 border-radius: 18px; /* 完美正圆 (44的一半) */
-                color: #0cc0df; /* 图2中的青色对勾 */
+                color: """ + AppConfig.COLOR_GRADIENT_START + """; /* 主题色对勾 */
                 font-size: 18px;
                 font-weight: bold;
             }
@@ -1148,7 +1152,11 @@ class InlineAddTodoView(QWidget):
             btn.setFixedSize(70, 30)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_cancel.setStyleSheet("QPushButton { background: transparent; border: 1px solid rgba(255,255,255,0.6); border-radius: 15px; color: white; font-family: 'Microsoft YaHei'; font-weight: bold;} QPushButton:hover { background: rgba(255,255,255,0.1); border: 1px solid white; }")
-        self.btn_confirm.setStyleSheet("QPushButton { background: white; border: none; border-radius: 15px; color: #0cc0df; font-family: 'Microsoft YaHei'; font-weight: bold;} QPushButton:hover { background: #f0f0f0; }")
+        self.btn_confirm.setStyleSheet(
+            f"QPushButton {{ background: white; border: none; border-radius: 15px; "
+            f"color: {AppConfig.COLOR_GRADIENT_START}; font-family: 'Microsoft YaHei'; "
+            "font-weight: bold;} QPushButton:hover { background: #f0f0f0; }"
+        )
         self.btn_cancel.clicked.connect(self.canceled.emit)
         self.btn_confirm.clicked.connect(self._on_save)
         

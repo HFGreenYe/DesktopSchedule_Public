@@ -22,6 +22,10 @@ from ..utils.timetable_preferences import (
     set_timetable_drag_snap_minutes,
     set_timetable_schedule_color,
 )
+from ..utils.schedule_sort_preferences import (
+    get_schedule_sort_options,
+    set_schedule_sort_options,
+)
 
 # 引入主界面的添加与选择组件
 from .add_view_week import AddScheduleViewWeek
@@ -33,7 +37,7 @@ from ..services.schedule_query_service import (
     ScheduleQueryService,
     WeekScheduleQueryOptions,
 )
-from ..services.schedule_sort_service import ScheduleSortService
+from ..services.schedule_sort_service import ScheduleSortOptions, ScheduleSortService
 from .header import ToolTipFilter
 from .dashboard import AdaptiveLabel 
 from .components import CountdownToolTipFilter, get_colored_icon, get_padded_colored_icon
@@ -41,6 +45,86 @@ from .common.week_day_block import DayBlock
 from .common.action_context_menu import ActionContextMenu
 from .common.weather_icon_label import WeatherIconLabel
 from .utils.window_drag_controller import WindowDragController
+
+
+class WeekContentBorderOverlay(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._border_color = QColor(120, 120, 120, 72)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+
+    def set_border_color(self, color):
+        self._border_color = QColor(color)
+        self.update()
+
+    def paintEvent(self, event):
+        width = self.width()
+        height = self.height()
+        if width <= 1 or height <= 1:
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        radius = 8.0
+        left = 0.5
+        right = width - 0.5
+        bottom = height - 0.5
+        path = QPainterPath()
+        path.moveTo(left, 0.0)
+        path.lineTo(left, bottom - radius)
+        path.quadTo(left, bottom, left + radius, bottom)
+        path.lineTo(right - radius, bottom)
+        path.quadTo(right, bottom, right, bottom - radius)
+        path.lineTo(right, 0.0)
+
+        pen = QPen(self._border_color, 1)
+        pen.setCosmetic(True)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(pen)
+        painter.drawPath(path)
+
+
+class WeekContentSurface(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._background_color = QColor("#FFFFFF")
+        self._border_color = QColor(120, 120, 120, 72)
+        self._border_overlay = WeekContentBorderOverlay(self)
+
+    def set_surface_colors(self, background_color, border_color):
+        self._background_color = QColor(background_color)
+        self._border_color = QColor(border_color)
+        self._border_overlay.set_border_color(self._border_color)
+        self._border_overlay.raise_()
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        width = self.width()
+        height = self.height()
+        if width <= 1 or height <= 1:
+            return
+
+        radius = 8.0
+        fill_path = QPainterPath()
+        fill_path.moveTo(0.0, 0.0)
+        fill_path.lineTo(width, 0.0)
+        fill_path.lineTo(width, height - radius)
+        fill_path.quadTo(width, height, width - radius, height)
+        fill_path.lineTo(radius, height)
+        fill_path.quadTo(0.0, height, 0.0, height - radius)
+        fill_path.lineTo(0.0, 0.0)
+        painter.fillPath(fill_path, self._background_color)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._border_overlay.setGeometry(self.rect())
+        self._border_overlay.raise_()
+
 
 class WeekScheduleCard(QFrame):
     """周视图中的单条日程小卡片"""
@@ -2012,8 +2096,10 @@ class WeekWindow(FramelessMainWindow):
         self._search_keyword = ""
         self._last_search_scope = "title"
         self._last_match_mode = "fuzzy"
+        self._sort_options = get_schedule_sort_options("week")
         self._search_options_panel = None
         self._filter_options_panel = None
+        self._sort_options_panel = None
         self._drag_edge_entered_at = 0.0
         self._drag_last_turn_at = 0.0
         self._drag_edge_timer = QTimer(self)
@@ -2055,9 +2141,9 @@ class WeekWindow(FramelessMainWindow):
         self.top_container.setStyleSheet("""
             QWidget#week_top_surface {
                 background: transparent;
-                border-top: 1px solid rgba(0, 0, 0, 0.1);
-                border-left: 1px solid rgba(0, 0, 0, 0.1);
-                border-right: 1px solid rgba(0, 0, 0, 0.1);
+                border-top: 1px solid rgba(120, 120, 120, 72);
+                border-left: 1px solid rgba(120, 120, 120, 72);
+                border-right: 1px solid rgba(120, 120, 120, 72);
                 border-top-left-radius: 8px;
                 border-top-right-radius: 8px;
             }
@@ -2142,7 +2228,7 @@ class WeekWindow(FramelessMainWindow):
             elif icon_name == "add.svg":
                 btn.clicked.connect(self.switch_to_add_page)
             elif icon_name == "sort.svg":
-                btn.clicked.connect(self._on_refresh_clicked)
+                btn.clicked.connect(self._on_sort_clicked)
             elif icon_name == "filter.svg":
                 btn.clicked.connect(self.toggle_filter_options_panel)
 
@@ -2341,25 +2427,20 @@ class WeekWindow(FramelessMainWindow):
         # ==========================================
         # 2. 底部区域 
         # ==========================================
-        self.content_area = QWidget()
+        self.content_area = WeekContentSurface()
         self.content_area.setObjectName("week_content_surface")
-        # 初始为纯白背景
-        self.content_area.setStyleSheet("""
-            QWidget#week_content_surface {
-                background-color: #FFFFFF;
-                border-left: 1px solid rgba(0, 0, 0, 0.1);
-                border-right: 1px solid rgba(0, 0, 0, 0.1);
-                border-bottom: 1px solid rgba(0, 0, 0, 0.1);
-                border-bottom-left-radius: 8px;
-                border-bottom-right-radius: 8px;
-            }
-        """)
+        self.content_area.set_surface_colors(
+            QColor("#FFFFFF"),
+            QColor(120, 120, 120, 72),
+        )
         
         content_layout = QVBoxLayout(self.content_area)
-        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setContentsMargins(1, 0, 1, 1)
         
         # 创建堆栈容器
         self.body_stack = QStackedWidget()
+        self.body_stack.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.body_stack.setStyleSheet("QStackedWidget { background: transparent; border: none; }")
         content_layout.addWidget(self.body_stack)
         
         # --- 第0页：周日程展示板 ---
@@ -2494,6 +2575,11 @@ class WeekWindow(FramelessMainWindow):
             return self.view_selector_container.isVisible()
         if button_key == "filter":
             return self._filter_options.has_filter_constraints()
+        if button_key == "sort":
+            return (
+                getattr(self, "schedule_display_mode", "card") == "card"
+                and not self._sort_options.is_default()
+            )
         return False
 
     def _sync_filter_button_state(self):
@@ -2502,6 +2588,15 @@ class WeekWindow(FramelessMainWindow):
             button.setStyleSheet(
                 self._toolbar_button_style(
                     active=self._toolbar_button_is_active("filter")
+                )
+            )
+
+    def _sync_sort_button_state(self):
+        button = getattr(self, "toolbar_buttons", {}).get("sort")
+        if button is not None:
+            button.setStyleSheet(
+                self._toolbar_button_style(
+                    active=self._toolbar_button_is_active("sort")
                 )
             )
 
@@ -2729,6 +2824,7 @@ class WeekWindow(FramelessMainWindow):
             self._set_toolbar_button_icon("sort", "refresh.svg", "刷新课表")
         else:
             self._set_toolbar_button_icon("sort", "sort.svg", "排序")
+        self._sync_sort_button_state()
 
         if self.body_stack.currentWidget() in (
             self.page_week_board,
@@ -2766,31 +2862,23 @@ class WeekWindow(FramelessMainWindow):
             gradient.setColorAt(1.0, QColor(AppConfig.COLOR_GRADIENT_END))
             painter.fillPath(path_top, QBrush(gradient))
 
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor(120, 120, 120, 140), 1))
+        painter.drawPath(path_bg)
+
     def _set_edit_mode_bg(self, is_edit):
         """动态切换下半部分盒子的颜色，并命令窗口重绘自己"""
         self.is_edit_mode = is_edit
         if is_edit:
-            self.content_area.setStyleSheet("""
-                QWidget#week_content_surface {
-                    background-color: transparent;
-                    border-left: 1px solid rgba(0, 0, 0, 0.1);
-                    border-right: 1px solid rgba(0, 0, 0, 0.1);
-                    border-bottom: 1px solid rgba(0, 0, 0, 0.1);
-                    border-bottom-left-radius: 8px;
-                    border-bottom-right-radius: 8px;
-                }
-            """)
+            self.content_area.set_surface_colors(
+                QColor(0, 0, 0, 0),
+                QColor(120, 120, 120, 72),
+            )
         else:
-            self.content_area.setStyleSheet("""
-                QWidget#week_content_surface {
-                    background-color: #FFFFFF;
-                    border-left: 1px solid rgba(0, 0, 0, 0.1);
-                    border-right: 1px solid rgba(0, 0, 0, 0.1);
-                    border-bottom: 1px solid rgba(0, 0, 0, 0.1);
-                    border-bottom-left-radius: 8px;
-                    border-bottom-right-radius: 8px;
-                }
-            """)
+            self.content_area.set_surface_colors(
+                QColor("#FFFFFF"),
+                QColor(120, 120, 120, 72),
+            )
         
         self.update() # 实现 paintEvent 重绘
 
@@ -3045,6 +3133,17 @@ class WeekWindow(FramelessMainWindow):
         self._hide_week_query_panels()
         super().hideEvent(event)
 
+    def closeEvent(self, event):
+        self._exit_sort_state_for_close()
+        self._hide_week_query_panels()
+        super().closeEvent(event)
+
+    def _exit_sort_state_for_close(self):
+        if self._sort_options.is_default():
+            return
+        self.freeze_current_card_order()
+        self.apply_sort_options(ScheduleSortOptions())
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if hasattr(self, 'btn_prev') and hasattr(self, 'btn_next'):
@@ -3191,6 +3290,45 @@ class WeekWindow(FramelessMainWindow):
             self._search_keyword,
         )
 
+    def sort_options(self):
+        return self._sort_options
+
+    def apply_sort_options(self, options):
+        self._sort_options = options
+        set_schedule_sort_options("week", options)
+        self._sync_sort_button_state()
+        self.refresh_week_data()
+
+    def freeze_current_card_order(self):
+        seen_ids = set()
+        for panel in self.bottom_panels:
+            layout = panel.layout()
+            if layout is None:
+                continue
+            schedules = []
+            for index in range(layout.count()):
+                item = layout.itemAt(index)
+                widget = item.widget() if item is not None else None
+                if not isinstance(widget, WeekScheduleCard):
+                    continue
+                schedule_id = getattr(widget.data, "id", None)
+                if schedule_id is None or schedule_id in seen_ids:
+                    continue
+                seen_ids.add(schedule_id)
+                schedules.append(widget.data)
+            self._write_manual_sort_order(schedules)
+
+    @staticmethod
+    def _write_manual_sort_order(schedules):
+        base_order = datetime.now().timestamp()
+        for index, schedule in enumerate(schedules):
+            schedule_id = getattr(schedule, "id", None)
+            if schedule_id is None:
+                continue
+            new_order = base_order - index * 100.0
+            schedule.sort_order = new_order
+            db_manager.update_schedule_fields(schedule_id, sort_order=new_order)
+
     def _on_search_text_changed(self, text):
         self.search_clear_action.setVisible(bool(text))
         self.set_search_keyword(text)
@@ -3221,6 +3359,15 @@ class WeekWindow(FramelessMainWindow):
         )
         self._show_week_query_panel(panel)
 
+    def toggle_sort_options_panel(self):
+        panel = self._ensure_week_sort_panel()
+        if panel.isVisible():
+            panel.close()
+            return
+        self._hide_week_query_panels()
+        panel.set_options(self.sort_options())
+        self._show_week_query_panel(panel)
+
     def _ensure_week_query_panel(self, panel_mode):
         from .popups.week_query_options_panel import WeekQueryOptionsPanel
 
@@ -3241,6 +3388,16 @@ class WeekWindow(FramelessMainWindow):
             setattr(self, attribute_name, panel)
         return panel
 
+    def _ensure_week_sort_panel(self):
+        from .popups.schedule_sort_options_panel import ScheduleSortOptionsPanel
+
+        if self._sort_options_panel is None:
+            panel = ScheduleSortOptionsPanel("week", self)
+            panel.options_changed.connect(self.apply_sort_options)
+            panel.applied.connect(self._handle_sort_options_applied)
+            self._sort_options_panel = panel
+        return self._sort_options_panel
+
     def _handle_search_options_applied(self, options):
         self.apply_search_options(options)
         if self._search_options_panel is not None:
@@ -3250,6 +3407,13 @@ class WeekWindow(FramelessMainWindow):
         self.apply_filter_options(options)
         if self._filter_options_panel is not None:
             self._filter_options_panel.close()
+
+    def _handle_sort_options_applied(self, options):
+        if options.is_default() and not self._sort_options.is_default():
+            self.freeze_current_card_order()
+        self.apply_sort_options(options)
+        if self._sort_options_panel is not None:
+            self._sort_options_panel.close()
 
     def _show_week_query_panel(self, panel):
         self._position_week_query_panel(panel)
@@ -3271,13 +3435,18 @@ class WeekWindow(FramelessMainWindow):
         panel.move(x, y)
 
     def _hide_week_query_panels(self):
-        for panel in (self._search_options_panel, self._filter_options_panel):
+        for panel in (
+            self._search_options_panel,
+            self._filter_options_panel,
+            self._sort_options_panel,
+        ):
             if panel is not None and panel.isVisible():
                 panel.close()
 
     def load_week_schedules_from_db(self):
         """直接从数据库读取本周所有数据，并渲染到 7 个面板"""
-        has_any_schedule = False
+        has_any_card_schedule = False
+        has_any_timetable_schedule = False
         week_timetable_schedules = {}
         category_map = db_manager.get_category_map()
         active_drag_card = self._active_drag_card
@@ -3320,14 +3489,18 @@ class WeekWindow(FramelessMainWindow):
                 day_index,
             )
             week_timetable_schedules[day_index] = list(valid_schedules)
-
             if valid_schedules:
-                has_any_schedule = True
+                has_any_timetable_schedule = True
+
+            card_schedules = ScheduleSortService.sort_for_week_view(
+                valid_schedules,
+                self._sort_options,
+            )
+            if card_schedules:
+                has_any_card_schedule = True
                 panel_layout = self.bottom_panels[day_index].layout()
 
-                valid_schedules = ScheduleSortService.sort_for_week_view(valid_schedules)
-                
-                for sched_obj in valid_schedules:
+                for sched_obj in card_schedules:
                     if active_drag_id is not None and sched_obj.id == active_drag_id:
                         continue
                     card = WeekScheduleCard(sched_obj)
@@ -3341,6 +3514,11 @@ class WeekWindow(FramelessMainWindow):
                     card.drag_finished.connect(self._finish_card_drag)
                     panel_layout.insertWidget(panel_layout.count() - 1, card)
 
+        has_any_schedule = (
+            has_any_timetable_schedule
+            if getattr(self, "schedule_display_mode", "card") == "timetable"
+            else has_any_card_schedule
+        )
         self.update_placeholder_visibility(has_any_schedule)
         self.page_week_timetable_placeholder.set_week_data(
             self.current_monday,
@@ -3593,11 +3771,13 @@ class WeekWindow(FramelessMainWindow):
             # 如果鼠标在下方列表区，把事件还给父类，让 QScrollArea 正常处理上下滑动
             super().wheelEvent(event)
 
-    def _on_refresh_clicked(self):
-        """课表模式：重置可见范围到当前时间；卡片模式：占位（排序未实现）"""
+    def _on_sort_clicked(self):
+        """卡片模式打开排序设置；课表模式重置可见范围到当前时间。"""
         if getattr(self, "schedule_display_mode", "card") == "timetable":
             self.page_week_timetable_placeholder.reset_to_current_time()
             self.refresh_week_data()
+            return
+        self.toggle_sort_options_panel()
 
     def _toggle_dark_mode(self):
         """切换暗色模式并持久化"""
@@ -3610,20 +3790,23 @@ class WeekWindow(FramelessMainWindow):
     def _apply_dark_mode(self):
         """根据 _dark_mode 状态更新所有 UI 元素"""
         dark = self._dark_mode
-        bg = "#2b2b2b" if dark else "#FFFFFF"
-        border_color = "rgba(255,255,255,0.08)" if dark else "rgba(0,0,0,0.1)"
+        bg = QColor("#2b2b2b") if dark else QColor("#FFFFFF")
+        border_qcolor = QColor(255, 255, 255, 44) if dark else QColor(120, 120, 120, 72)
+        border_color = "rgba(255, 255, 255, 44)" if dark else "rgba(120, 120, 120, 72)"
 
-        # content_area 背景
-        self.content_area.setStyleSheet(f"""
-            QWidget#week_content_surface {{
-                background-color: {bg};
+        self.top_container.setStyleSheet(f"""
+            QWidget#week_top_surface {{
+                background: transparent;
+                border-top: 1px solid {border_color};
                 border-left: 1px solid {border_color};
                 border-right: 1px solid {border_color};
-                border-bottom: 1px solid {border_color};
-                border-bottom-left-radius: 8px;
-                border-bottom-right-radius: 8px;
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
             }}
         """)
+
+        # content_area 背景与底部圆角描边
+        self.content_area.set_surface_colors(bg, border_qcolor)
 
         # 卡片模式面板
         if hasattr(self, 'bottom_panels'):

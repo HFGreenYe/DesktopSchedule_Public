@@ -19,6 +19,8 @@ class ScheduleQueryOptions:
     priority: Optional[int] = None
     status: Optional[int] = None
     time_kind: str = "all"
+    reminder_state: str = "all"
+    repeat_kind: str = "all"
     search_scope: str = "title"
     match_mode: str = "fuzzy"
 
@@ -29,6 +31,8 @@ class ScheduleQueryOptions:
                 self.priority is not None,
                 self.status is not None,
                 self.time_kind != "all",
+                self.reminder_state != "all",
+                self.repeat_kind != "all",
             )
         )
 
@@ -157,6 +161,18 @@ class ScheduleQueryService:
         if not ScheduleQueryService._matches_time_kind(item, options.time_kind):
             return False
 
+        if not ScheduleQueryService._matches_reminder_state(
+            item,
+            getattr(options, "reminder_state", "all"),
+        ):
+            return False
+
+        if not ScheduleQueryService._matches_repeat_kind(
+            item,
+            getattr(options, "repeat_kind", "all"),
+        ):
+            return False
+
         if not normalized_keyword:
             return True
 
@@ -187,6 +203,43 @@ class ScheduleQueryService:
         if time_kind == "point":
             return not is_interval
         return True
+
+    @staticmethod
+    def _matches_reminder_state(item, reminder_state):
+        if reminder_state == "all":
+            return True
+        has_reminder = getattr(item, "reminder_time", None) is not None
+        if reminder_state == "with":
+            return has_reminder
+        if reminder_state == "without":
+            return not has_reminder
+        return True
+
+    @staticmethod
+    def _matches_repeat_kind(item, repeat_kind):
+        if repeat_kind == "all":
+            return True
+        rule = ScheduleQueryService._normalize_repeat_rule(
+            getattr(item, "repeat_rule", "")
+        )
+        if repeat_kind == "repeated":
+            return rule is not None
+        if repeat_kind in {"daily", "weekly", "monthly"}:
+            return rule == repeat_kind
+        return True
+
+    @staticmethod
+    def _normalize_repeat_rule(value):
+        rule = str(value or "").strip()
+        if rule in {"", "none", "无", "不重复"}:
+            return None
+        if rule in {"每天", "日", "daily"}:
+            return "daily"
+        if rule in {"每周", "周", "weekly"}:
+            return "weekly"
+        if rule in {"每月", "月", "monthly"}:
+            return "monthly"
+        return "repeated"
 
     @staticmethod
     def _normalize_text(value):

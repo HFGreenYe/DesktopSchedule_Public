@@ -18,6 +18,11 @@ from ..services.schedule_query_service import (
     ScheduleQueryOptions,
     ScheduleQueryService,
 )
+from ..services.schedule_sort_service import ScheduleSortOptions, ScheduleSortService
+from ..utils.schedule_sort_preferences import (
+    get_schedule_sort_options,
+    set_schedule_sort_options,
+)
 from ..utils.win_api import apply_24h2_border_fix
 from ..utils.styles import StyleManager
 from ..utils.timetable_preferences import get_timetable_preferences
@@ -1238,8 +1243,10 @@ class MonthWindow(FramelessMainWindow):
         self._search_keyword = ""
         self._last_search_scope = "title"
         self._last_match_mode = "fuzzy"
+        self._sort_options = get_schedule_sort_options("month")
         self._search_options_panel = None
         self._filter_options_panel = None
+        self._sort_options_panel = None
         self.open_day_panels = []
         self.schedule_display_mode = get_timetable_preferences().get(
             "display_mode",
@@ -1254,6 +1261,7 @@ class MonthWindow(FramelessMainWindow):
         self.editing_schedule = None
 
         self._setup_ui()
+        self._sync_sort_button_state()
         self._window_drag_controller = WindowDragController(
             self,
             drag_started=self._on_window_drag_started,
@@ -1433,6 +1441,8 @@ class MonthWindow(FramelessMainWindow):
                 self.btn_view_toggle.clicked.connect(self.toggle_view_selector)
             elif icon == "add.svg":
                 btn.clicked.connect(self._on_add_clicked)
+            elif icon == "sort.svg":
+                btn.clicked.connect(self.toggle_sort_options_panel)
             elif icon == "filter.svg":
                 btn.clicked.connect(self.toggle_filter_options_panel)
                 
@@ -1698,6 +1708,15 @@ class MonthWindow(FramelessMainWindow):
                 )
             )
 
+    def _sync_sort_button_state(self):
+        button = getattr(self, "toolbar_buttons", {}).get("sort")
+        if button is not None:
+            button.setStyleSheet(
+                self._toolbar_button_style(
+                    active=not self._sort_options.is_default()
+                )
+            )
+
     def search_options_for_panel(self):
         if self._search_options is not None:
             return self._search_options
@@ -1744,10 +1763,14 @@ class MonthWindow(FramelessMainWindow):
         return self._filter_options
 
     def _filtered_month_schedules(self):
-        return ScheduleQueryService.apply_options(
+        filtered = ScheduleQueryService.apply_options(
             self._month_schedule_source,
             self._active_query_options(),
             self._search_keyword,
+        )
+        return ScheduleSortService.sort_for_month_day_panel(
+            filtered,
+            self._sort_options,
         )
 
     def _on_search_text_changed(self, text):
@@ -1780,6 +1803,27 @@ class MonthWindow(FramelessMainWindow):
         )
         self._show_month_query_panel(panel)
 
+    def sort_options(self):
+        return self._sort_options
+
+    def apply_sort_options(self, options):
+        self._sort_options = options
+        set_schedule_sort_options("month", options)
+        self._sync_sort_button_state()
+        self._refresh_schedule_marker_cache(
+            reload_source=False,
+            refresh_panels=True,
+        )
+
+    def toggle_sort_options_panel(self):
+        panel = self._ensure_month_sort_panel()
+        if panel.isVisible():
+            panel.close()
+            return
+        self._hide_month_query_panels()
+        panel.set_options(self.sort_options())
+        self._show_month_query_panel(panel)
+
     def _ensure_month_query_panel(self, panel_mode):
         from .popups.day_query_options_panel import DayQueryOptionsPanel
 
@@ -1804,6 +1848,16 @@ class MonthWindow(FramelessMainWindow):
             setattr(self, attribute_name, panel)
         return panel
 
+    def _ensure_month_sort_panel(self):
+        from .popups.schedule_sort_options_panel import ScheduleSortOptionsPanel
+
+        if self._sort_options_panel is None:
+            panel = ScheduleSortOptionsPanel("month", self)
+            panel.options_changed.connect(self.apply_sort_options)
+            panel.applied.connect(self._handle_sort_options_applied)
+            self._sort_options_panel = panel
+        return self._sort_options_panel
+
     def _handle_search_options_applied(self, options):
         self.apply_search_options(options)
         if self._search_options_panel is not None:
@@ -1813,6 +1867,11 @@ class MonthWindow(FramelessMainWindow):
         self.apply_filter_options(options)
         if self._filter_options_panel is not None:
             self._filter_options_panel.close()
+
+    def _handle_sort_options_applied(self, options):
+        self.apply_sort_options(options)
+        if self._sort_options_panel is not None:
+            self._sort_options_panel.close()
 
     def _show_month_query_panel(self, panel):
         self._position_month_query_panel(panel)
@@ -1834,7 +1893,11 @@ class MonthWindow(FramelessMainWindow):
         panel.move(x, y)
 
     def _hide_month_query_panels(self):
-        for panel in (self._search_options_panel, self._filter_options_panel):
+        for panel in (
+            self._search_options_panel,
+            self._filter_options_panel,
+            self._sort_options_panel,
+        ):
             if panel is not None and panel.isVisible():
                 panel.close()
 
@@ -1890,18 +1953,6 @@ class MonthWindow(FramelessMainWindow):
                 continue
 
             hover_schedule_cache.setdefault(target_date, []).append(schedule)
-
-        fallback_time = datetime.datetime.max
-        for schedules in hover_schedule_cache.values():
-            schedules.sort(
-                key=lambda schedule: (
-                    getattr(schedule, "start_time", None)
-                    or getattr(schedule, "end_time", None)
-                    or fallback_time,
-                    -int(getattr(schedule, "priority", 0)),
-                    getattr(schedule, "title", "") or "",
-                )
-            )
 
         return hover_schedule_cache
 
@@ -1962,14 +2013,14 @@ class MonthWindow(FramelessMainWindow):
         self._refresh_schedule_marker_cache()
 
     def _on_calendar_date_clicked(self, qdate):
-        self.user_selected_date = qdate
-        self._refresh_schedule_marker_cache()
         self._hide_hover_preview()
         existing_panel = self._find_open_day_panel(qdate)
         if existing_panel is not None:
             existing_panel.close()
             return
 
+        self.user_selected_date = qdate
+        self._refresh_schedule_marker_cache()
         self._open_day_panel(qdate)
 
     def _on_calendar_date_activated(self, qdate):
@@ -1982,6 +2033,10 @@ class MonthWindow(FramelessMainWindow):
     def _remove_day_panel(self, panel):
         if panel in self.open_day_panels:
             self.open_day_panels.remove(panel)
+        panel_date = getattr(panel, "panel_date", None)
+        if panel_date is not None and panel_date == self.user_selected_date:
+            self.user_selected_date = None
+            self._refresh_schedule_marker_cache(reload_source=False)
 
     def _find_open_day_panel(self, qdate):
         self.open_day_panels = [panel for panel in self.open_day_panels if panel is not None]
@@ -2224,10 +2279,16 @@ class MonthWindow(FramelessMainWindow):
         super().hideEvent(event)
 
     def closeEvent(self, event):
+        self._exit_sort_state_for_close()
         self.close_day_panels()
         self._hide_hover_preview()
         self._hide_month_query_panels()
         super().closeEvent(event)
+
+    def _exit_sort_state_for_close(self):
+        if self._sort_options.is_default():
+            return
+        self.apply_sort_options(ScheduleSortOptions())
 
     def _on_window_drag_started(self):
         self._hide_hover_preview()

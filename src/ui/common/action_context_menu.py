@@ -12,9 +12,20 @@ class _MenuRow(QFrame):
     ICON_COLOR = "#333333"
     TEXT_COLOR = "#333333"
     DISABLED_TEXT_COLOR = "#777777"
-    HOVER_BG = "rgba(12, 192, 223, 0.1)"
     ICON_SIZE = 18
     ICON_DPR = 2.0
+
+    @staticmethod
+    def hover_bg():
+        return StyleManager.theme_overlay_rgba(0.10)
+
+    @staticmethod
+    def active_bg():
+        return StyleManager.theme_overlay_rgba(0.16)
+
+    @staticmethod
+    def accent_color():
+        return StyleManager.theme_accent_color()
 
     def __init__(
         self,
@@ -70,7 +81,7 @@ class _MenuRow(QFrame):
             arrow_label = QLabel("›")
             arrow_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             arrow_label.setStyleSheet(
-                "color: #0cc0df; font-family: 'Microsoft YaHei UI'; "
+                f"color: {self.accent_color()}; font-family: 'Microsoft YaHei UI'; "
                 "font-size: 18px; font-weight: bold; background: transparent; border: none;"
             )
             layout.addWidget(arrow_label)
@@ -106,7 +117,7 @@ class _MenuRow(QFrame):
         self._refresh_hover_style()
 
     def _refresh_hover_style(self):
-        bg = self.HOVER_BG if (self._hovered or self._forced_hovered) else "transparent"
+        bg = self.hover_bg() if (self._hovered or self._forced_hovered) else "transparent"
         self.setStyleSheet(f"background-color: {bg}; border-radius: 8px;")
 
     @classmethod
@@ -418,9 +429,13 @@ class ActionContextMenu(QMenu):
             return
         is_current = self.drag_snap_minutes == self._normalize_drag_snap_minutes(minutes)
         if is_current:
-            row.setStyleSheet("background-color: rgba(12, 192, 223, 0.16); border-radius: 8px;")
+            row.setStyleSheet(
+                f"background-color: {_MenuRow.active_bg()}; border-radius: 8px;"
+            )
         elif hovered:
-            row.setStyleSheet("background-color: rgba(12, 192, 223, 0.1); border-radius: 8px;")
+            row.setStyleSheet(
+                f"background-color: {_MenuRow.hover_bg()}; border-radius: 8px;"
+            )
         else:
             row.setStyleSheet("background-color: transparent; border-radius: 8px;")
 
