@@ -11,7 +11,10 @@ from PyQt6.QtGui import (QColor, QFont, QFontMetrics, QPainter, QPainterPath, QP
 
 from ..data.database import db_manager
 from ..config import AppConfig
-from ..services.schedule_query_service import ScheduleQueryService
+from ..services.schedule_query_service import (
+    ScheduleQueryOptions,
+    ScheduleQueryService,
+)
 from ..services.schedule_sort_service import ScheduleSortService
 from ..utils.timetable_preferences import (
     get_timetable_preferences,
@@ -1900,6 +1903,12 @@ class DashboardView(QWidget):
         self.schedule_display_mode = "card"
         
         self.current_date = datetime.date.today()
+        self._filter_options = ScheduleQueryOptions()
+        self._search_options = None
+        self._search_keyword = ""
+        self._last_search_scope = "title"
+        self._last_match_mode = "fuzzy"
+        self._card_schedule_source = []
         
         self._setup_ui()
         
@@ -1996,6 +2005,85 @@ class DashboardView(QWidget):
         if entering_timetable:
             self.timetable_placeholder.reset_to_current_time()
         self._sync_schedule_area_visibility()
+
+    def filter_options(self):
+        return self._filter_options
+
+    def search_options_for_panel(self):
+        if self._search_options is not None:
+            return self._search_options
+        return self._filter_options.with_search_preferences(
+            self._last_search_scope,
+            self._last_match_mode,
+        )
+
+    def apply_filter_options(self, options):
+        self._filter_options = options
+        self._render_card_query_results()
+
+    def apply_search_options(self, options):
+        self._search_options = options
+        self._last_search_scope = options.search_scope
+        self._last_match_mode = options.match_mode
+        if self._search_keyword:
+            self._render_card_query_results()
+
+    def set_search_keyword(self, keyword):
+        normalized_keyword = str(keyword or "").strip()
+        if normalized_keyword:
+            if self._search_options is None:
+                self._search_options = self.search_options_for_panel()
+            self._search_keyword = normalized_keyword
+        else:
+            self._search_keyword = ""
+            self._search_options = None
+        self._render_card_query_results()
+
+    def has_active_filter(self):
+        return self._filter_options.has_filter_constraints()
+
+    def has_active_query(self):
+        return bool(self._search_keyword) or self.has_active_filter()
+
+    def _apply_card_query(self, schedules):
+        if self._search_keyword:
+            options = self._search_options or self.search_options_for_panel()
+            return ScheduleQueryService.apply_options(
+                schedules,
+                options,
+                self._search_keyword,
+            )
+        return ScheduleQueryService.apply_options(
+            schedules,
+            self._filter_options,
+        )
+
+    def _clear_schedule_cards(self):
+        while self.list_layout.count() > 1:
+            item = self.list_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+    def _render_card_query_results(self):
+        self._clear_schedule_cards()
+        dashboard_schedules = self._apply_card_query(self._card_schedule_source)
+        dashboard_schedules = ScheduleSortService.sort_for_day_view(dashboard_schedules)
+
+        for index, item in enumerate(dashboard_schedules):
+            card = ScheduleCard(item)
+            card.req_delete.connect(self._remove_card_from_view)
+            card.req_refresh.connect(self.refresh_data)
+            card.req_refresh.connect(self.req_refresh_all.emit)
+            card.req_status.connect(self._handle_status_change)
+            card.req_show_detail.connect(self._show_detail_popup)
+            self.list_layout.insertWidget(index, card)
+
+        self.lbl_empty.setText(
+            "没有符合条件的日程"
+            if self.has_active_query()
+            else "您还没有日程记录，请点击添加"
+        )
+        self._sync_schedule_area_visibility(bool(dashboard_schedules))
 
     def reset_timetable_to_current_time(self):
         self.timetable_placeholder.reset_to_current_time()
@@ -2172,11 +2260,6 @@ class DashboardView(QWidget):
         set_timetable_drag_snap_minutes(minutes)
 
     def refresh_data(self):
-        while self.list_layout.count() > 1:
-            item = self.list_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-
         schedules = db_manager.get_schedules_for_date(self.current_date)
         timetable_schedules = list(schedules)
         seen_timetable_ids = {
@@ -2204,23 +2287,8 @@ class DashboardView(QWidget):
                 
             if not ScheduleQueryService.is_todo(s):
                 dashboard_schedules.append(s)
-
-        dashboard_schedules = ScheduleSortService.sort_for_day_view(dashboard_schedules)
-
-        if dashboard_schedules:
-            for index, item in enumerate(dashboard_schedules):
-                card = ScheduleCard(item)
-                card.req_delete.connect(self._remove_card_from_view)
-                card.req_refresh.connect(self.refresh_data)
-                
-                # 卡片自身操作后，发射全局刷新信号
-                card.req_refresh.connect(self.req_refresh_all.emit) 
-                
-                card.req_status.connect(self._handle_status_change)
-                # 连接弹窗信号
-                card.req_show_detail.connect(self._show_detail_popup)
-                self.list_layout.insertWidget(index, card)
-        self._sync_schedule_area_visibility(bool(dashboard_schedules))
+        self._card_schedule_source = dashboard_schedules
+        self._render_card_query_results()
 
     # 弹出并管理详情面板
     def _show_detail_popup(
@@ -2280,6 +2348,11 @@ class DashboardView(QWidget):
             popup.raise_()
 
     def _remove_card_from_view(self, schedule_id):
+        self._card_schedule_source = [
+            schedule
+            for schedule in self._card_schedule_source
+            if getattr(schedule, "id", None) != schedule_id
+        ]
         sender_card = self.sender()
         if sender_card:
             self.list_layout.removeWidget(sender_card)

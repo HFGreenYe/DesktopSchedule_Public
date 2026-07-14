@@ -1,16 +1,43 @@
-"""Service boundary for schedule query/filter logic.
-
-Round 3-1 only defines importable boundaries.
-Concrete date filtering and todo/schedule partition logic is deferred to 3-2.
-"""
+"""Pure schedule query and filter helpers."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass, replace
 from datetime import date
-from typing import Iterable, List, Sequence, TypeVar
+from typing import Iterable, List, Optional, Sequence, TypeVar
 
 
 T = TypeVar("T")
+
+
+@dataclass(frozen=True)
+class ScheduleQueryOptions:
+    ALL_CATEGORIES = None
+    UNCATEGORIZED = -1
+
+    category_id: Optional[int] = ALL_CATEGORIES
+    priority: Optional[int] = None
+    status: Optional[int] = None
+    time_kind: str = "all"
+    search_scope: str = "title"
+    match_mode: str = "fuzzy"
+
+    def has_filter_constraints(self) -> bool:
+        return any(
+            (
+                self.category_id is not self.ALL_CATEGORIES,
+                self.priority is not None,
+                self.status is not None,
+                self.time_kind != "all",
+            )
+        )
+
+    def with_search_preferences(self, search_scope: str, match_mode: str):
+        return replace(
+            self,
+            search_scope=search_scope,
+            match_mode=match_mode,
+        )
 
 
 class ScheduleQueryService:
@@ -67,3 +94,75 @@ class ScheduleQueryService:
     def is_schedule(item: T) -> bool:
         """Legacy schedule predicate aligned with current week view semantics."""
         return getattr(item, "item_type", None) == "schedule"
+
+    @staticmethod
+    def apply_options(
+        items: Iterable[T],
+        options: ScheduleQueryOptions,
+        keyword: str = "",
+    ) -> List[T]:
+        normalized_keyword = ScheduleQueryService._normalize_text(keyword)
+        return [
+            item
+            for item in items
+            if ScheduleQueryService._matches_options(
+                item,
+                options,
+                normalized_keyword,
+            )
+        ]
+
+    @staticmethod
+    def _matches_options(item, options, normalized_keyword):
+        category_id = getattr(item, "category_id", None)
+        if options.category_id == ScheduleQueryOptions.UNCATEGORIZED:
+            if category_id is not None:
+                return False
+        elif options.category_id is not None and category_id != options.category_id:
+            return False
+
+        if options.priority is not None:
+            if int(getattr(item, "priority", 0) or 0) != options.priority:
+                return False
+
+        if options.status is not None:
+            if int(getattr(item, "status", 0) or 0) != options.status:
+                return False
+
+        if not ScheduleQueryService._matches_time_kind(item, options.time_kind):
+            return False
+
+        if not normalized_keyword:
+            return True
+
+        fields = [getattr(item, "title", "")]
+        if options.search_scope == "title_description":
+            fields.append(getattr(item, "description", ""))
+        normalized_fields = [
+            ScheduleQueryService._normalize_text(field)
+            for field in fields
+        ]
+        if options.match_mode == "exact":
+            return any(field == normalized_keyword for field in normalized_fields)
+        return any(normalized_keyword in field for field in normalized_fields)
+
+    @staticmethod
+    def _matches_time_kind(item, time_kind):
+        if time_kind == "all":
+            return True
+        start_time = getattr(item, "start_time", None)
+        end_time = getattr(item, "end_time", None)
+        is_interval = bool(
+            start_time is not None
+            and end_time is not None
+            and start_time != end_time
+        )
+        if time_kind == "interval":
+            return is_interval
+        if time_kind == "point":
+            return not is_interval
+        return True
+
+    @staticmethod
+    def _normalize_text(value):
+        return str(value or "").strip().casefold()

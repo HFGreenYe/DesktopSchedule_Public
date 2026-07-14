@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdi
                              QPushButton, QToolButton, QMenu, QWidgetAction, 
                              QCheckBox, QSpacerItem, QSizePolicy, QFrame)
 from PyQt6.QtCore import Qt, QTimer, QTime, QDate, pyqtSignal, QSize, QRectF, QEvent, QObject, QPoint
-from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QPen, QAction
+from PyQt6.QtGui import QIcon, QImage, QPixmap, QPainter, QColor, QPen, QAction
 from PyQt6.QtSvg import QSvgRenderer
 
 from ..utils.styles import StyleManager
@@ -104,10 +104,75 @@ class ClickableIcon(QLabel):
     def leaveEvent(self, event):
         self.setStyleSheet("background-color: transparent;")
 
+
+class LeadingElideLineEdit(QLineEdit):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._base_style_sheet = ""
+        self._elide_label = QLabel(self)
+        self._elide_label.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+            True,
+        )
+        self._elide_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        self._elide_label.setStyleSheet(
+            "background: transparent; border: none; color: white; padding: 0px;"
+        )
+        self._elide_label.hide()
+        self.textChanged.connect(self._refresh_elided_text)
+
+    def set_elide_style_sheet(self, style_sheet):
+        self._base_style_sheet = style_sheet
+        QLineEdit.setStyleSheet(self, style_sheet)
+        self._refresh_elided_text()
+
+    def _refresh_elided_text(self):
+        text = self.text()
+        available_width = max(0, self.width() - 50)
+        should_elide = bool(
+            text
+            and not self.hasFocus()
+            and self.fontMetrics().horizontalAdvance(text) > available_width
+        )
+        if not should_elide:
+            self._elide_label.hide()
+            QLineEdit.setStyleSheet(self, self._base_style_sheet)
+            return
+
+        self._elide_label.setText(
+            self.fontMetrics().elidedText(
+                text,
+                Qt.TextElideMode.ElideLeft,
+                available_width,
+            )
+        )
+        self._elide_label.setGeometry(25, 0, available_width, self.height())
+        QLineEdit.setStyleSheet(
+            self,
+            self._base_style_sheet + " QLineEdit { color: transparent; }",
+        )
+        self._elide_label.show()
+        self._elide_label.raise_()
+
+    def focusInEvent(self, event):
+        super().focusInEvent(event)
+        self._refresh_elided_text()
+
+    def focusOutEvent(self, event):
+        super().focusOutEvent(event)
+        self._refresh_elided_text()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._refresh_elided_text()
+
 class HeaderBar(QWidget):
     suspend_requested = pyqtSignal(bool)
     action_requested = pyqtSignal(str)
     search_requested = pyqtSignal()
+    search_text_changed = pyqtSignal(str)
     req_open_calendar = pyqtSignal()
     midnight_rollover = pyqtSignal()
     weather_updated = pyqtSignal(dict)
@@ -146,6 +211,41 @@ class HeaderBar(QWidget):
         ratio = self.devicePixelRatio()
         return load_colored_svg_pixmap(icon_path, color_hex, width, height, ratio)
 
+    @staticmethod
+    def _load_padded_svg_icon(
+        icon_path,
+        color_hex="#FFFFFF",
+        glyph_size=9,
+        canvas_size=16,
+    ):
+        renderer = QSvgRenderer(icon_path)
+        if not renderer.isValid():
+            return QIcon(icon_path)
+
+        scale_ratio = 4.0
+        canvas_pixels = int(canvas_size * scale_ratio)
+        glyph_pixels = glyph_size * scale_ratio
+        offset = (canvas_pixels - glyph_pixels) / 2
+        image = QImage(
+            canvas_pixels,
+            canvas_pixels,
+            QImage.Format.Format_ARGB32,
+        )
+        image.fill(Qt.GlobalColor.transparent)
+
+        painter = QPainter(image)
+        renderer.render(
+            painter,
+            QRectF(offset, offset, glyph_pixels, glyph_pixels),
+        )
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+        painter.fillRect(image.rect(), QColor(color_hex))
+        painter.end()
+
+        pixmap = QPixmap.fromImage(image)
+        pixmap.setDevicePixelRatio(scale_ratio)
+        return QIcon(pixmap)
+
     def _set_toolbar_button_icon(self, btn, icon_name, tooltip):
         svg_path = f"assets/icons/{icon_name}"
         pixmap = self._load_colored_svg(svg_path, "#FFFFFF", 24, 24)
@@ -183,7 +283,7 @@ class HeaderBar(QWidget):
         self.weather_worker.start()
 
     def _setup_search_ui(self):
-        self.search = QLineEdit()
+        self.search = LeadingElideLineEdit()
         self.search.setFixedHeight(26)
         self.search.setPlaceholderText("搜索日程...")
         icon_path = "assets/icons/search.svg"
@@ -191,11 +291,27 @@ class HeaderBar(QWidget):
             QIcon(icon_path),
             QLineEdit.ActionPosition.LeadingPosition,
         )
-        self.search_action.setToolTip("搜索 / 筛选")
+        self.search_action.setToolTip("搜索设置")
         self.search_action.triggered.connect(
             lambda _checked=False: self.search_requested.emit()
         )
-        self.search.setStyleSheet(StyleManager.get_search_input_style())
+        self.search_clear_action = self.search.addAction(
+            self._load_padded_svg_icon(
+                "assets/icons/search_clear.svg",
+                glyph_size=10,
+                canvas_size=16,
+            ),
+            QLineEdit.ActionPosition.TrailingPosition,
+        )
+        self.search_clear_action.setToolTip("清空搜索")
+        self.search_clear_action.setVisible(False)
+        self.search_clear_action.triggered.connect(self.search.clear)
+        self.search.textChanged.connect(self._on_search_text_changed)
+        self.search.set_elide_style_sheet(StyleManager.get_search_input_style())
+
+    def _on_search_text_changed(self, text):
+        self.search_clear_action.setVisible(bool(text))
+        self.search_text_changed.emit(text)
 
     def _setup_hud_ui(self):
         self.main_layout = QVBoxLayout(self)

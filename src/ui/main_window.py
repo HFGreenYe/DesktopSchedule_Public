@@ -46,7 +46,8 @@ class MainWindow(FramelessMainWindow):
         self.main_controller = MainController()
         self.axis_board = None
         self.weather_board = None
-        self.search_filter_panel = None
+        self.search_options_panel = None
+        self.day_filter_panel = None
         self._vertical_resize_margin = 8
         self._vertical_resize_edge = None
         self._vertical_resize_start_pos = QPoint()
@@ -180,7 +181,8 @@ class MainWindow(FramelessMainWindow):
         self.header.suspend_requested.connect(self.switch_to_suspend)
         self.suspend_window.restore_requested.connect(self.switch_to_normal)
         self.header.action_requested.connect(self.handle_header_action)
-        self.header.search_requested.connect(self.toggle_search_filter_panel)
+        self.header.search_requested.connect(self.toggle_search_options_panel)
+        self.header.search_text_changed.connect(self._handle_search_text_changed)
         self.header.view_requested.connect(self.switch_view)
         self.header.mode_requested.connect(self.set_schedule_display_mode)
         # 实例化日历弹窗
@@ -286,7 +288,7 @@ class MainWindow(FramelessMainWindow):
         if hasattr(self.header, "set_schedule_display_mode"):
             self.header.set_schedule_display_mode(mode_id)
         if mode_id != "card":
-            self._hide_search_filter_panel()
+            self._hide_day_query_panels()
         if persist:
             set_timetable_display_mode(mode_id)
 
@@ -294,46 +296,92 @@ class MainWindow(FramelessMainWindow):
         self.on_calendar_date_picked(datetime.now().date())
         self.page_dashboard.reset_timetable_to_current_time()
 
-    def toggle_search_filter_panel(self):
+    def _can_open_day_query_panel(self, panel_name):
         if self.body_stack.currentWidget() != self.page_dashboard:
-            self.show_toast("搜索面板先支持日界面")
-            return
+            self.show_toast(f"{panel_name}先支持日界面")
+            return False
         if getattr(self.page_dashboard, "schedule_display_mode", "card") != "card":
-            self.show_toast("搜索面板先支持卡片模式")
+            self.show_toast(f"{panel_name}先支持卡片模式")
+            return False
+        return True
+
+    def toggle_search_options_panel(self):
+        if not self._can_open_day_query_panel("搜索设置"):
             return
-
-        if self.search_filter_panel is not None and self.search_filter_panel.isVisible():
-            self.search_filter_panel.close()
+        panel = self._ensure_day_query_panel("search")
+        if panel.isVisible():
+            panel.close()
             return
+        if self.day_filter_panel is not None:
+            self.day_filter_panel.close()
+        panel.set_options(
+            self.page_dashboard.search_options_for_panel(),
+            db_manager.get_active_categories("schedule"),
+        )
+        self._show_day_query_panel(panel)
 
-        if self.search_filter_panel is None:
-            from .popups.schedule_search_panel import ScheduleSearchPanel
-
-            self.search_filter_panel = ScheduleSearchPanel(self)
-            self.search_filter_panel.apply_requested.connect(
-                self._handle_search_filter_apply
-            )
-            self.search_filter_panel.cleared.connect(
-                lambda: self.show_toast("已清空查询条件")
-            )
-
-        self._position_search_filter_panel()
-        self.search_filter_panel.show()
-        self.search_filter_panel.raise_()
-        self.search_filter_panel.activateWindow()
-
-    def _handle_search_filter_apply(self, options):
-        self.show_toast("查询生效逻辑下一步接入")
-
-    def _hide_search_filter_panel(self):
-        if self.search_filter_panel is not None and self.search_filter_panel.isVisible():
-            self.search_filter_panel.close()
-
-    def _position_search_filter_panel(self):
-        if self.search_filter_panel is None:
+    def toggle_day_filter_panel(self):
+        if not self._can_open_day_query_panel("筛选"):
             return
+        panel = self._ensure_day_query_panel("filter")
+        if panel.isVisible():
+            panel.close()
+            return
+        if self.search_options_panel is not None:
+            self.search_options_panel.close()
+        panel.set_options(
+            self.page_dashboard.filter_options(),
+            db_manager.get_active_categories("schedule"),
+        )
+        self._show_day_query_panel(panel)
 
-        panel = self.search_filter_panel
+    def _ensure_day_query_panel(self, panel_mode):
+        from .popups.day_query_options_panel import DayQueryOptionsPanel
+
+        attribute_name = (
+            "search_options_panel"
+            if panel_mode == "search"
+            else "day_filter_panel"
+        )
+        panel = getattr(self, attribute_name)
+        if panel is None:
+            panel = DayQueryOptionsPanel(panel_mode, self)
+            if panel_mode == "search":
+                panel.options_changed.connect(self._handle_search_options_previewed)
+                panel.applied.connect(self._handle_search_options_applied)
+            else:
+                panel.applied.connect(self._handle_filter_options_applied)
+            setattr(self, attribute_name, panel)
+        return panel
+
+    def _handle_search_options_applied(self, options):
+        self.page_dashboard.apply_search_options(options)
+        if self.search_options_panel is not None:
+            self.search_options_panel.close()
+
+    def _handle_search_options_previewed(self, options):
+        self.page_dashboard.apply_search_options(options)
+
+    def _handle_filter_options_applied(self, options):
+        self.page_dashboard.apply_filter_options(options)
+        if self.day_filter_panel is not None:
+            self.day_filter_panel.close()
+
+    def _handle_search_text_changed(self, text):
+        self.page_dashboard.set_search_keyword(text)
+
+    def _hide_day_query_panels(self):
+        for panel in (self.search_options_panel, self.day_filter_panel):
+            if panel is not None and panel.isVisible():
+                panel.close()
+
+    def _show_day_query_panel(self, panel):
+        self._position_day_query_panel(panel)
+        panel.show()
+        panel.raise_()
+        panel.activateWindow()
+
+    def _position_day_query_panel(self, panel):
         window_geometry = self.frameGeometry()
         x = window_geometry.left() - panel.width() - 8
         y = window_geometry.top() + self.header.height() - 8
@@ -872,6 +920,8 @@ class MainWindow(FramelessMainWindow):
                 self.reset_timetable_view_to_now()
                 return
             print("这里以后写排序逻辑")
+        elif action_name == "filter":
+            self.toggle_day_filter_panel()
 
     def _handle_dashboard_context_action(self, action_name):
         if action_name == "add":
@@ -902,7 +952,7 @@ class MainWindow(FramelessMainWindow):
                 apply_24h2_border_fix(int(window.winId()))
             
     def switch_to_add_page(self):
-        self._hide_search_filter_panel()
+        self._hide_day_query_panels()
         current_widget = self.body_stack.currentWidget()
         
         # 只有在日视图（看板）且日期过期时，才禁止添加
@@ -940,7 +990,7 @@ class MainWindow(FramelessMainWindow):
         route_action = ViewRouter.classify_main_view(view_name)
         self._sync_view_selector_state(route_action)
         if route_action != "day":
-            self._hide_search_filter_panel()
+            self._hide_day_query_panels()
 
         # 切换前，先把可能处于打开状态的视图选择菜单隐藏掉
         if hasattr(self, 'page_dashboard'):
@@ -1168,8 +1218,7 @@ class MainWindow(FramelessMainWindow):
             self.axis_board.close()
         if self.weather_board is not None:
             self.weather_board.close()
-        if self.search_filter_panel is not None:
-            self.search_filter_panel.close()
+        self._hide_day_query_panels()
         super().closeEvent(event)
 
     def switch_week_to_suspend(self):
