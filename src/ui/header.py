@@ -93,16 +93,42 @@ class ClickableIcon(QLabel):
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.icon_path = icon_path
         self.icon_size = size
+        self._active = False
+        self._hovered = False
+        self._update_background()
+
+    def set_active(self, active):
+        self._active = bool(active)
+        self._update_background()
+
+    def _update_background(self):
+        if self._active:
+            background = (
+                "rgba(255, 255, 255, 0.36)"
+                if self._hovered
+                else "rgba(255, 255, 255, 0.30)"
+            )
+        elif self._hovered:
+            background = "rgba(255, 255, 255, 0.15)"
+        else:
+            background = "transparent"
+        self.setStyleSheet(
+            f"background-color: {background}; border-radius: 4px;"
+        )
         
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit()
             
     def enterEvent(self, event):
-        self.setStyleSheet("background-color: rgba(255, 255, 255, 0.15); border-radius: 4px;")
+        self._hovered = True
+        self._update_background()
+        super().enterEvent(event)
         
     def leaveEvent(self, event):
-        self.setStyleSheet("background-color: transparent;")
+        self._hovered = False
+        self._update_background()
+        super().leaveEvent(event)
 
 
 class LeadingElideLineEdit(QLineEdit):

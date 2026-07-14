@@ -80,15 +80,24 @@ class DayQueryOptionsPanel(QWidget):
     applied = pyqtSignal(object)
     options_changed = pyqtSignal(object)
 
-    def __init__(self, panel_mode, parent=None):
+    def __init__(self, panel_mode, parent=None, view_scope="day"):
         super().__init__(parent, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint)
         if panel_mode not in {"search", "filter"}:
             raise ValueError(f"unsupported panel mode: {panel_mode}")
         self.panel_mode = panel_mode
+        self.view_scope = (
+            view_scope
+            if view_scope in {"day", "month", "todo"}
+            else "day"
+        )
         self._drag_offset = None
         self._synchronizing_options = False
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setFixedSize(252, 346 if panel_mode == "search" else 270)
+        if self.view_scope == "todo":
+            panel_height = 270 if panel_mode == "search" else 212
+        else:
+            panel_height = 346 if panel_mode == "search" else 270
+        self.setFixedSize(252, panel_height)
         self._setup_ui()
 
     def _setup_ui(self):
@@ -98,7 +107,15 @@ class DayQueryOptionsPanel(QWidget):
 
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
-        self.title_label = QLabel("搜索设置" if self.panel_mode == "search" else "筛选")
+        title_prefix = {
+            "month": "月",
+            "todo": "待办",
+        }.get(self.view_scope, "")
+        self.title_label = QLabel(
+            f"{title_prefix}搜索设置"
+            if self.panel_mode == "search"
+            else f"{title_prefix}筛选"
+        )
         self.title_label.setStyleSheet(
             "color: white; font-family: 'Microsoft YaHei'; "
             "font-size: 15px; font-weight: bold; background: transparent;"
@@ -170,22 +187,27 @@ class DayQueryOptionsPanel(QWidget):
         self.priority_combo = self._create_combo(
             (("不限", None), ("低重要性", 0), ("中重要性", 1), ("高重要性", 2))
         )
-        self.status_combo = self._create_combo(
-            (("不限", None), ("未完成", 0), ("已完成", 1))
-        )
-        self.time_kind_combo = self._create_combo(
-            (("不限", "all"), ("时间段", "interval"), ("DDL / 单时间", "point"))
-        )
+        self.status_combo = None
+        self.time_kind_combo = None
+        if self.view_scope != "todo":
+            self.status_combo = self._create_combo(
+                (("不限", None), ("未完成", 0), ("已完成", 1))
+            )
+            self.time_kind_combo = self._create_combo(
+                (("不限", "all"), ("时间段", "interval"), ("DDL / 单时间", "point"))
+            )
 
         row = 0
         self._add_option_row(option_grid, row, "清单", self.category_combo)
         row += 1
         self._add_option_row(option_grid, row, "重要性", self.priority_combo)
         row += 1
-        self._add_option_row(option_grid, row, "状态", self.status_combo)
-        row += 1
-        self._add_option_row(option_grid, row, "时间形式", self.time_kind_combo)
-        row += 1
+        if self.status_combo is not None:
+            self._add_option_row(option_grid, row, "状态", self.status_combo)
+            row += 1
+        if self.time_kind_combo is not None:
+            self._add_option_row(option_grid, row, "时间形式", self.time_kind_combo)
+            row += 1
 
         self.scope_combo = None
         self.match_combo = None
@@ -209,11 +231,22 @@ class DayQueryOptionsPanel(QWidget):
         if self.panel_mode == "search":
             content_layout.addSpacing(4)
 
-        hint_text = (
-            "搜索条件会即时作用于当前关键词；清空关键词后恢复原筛选结果。"
-            if self.panel_mode == "search"
-            else "筛选条件会即时作用于日界面，搜索清空后会回到这里。"
-        )
+        if self.panel_mode == "search":
+            hint_text = {
+                "month": "搜索条件会即时作用于本月关键词；清空关键词后恢复原筛选结果。",
+                "todo": "搜索条件会即时作用于待办关键词；清空关键词后恢复原筛选结果。",
+            }.get(
+                self.view_scope,
+                "搜索条件会即时作用于当前关键词；清空关键词后恢复原筛选结果。",
+            )
+        else:
+            hint_text = {
+                "month": "筛选条件会即时作用于当前月；搜索清空后会回到这里。",
+                "todo": "筛选条件会即时作用于待办列表；搜索清空后会回到这里。",
+            }.get(
+                self.view_scope,
+                "筛选条件会即时作用于日界面，搜索清空后会回到这里。",
+            )
         hint = QLabel(hint_text)
         hint.setWordWrap(True)
         hint.setStyleSheet(
@@ -314,8 +347,10 @@ class DayQueryOptionsPanel(QWidget):
 
             self._set_combo_data(self.category_combo, options.category_id)
             self._set_combo_data(self.priority_combo, options.priority)
-            self._set_combo_data(self.status_combo, options.status)
-            self._set_combo_data(self.time_kind_combo, options.time_kind)
+            if self.status_combo is not None:
+                self._set_combo_data(self.status_combo, options.status)
+            if self.time_kind_combo is not None:
+                self._set_combo_data(self.time_kind_combo, options.time_kind)
             if self.scope_combo is not None:
                 self._set_combo_data(self.scope_combo, options.search_scope)
             if self.match_combo is not None:
@@ -327,8 +362,16 @@ class DayQueryOptionsPanel(QWidget):
         return ScheduleQueryOptions(
             category_id=self.category_combo.currentData(),
             priority=self.priority_combo.currentData(),
-            status=self.status_combo.currentData(),
-            time_kind=self.time_kind_combo.currentData() or "all",
+            status=(
+                self.status_combo.currentData()
+                if self.status_combo is not None
+                else None
+            ),
+            time_kind=(
+                self.time_kind_combo.currentData() or "all"
+                if self.time_kind_combo is not None
+                else "all"
+            ),
             search_scope=(
                 self.scope_combo.currentData()
                 if self.scope_combo is not None

@@ -5,7 +5,10 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QTimer, QMimeData
 from PyQt6.QtGui import QDrag
 from ..data.database import db_manager
-from ..services.schedule_query_service import ScheduleQueryService
+from ..services.schedule_query_service import (
+    ScheduleQueryOptions,
+    ScheduleQueryService,
+)
 from ..services.schedule_sort_service import ScheduleSortService
 from .schedule_detail_pop import ScheduleDetailPop
 
@@ -316,6 +319,12 @@ class TodoView(QWidget):
         self.drag_pos = None 
         self.open_popups = []
         self.current_todos = []
+        self._todo_source = []
+        self._filter_options = ScheduleQueryOptions()
+        self._search_options = None
+        self._search_keyword = ""
+        self._last_search_scope = "title"
+        self._last_match_mode = "fuzzy"
         
         self._setup_ui()
         
@@ -412,13 +421,97 @@ class TodoView(QWidget):
         self.refresh_data()
         self.req_refresh_all.emit()
 
-    def refresh_data(self):
-        if hasattr(self, 'scroll_content') and getattr(self.scroll_content, 'current_drag_widget', None) is not None:
-            return
+    def filter_options(self):
+        return self._filter_options
+
+    def search_options_for_panel(self):
+        if self._search_options is not None:
+            return self._search_options
+        return self._filter_options.with_search_preferences(
+            self._last_search_scope,
+            self._last_match_mode,
+        )
+
+    def apply_filter_options(self, options):
+        self._filter_options = options
+        self._render_query_results()
+
+    def apply_search_options(self, options):
+        self._search_options = options
+        self._last_search_scope = options.search_scope
+        self._last_match_mode = options.match_mode
+        if self._search_keyword:
+            self._render_query_results()
+
+    def set_search_keyword(self, keyword):
+        normalized_keyword = str(keyword or "").strip()
+        if normalized_keyword:
+            if self._search_options is None:
+                self._search_options = self.search_options_for_panel()
+            self._search_keyword = normalized_keyword
+        else:
+            self._search_keyword = ""
+            self._search_options = None
+        self._render_query_results()
+
+    def search_keyword(self):
+        return self._search_keyword
+
+    def has_active_filter(self):
+        return self._filter_options.has_filter_constraints()
+
+    def has_active_query(self):
+        return bool(self._search_keyword) or self.has_active_filter()
+
+    def _active_query_options(self):
+        if self._search_keyword:
+            return self._search_options or self.search_options_for_panel()
+        return self._filter_options
+
+    def _filtered_todos(self):
+        return ScheduleQueryService.apply_options(
+            self._todo_source,
+            self._active_query_options(),
+            self._search_keyword,
+        )
+
+    def _clear_todo_cards(self):
         while self.list_layout.count() > 1:
             item = self.list_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+
+    def _render_query_results(self):
+        self._clear_todo_cards()
+        visible_todos = ScheduleSortService.sort_for_todo_list(
+            self._filtered_todos()
+        )
+        self.current_todos = visible_todos
+
+        if not visible_todos:
+            self.lbl_empty.setText(
+                "没有符合条件的待办"
+                if self.has_active_query()
+                else "您还没有待办记录，请点击添加"
+            )
+            self.lbl_empty.show()
+            self.scroll_area.hide()
+            return
+
+        self.lbl_empty.hide()
+        self.scroll_area.show()
+        for index, item in enumerate(visible_todos):
+            card = TodoCard(item)
+            card.req_delete.connect(self._remove_card_from_view)
+            card.req_refresh.connect(self.refresh_data)
+            card.req_refresh.connect(self.req_refresh_all.emit)
+            card.req_status.connect(self._handle_status_change)
+            card.req_show_detail.connect(self._show_detail_popup)
+            self.list_layout.insertWidget(index, card)
+
+    def refresh_data(self):
+        if hasattr(self, 'scroll_content') and getattr(self.scroll_content, 'current_drag_widget', None) is not None:
+            return
 
         # 获取所有数据并仅过滤出待办事项
         all_schedules = db_manager.get_all_schedules()
@@ -440,32 +533,13 @@ class TodoView(QWidget):
                         break
         # ==========================================
 
-        dashboard_todos = []
-        for s in all_schedules:
-            if getattr(s, 'status', 0) == 2:
-                continue
-                
-            if ScheduleQueryService.is_todo(s):
-                dashboard_todos.append(s)
-
-
-        dashboard_todos = ScheduleSortService.sort_for_todo_list(dashboard_todos)
-        self.current_todos = dashboard_todos
-
-        if not dashboard_todos:
-            self.lbl_empty.show()
-            self.scroll_area.hide()
-        else:
-            self.lbl_empty.hide()
-            self.scroll_area.show()
-            for index, item in enumerate(dashboard_todos):
-                card = TodoCard(item)
-                card.req_delete.connect(self._remove_card_from_view)
-                card.req_refresh.connect(self.refresh_data)
-                card.req_refresh.connect(self.req_refresh_all.emit) 
-                card.req_status.connect(self._handle_status_change)
-                card.req_show_detail.connect(self._show_detail_popup)
-                self.list_layout.insertWidget(index, card)
+        self._todo_source = [
+            schedule
+            for schedule in all_schedules
+            if getattr(schedule, 'status', 0) != 2
+            and ScheduleQueryService.is_todo(schedule)
+        ]
+        self._render_query_results()
 
     def _show_detail_popup(self, schedule_data, source_view="todo"):
         for p in self.open_popups:

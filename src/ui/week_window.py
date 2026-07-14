@@ -2489,6 +2489,22 @@ class WeekWindow(FramelessMainWindow):
             f"QPushButton:hover {{ background: {self._header_hover_background()}; border-radius: 3px; }}"
         )
 
+    def _toolbar_button_is_active(self, button_key):
+        if button_key == "view":
+            return self.view_selector_container.isVisible()
+        if button_key == "filter":
+            return self._filter_options.has_filter_constraints()
+        return False
+
+    def _sync_filter_button_state(self):
+        button = getattr(self, "toolbar_buttons", {}).get("filter")
+        if button is not None:
+            button.setStyleSheet(
+                self._toolbar_button_style(
+                    active=self._toolbar_button_is_active("filter")
+                )
+            )
+
     def _search_input_style(self):
         foreground = self._header_foreground_color()
         placeholder = "rgba(43, 43, 43, 0.65)" if getattr(self, "_dark_mode", False) else "rgba(255, 255, 255, 0.7)"
@@ -2654,7 +2670,11 @@ class WeekWindow(FramelessMainWindow):
             if icon_name:
                 pixmap = get_colored_icon(icon_name, foreground, 16)
                 button.setIcon(QIcon(pixmap) if not pixmap.isNull() else QIcon(f"assets/icons/{icon_name}"))
-            button.setStyleSheet(self._toolbar_button_style(active=(key == "view" and self.view_selector_container.isVisible())))
+            button.setStyleSheet(
+                self._toolbar_button_style(
+                    active=self._toolbar_button_is_active(key)
+                )
+            )
 
         if hasattr(self, "search_box"):
             self.search_box.setStyleSheet(self._search_input_style())
@@ -2694,7 +2714,11 @@ class WeekWindow(FramelessMainWindow):
             button.removeEventFilter(old_filter)
         pixmap = get_colored_icon(icon_name, self._header_foreground_color(), 16)
         button.setIcon(QIcon(pixmap) if not pixmap.isNull() else QIcon(f"assets/icons/{icon_name}"))
-        button.setStyleSheet(self._toolbar_button_style(active=(button_key == "view" and self.view_selector_container.isVisible())))
+        button.setStyleSheet(
+            self._toolbar_button_style(
+                active=self._toolbar_button_is_active(button_key)
+            )
+        )
         button._tooltip_filter = ToolTipFilter(tooltip, button)
         button.installEventFilter(button._tooltip_filter)
 
@@ -3131,6 +3155,7 @@ class WeekWindow(FramelessMainWindow):
 
     def apply_filter_options(self, options):
         self._filter_options = options
+        self._sync_filter_button_state()
         self.refresh_week_data()
 
     def apply_search_options(self, options):

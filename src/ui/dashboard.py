@@ -2041,6 +2041,9 @@ class DashboardView(QWidget):
             self._search_options = None
         self._render_query_results()
 
+    def search_keyword(self):
+        return self._search_keyword
+
     def has_active_filter(self):
         return self._filter_options.has_filter_constraints()
 

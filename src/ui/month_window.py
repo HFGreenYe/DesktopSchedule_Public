@@ -14,6 +14,10 @@ import datetime
 
 from ..config import AppConfig
 from ..data.database import db_manager
+from ..services.schedule_query_service import (
+    ScheduleQueryOptions,
+    ScheduleQueryService,
+)
 from ..utils.win_api import apply_24h2_border_fix
 from ..utils.styles import StyleManager
 from ..utils.timetable_preferences import get_timetable_preferences
@@ -1228,6 +1232,14 @@ class MonthWindow(FramelessMainWindow):
         self.schedule_marker_cache = {}
         self.schedule_marker_count_cache = {}
         self.hover_schedule_cache = {}
+        self._month_schedule_source = []
+        self._filter_options = ScheduleQueryOptions()
+        self._search_options = None
+        self._search_keyword = ""
+        self._last_search_scope = "title"
+        self._last_match_mode = "fuzzy"
+        self._search_options_panel = None
+        self._filter_options_panel = None
         self.open_day_panels = []
         self.schedule_display_mode = get_timetable_preferences().get(
             "display_mode",
@@ -1403,6 +1415,7 @@ class MonthWindow(FramelessMainWindow):
         icons_row.setSpacing(6)
         icons_row.setAlignment(Qt.AlignmentFlag.AlignLeft)
         icon_names = ["skin.svg", "view.svg", "add.svg", "sort.svg", "filter.svg"]
+        self.toolbar_buttons = {}
         for icon in icon_names:
             btn = QPushButton()
             pixmap = get_colored_icon(icon, "#FFFFFF", 16)
@@ -1410,7 +1423,9 @@ class MonthWindow(FramelessMainWindow):
             btn.setIconSize(QSize(16, 16))
             btn.setFixedSize(24, 24)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setStyleSheet("QPushButton { background: transparent; border: none; } QPushButton:hover { background: rgba(255,255,255,0.2); border-radius: 4px; }")
+            button_key = icon.split(".")[0]
+            self.toolbar_buttons[button_key] = btn
+            btn.setStyleSheet(self._toolbar_button_style())
             
             # 绑定视图按钮事件
             if icon == "view.svg":
@@ -1418,6 +1433,8 @@ class MonthWindow(FramelessMainWindow):
                 self.btn_view_toggle.clicked.connect(self.toggle_view_selector)
             elif icon == "add.svg":
                 btn.clicked.connect(self._on_add_clicked)
+            elif icon == "filter.svg":
+                btn.clicked.connect(self.toggle_filter_options_panel)
                 
             icons_row.addWidget(btn)
             
@@ -1470,10 +1487,30 @@ class MonthWindow(FramelessMainWindow):
             icon_size=10,
             canvas_size=16,
         )
-        self.search_box.addAction(
+        self.search_action = self.search_box.addAction(
             QIcon(search_pixmap) if not search_pixmap.isNull() else QIcon("assets/icons/search.svg"),
             QLineEdit.ActionPosition.LeadingPosition,
         )
+        self.search_action.setToolTip("月搜索设置")
+        self.search_action.triggered.connect(
+            lambda _checked=False: self.toggle_search_options_panel()
+        )
+        clear_pixmap = get_padded_colored_icon(
+            "search_clear.svg",
+            "#FFFFFF",
+            icon_size=8,
+            canvas_size=14,
+        )
+        self.search_clear_action = self.search_box.addAction(
+            QIcon(clear_pixmap)
+            if not clear_pixmap.isNull()
+            else QIcon("assets/icons/search_clear.svg"),
+            QLineEdit.ActionPosition.TrailingPosition,
+        )
+        self.search_clear_action.setToolTip("清空搜索")
+        self.search_clear_action.setVisible(False)
+        self.search_clear_action.triggered.connect(self.search_box.clear)
+        self.search_box.textChanged.connect(self._on_search_text_changed)
         self.search_box.setStyleSheet(StyleManager.get_search_input_style() + " QLineEdit { font-size: 11px; padding: 0px 1px; border-radius: 10px; }")
         
         bottom_tools_vbox.addWidget(self.search_box)
@@ -1613,23 +1650,202 @@ class MonthWindow(FramelessMainWindow):
         content_layout.addWidget(right_panel, stretch=1)
         main_layout.addWidget(content_area, stretch=1)
 
-    def _build_schedule_marker_cache(self):
+    @staticmethod
+    def _schedule_target_date(schedule):
+        if getattr(schedule, "start_time", None):
+            return schedule.start_time.date()
+        if getattr(schedule, "end_time", None):
+            return schedule.end_time.date()
+        return None
+
+    def _load_month_schedule_source(self):
+        visible_year = self.current_date.year()
+        visible_month = self.current_date.month()
+        self._month_schedule_source = [
+            schedule
+            for schedule in db_manager.get_all_schedules()
+            if getattr(schedule, "status", 0) != 2
+            and ScheduleQueryService.is_schedule(schedule)
+            and (
+                (target_date := self._schedule_target_date(schedule))
+                is not None
+            )
+            and target_date.year == visible_year
+            and target_date.month == visible_month
+        ]
+
+    def filter_options(self):
+        return self._filter_options
+
+    @staticmethod
+    def _toolbar_button_style(active=False):
+        background = "rgba(255,255,255,0.30)" if active else "transparent"
+        return (
+            "QPushButton { "
+            f"background: {background}; border: none; border-radius: 4px; "
+            "} "
+            "QPushButton:hover { "
+            "background: rgba(255,255,255,0.20); border-radius: 4px; "
+            "}"
+        )
+
+    def _sync_filter_button_state(self):
+        button = getattr(self, "toolbar_buttons", {}).get("filter")
+        if button is not None:
+            button.setStyleSheet(
+                self._toolbar_button_style(
+                    active=self._filter_options.has_filter_constraints()
+                )
+            )
+
+    def search_options_for_panel(self):
+        if self._search_options is not None:
+            return self._search_options
+        return self._filter_options.with_search_preferences(
+            self._last_search_scope,
+            self._last_match_mode,
+        )
+
+    def apply_filter_options(self, options):
+        self._filter_options = options
+        self._sync_filter_button_state()
+        self._refresh_schedule_marker_cache(
+            reload_source=False,
+            refresh_panels=True,
+        )
+
+    def apply_search_options(self, options):
+        self._search_options = options
+        self._last_search_scope = options.search_scope
+        self._last_match_mode = options.match_mode
+        if self._search_keyword:
+            self._refresh_schedule_marker_cache(
+                reload_source=False,
+                refresh_panels=True,
+            )
+
+    def set_search_keyword(self, keyword):
+        normalized_keyword = str(keyword or "").strip()
+        if normalized_keyword:
+            if self._search_options is None:
+                self._search_options = self.search_options_for_panel()
+            self._search_keyword = normalized_keyword
+        else:
+            self._search_keyword = ""
+            self._search_options = None
+        self._refresh_schedule_marker_cache(
+            reload_source=False,
+            refresh_panels=True,
+        )
+
+    def _active_query_options(self):
+        if self._search_keyword:
+            return self._search_options or self.search_options_for_panel()
+        return self._filter_options
+
+    def _filtered_month_schedules(self):
+        return ScheduleQueryService.apply_options(
+            self._month_schedule_source,
+            self._active_query_options(),
+            self._search_keyword,
+        )
+
+    def _on_search_text_changed(self, text):
+        self.search_clear_action.setVisible(bool(text))
+        self.set_search_keyword(text)
+
+    def toggle_search_options_panel(self):
+        panel = self._ensure_month_query_panel("search")
+        if panel.isVisible():
+            panel.close()
+            return
+        if self._filter_options_panel is not None:
+            self._filter_options_panel.close()
+        panel.set_options(
+            self.search_options_for_panel(),
+            db_manager.get_active_categories("schedule"),
+        )
+        self._show_month_query_panel(panel)
+
+    def toggle_filter_options_panel(self):
+        panel = self._ensure_month_query_panel("filter")
+        if panel.isVisible():
+            panel.close()
+            return
+        if self._search_options_panel is not None:
+            self._search_options_panel.close()
+        panel.set_options(
+            self.filter_options(),
+            db_manager.get_active_categories("schedule"),
+        )
+        self._show_month_query_panel(panel)
+
+    def _ensure_month_query_panel(self, panel_mode):
+        from .popups.day_query_options_panel import DayQueryOptionsPanel
+
+        attribute_name = (
+            "_search_options_panel"
+            if panel_mode == "search"
+            else "_filter_options_panel"
+        )
+        panel = getattr(self, attribute_name)
+        if panel is None:
+            panel = DayQueryOptionsPanel(
+                panel_mode,
+                self,
+                view_scope="month",
+            )
+            if panel_mode == "search":
+                panel.options_changed.connect(self.apply_search_options)
+                panel.applied.connect(self._handle_search_options_applied)
+            else:
+                panel.options_changed.connect(self.apply_filter_options)
+                panel.applied.connect(self._handle_filter_options_applied)
+            setattr(self, attribute_name, panel)
+        return panel
+
+    def _handle_search_options_applied(self, options):
+        self.apply_search_options(options)
+        if self._search_options_panel is not None:
+            self._search_options_panel.close()
+
+    def _handle_filter_options_applied(self, options):
+        self.apply_filter_options(options)
+        if self._filter_options_panel is not None:
+            self._filter_options_panel.close()
+
+    def _show_month_query_panel(self, panel):
+        self._position_month_query_panel(panel)
+        panel.show()
+        panel.raise_()
+        panel.activateWindow()
+
+    def _position_month_query_panel(self, panel):
+        window_geometry = self.frameGeometry()
+        x = window_geometry.left() - panel.width() - 8
+        y = window_geometry.top() + 34
+        screen = QApplication.screenAt(window_geometry.center()) or QApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            if x < available.left():
+                x = window_geometry.left() + 8
+            x = max(available.left(), min(x, available.right() - panel.width() + 1))
+            y = max(available.top(), min(y, available.bottom() - panel.height() + 1))
+        panel.move(x, y)
+
+    def _hide_month_query_panels(self):
+        for panel in (self._search_options_panel, self._filter_options_panel):
+            if panel is not None and panel.isVisible():
+                panel.close()
+
+    def _build_schedule_marker_cache(self, schedules):
         marker_cache = {}
         marker_count_cache = {}
         today = datetime.date.today()
         grouped = {}
 
-        for schedule in db_manager.get_all_schedules():
-            if getattr(schedule, "status", 0) == 2:
-                continue
-            if getattr(schedule, "item_type", None) != "schedule":
-                continue
-
-            target_date = (
-                schedule.start_time.date()
-                if schedule.start_time
-                else (schedule.end_time.date() if schedule.end_time else None)
-            )
+        for schedule in schedules:
+            target_date = self._schedule_target_date(schedule)
             if target_date is None:
                 continue
 
@@ -1665,20 +1881,11 @@ class MonthWindow(FramelessMainWindow):
 
         return marker_cache, marker_count_cache
 
-    def _build_hover_schedule_cache(self):
+    def _build_hover_schedule_cache(self, schedules):
         hover_schedule_cache = {}
 
-        for schedule in db_manager.get_all_schedules():
-            if getattr(schedule, "status", 0) == 2:
-                continue
-            if getattr(schedule, "item_type", None) != "schedule":
-                continue
-
-            target_date = (
-                schedule.start_time.date()
-                if schedule.start_time
-                else (schedule.end_time.date() if schedule.end_time else None)
-            )
+        for schedule in schedules:
+            target_date = self._schedule_target_date(schedule)
             if target_date is None:
                 continue
 
@@ -1698,9 +1905,21 @@ class MonthWindow(FramelessMainWindow):
 
         return hover_schedule_cache
 
-    def _refresh_schedule_marker_cache(self):
-        self.schedule_marker_cache, self.schedule_marker_count_cache = self._build_schedule_marker_cache()
-        self.hover_schedule_cache = self._build_hover_schedule_cache()
+    def _refresh_schedule_marker_cache(
+        self,
+        reload_source=True,
+        refresh_panels=False,
+    ):
+        if reload_source:
+            self._load_month_schedule_source()
+        filtered_schedules = self._filtered_month_schedules()
+        (
+            self.schedule_marker_cache,
+            self.schedule_marker_count_cache,
+        ) = self._build_schedule_marker_cache(filtered_schedules)
+        self.hover_schedule_cache = self._build_hover_schedule_cache(
+            filtered_schedules
+        )
         self.cell_delegate.set_calendar_state(
             self.current_date.year(),
             self.current_date.month(),
@@ -1711,6 +1930,8 @@ class MonthWindow(FramelessMainWindow):
         )
         self._hide_hover_preview()
         self.calendar.updateCells()
+        if refresh_panels:
+            self.refresh_open_day_panels()
 
     def _start_clock(self):
         self.timer = QTimer(self)
@@ -1733,6 +1954,7 @@ class MonthWindow(FramelessMainWindow):
 
     def _on_calendar_page_changed(self, year, month):
         """当右侧日历通过滚轮等原生方式翻页时，同步更新左侧UI和内部状态"""
+        self.close_day_panels()
         # 1. 更新内部维护的时间状态 (固定到该月1号防止日期溢出)
         self.current_date = QDate(year, month, 1)
         # 2. 同步更新左侧月份标签
@@ -1998,15 +2220,18 @@ class MonthWindow(FramelessMainWindow):
 
     def hideEvent(self, event):
         self._hide_hover_preview()
+        self._hide_month_query_panels()
         super().hideEvent(event)
 
     def closeEvent(self, event):
         self.close_day_panels()
         self._hide_hover_preview()
+        self._hide_month_query_panels()
         super().closeEvent(event)
 
     def _on_window_drag_started(self):
         self._hide_hover_preview()
+        self._hide_month_query_panels()
         self.close_view_selector()
 
     def update_weather_ui(self, data):
@@ -2056,6 +2281,7 @@ class MonthWindow(FramelessMainWindow):
             self.open_view_selector()
 
     def open_view_selector(self):
+        self._hide_month_query_panels()
         self.search_box.hide() # 展开时隐藏搜索框
         self.view_selector_container.show()
         if hasattr(self, 'btn_view_toggle'):
@@ -2088,6 +2314,7 @@ class MonthWindow(FramelessMainWindow):
         return self.calendar.selectedDate()
 
     def _on_add_clicked(self):
+        self._hide_month_query_panels()
         # 1. 验证日期是否过期
         today = QDate.currentDate()
         target_date = self._get_add_target_date()

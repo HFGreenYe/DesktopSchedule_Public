@@ -48,6 +48,8 @@ class MainWindow(FramelessMainWindow):
         self.weather_board = None
         self.search_options_panel = None
         self.day_filter_panel = None
+        self.todo_search_options_panel = None
+        self.todo_filter_panel = None
         self._vertical_resize_margin = 8
         self._vertical_resize_edge = None
         self._vertical_resize_start_pos = QPoint()
@@ -294,40 +296,44 @@ class MainWindow(FramelessMainWindow):
         self.on_calendar_date_picked(datetime.now().date())
         self.page_dashboard.reset_timetable_to_current_time()
 
-    def _can_open_day_query_panel(self, panel_name):
-        if self.body_stack.currentWidget() != self.page_dashboard:
-            self.show_toast(f"{panel_name}先支持日界面")
-            return False
-        return True
-
     def toggle_search_options_panel(self):
-        if not self._can_open_day_query_panel("搜索设置"):
+        current_widget = self.body_stack.currentWidget()
+        if current_widget == self.page_dashboard:
+            panel = self._ensure_day_query_panel("search")
+            options = self.page_dashboard.search_options_for_panel()
+            categories = db_manager.get_active_categories("schedule")
+        elif current_widget == self.page_todo:
+            panel = self._ensure_todo_query_panel("search")
+            options = self.page_todo.search_options_for_panel()
+            categories = db_manager.get_active_categories("todo")
+        else:
+            self.show_toast("搜索设置仅支持日界面和待办界面")
             return
-        panel = self._ensure_day_query_panel("search")
         if panel.isVisible():
             panel.close()
             return
-        if self.day_filter_panel is not None:
-            self.day_filter_panel.close()
-        panel.set_options(
-            self.page_dashboard.search_options_for_panel(),
-            db_manager.get_active_categories("schedule"),
-        )
+        self._hide_day_query_panels(except_panel=panel)
+        panel.set_options(options, categories)
         self._show_day_query_panel(panel)
 
     def toggle_day_filter_panel(self):
-        if not self._can_open_day_query_panel("筛选"):
+        current_widget = self.body_stack.currentWidget()
+        if current_widget == self.page_dashboard:
+            panel = self._ensure_day_query_panel("filter")
+            options = self.page_dashboard.filter_options()
+            categories = db_manager.get_active_categories("schedule")
+        elif current_widget == self.page_todo:
+            panel = self._ensure_todo_query_panel("filter")
+            options = self.page_todo.filter_options()
+            categories = db_manager.get_active_categories("todo")
+        else:
+            self.show_toast("筛选仅支持日界面和待办界面")
             return
-        panel = self._ensure_day_query_panel("filter")
         if panel.isVisible():
             panel.close()
             return
-        if self.search_options_panel is not None:
-            self.search_options_panel.close()
-        panel.set_options(
-            self.page_dashboard.filter_options(),
-            db_manager.get_active_categories("schedule"),
-        )
+        self._hide_day_query_panels(except_panel=panel)
+        panel.set_options(options, categories)
         self._show_day_query_panel(panel)
 
     def _ensure_day_query_panel(self, panel_mode):
@@ -350,6 +356,38 @@ class MainWindow(FramelessMainWindow):
             setattr(self, attribute_name, panel)
         return panel
 
+    def _ensure_todo_query_panel(self, panel_mode):
+        from .popups.day_query_options_panel import DayQueryOptionsPanel
+
+        attribute_name = (
+            "todo_search_options_panel"
+            if panel_mode == "search"
+            else "todo_filter_panel"
+        )
+        panel = getattr(self, attribute_name)
+        if panel is None:
+            panel = DayQueryOptionsPanel(
+                panel_mode,
+                self,
+                view_scope="todo",
+            )
+            if panel_mode == "search":
+                panel.options_changed.connect(
+                    self._handle_todo_search_options_previewed
+                )
+                panel.applied.connect(
+                    self._handle_todo_search_options_applied
+                )
+            else:
+                panel.options_changed.connect(
+                    self._handle_todo_filter_options_previewed
+                )
+                panel.applied.connect(
+                    self._handle_todo_filter_options_applied
+                )
+            setattr(self, attribute_name, panel)
+        return panel
+
     def _handle_search_options_applied(self, options):
         self.page_dashboard.apply_search_options(options)
         if self.search_options_panel is not None:
@@ -360,19 +398,89 @@ class MainWindow(FramelessMainWindow):
 
     def _handle_filter_options_applied(self, options):
         self.page_dashboard.apply_filter_options(options)
+        self._sync_primary_filter_indicator()
         if self.day_filter_panel is not None:
             self.day_filter_panel.close()
 
     def _handle_filter_options_previewed(self, options):
         self.page_dashboard.apply_filter_options(options)
+        self._sync_primary_filter_indicator()
+
+    def _sync_day_filter_indicator(self):
+        self._sync_primary_filter_indicator()
+
+    def _handle_todo_search_options_applied(self, options):
+        self.page_todo.apply_search_options(options)
+        if self.todo_search_options_panel is not None:
+            self.todo_search_options_panel.close()
+
+    def _handle_todo_search_options_previewed(self, options):
+        self.page_todo.apply_search_options(options)
+
+    def _handle_todo_filter_options_applied(self, options):
+        self.page_todo.apply_filter_options(options)
+        self._sync_primary_filter_indicator()
+        if self.todo_filter_panel is not None:
+            self.todo_filter_panel.close()
+
+    def _handle_todo_filter_options_previewed(self, options):
+        self.page_todo.apply_filter_options(options)
+        self._sync_primary_filter_indicator()
+
+    def _sync_primary_filter_indicator(self):
+        button = getattr(self.header, "toolbar_buttons", {}).get("filter")
+        if button is None or not hasattr(button, "set_active"):
+            return
+        current_widget = self.body_stack.currentWidget()
+        if current_widget == self.page_todo:
+            active = self.page_todo.has_active_filter()
+        elif current_widget == self.page_dashboard:
+            active = self.page_dashboard.has_active_filter()
+        else:
+            active = False
+        button.set_active(active)
 
     def _handle_search_text_changed(self, text):
-        self.page_dashboard.set_search_keyword(text)
+        current_widget = self.body_stack.currentWidget()
+        if current_widget == self.page_todo:
+            self.page_todo.set_search_keyword(text)
+        elif current_widget == self.page_dashboard:
+            self.page_dashboard.set_search_keyword(text)
 
-    def _hide_day_query_panels(self):
-        for panel in (self.search_options_panel, self.day_filter_panel):
-            if panel is not None and panel.isVisible():
+    def _hide_day_query_panels(self, except_panel=None):
+        for panel in (
+            self.search_options_panel,
+            self.day_filter_panel,
+            self.todo_search_options_panel,
+            self.todo_filter_panel,
+        ):
+            if (
+                panel is not None
+                and panel is not except_panel
+                and panel.isVisible()
+            ):
                 panel.close()
+
+    def _sync_primary_query_header(self):
+        current_widget = self.body_stack.currentWidget()
+        if current_widget == self.page_todo:
+            keyword = self.page_todo.search_keyword()
+            placeholder = "搜索待办..."
+        elif current_widget == self.page_dashboard:
+            keyword = self.page_dashboard.search_keyword()
+            placeholder = "搜索日程..."
+        else:
+            return
+
+        search_box = self.header.search
+        previous_block_state = search_box.blockSignals(True)
+        search_box.setPlaceholderText(placeholder)
+        search_box.setText(keyword)
+        search_box.blockSignals(previous_block_state)
+        self.header.search_clear_action.setVisible(bool(keyword))
+        if hasattr(search_box, "_refresh_elided_text"):
+            search_box._refresh_elided_text()
+        self._sync_primary_filter_indicator()
 
     def _show_day_query_panel(self, panel):
         self._position_day_query_panel(panel)
@@ -988,7 +1096,7 @@ class MainWindow(FramelessMainWindow):
     def switch_view(self, view_name):
         route_action = ViewRouter.classify_main_view(view_name)
         self._sync_view_selector_state(route_action)
-        if route_action != "day":
+        if route_action in {"day", "week", "month", "todo"}:
             self._hide_day_query_panels()
 
         # 切换前，先把可能处于打开状态的视图选择菜单隐藏掉
@@ -1043,11 +1151,13 @@ class MainWindow(FramelessMainWindow):
             # 切换到待办视图
             self.body_stack.setCurrentWidget(self.page_todo)
             self.page_todo.refresh_data() # 切过去的时候刷新一下数据
+            self._sync_primary_query_header()
             
         elif route_action == "day":
             # 切换回日视图 (主面板)
             self.body_stack.setCurrentWidget(self.page_dashboard)
             self.page_dashboard.refresh_data()
+            self._sync_primary_query_header()
             
         elif route_action == "priority":
 
@@ -1083,6 +1193,7 @@ class MainWindow(FramelessMainWindow):
         self.body_stack.setCurrentWidget(self.page_dashboard) # 确保路由回到看板
         self._sync_view_selector_state("day")
         self.page_dashboard.refresh_data()
+        self._sync_primary_query_header()
         self.show()
 
     def restore_from_week_view(self):
@@ -1097,6 +1208,7 @@ class MainWindow(FramelessMainWindow):
         self.body_stack.setCurrentWidget(self.page_dashboard) # 确保路由回到看板
         self._sync_view_selector_state("day")
         self.page_dashboard.refresh_data()
+        self._sync_primary_query_header()
         self.show()
 
     def show_toast(self, message):
