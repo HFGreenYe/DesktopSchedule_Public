@@ -16,9 +16,10 @@ from ..config import AppConfig
 from ..data.database import db_manager
 from ..utils.win_api import apply_24h2_border_fix
 from ..utils.styles import StyleManager
+from ..utils.timetable_preferences import get_timetable_preferences
 from ..utils.window_preferences import get_primary_pin_preference
 from .header import ToolTipFilter
-from .components import IOSSwitch, get_colored_icon, SharedMoreMenu
+from .components import IOSSwitch, get_colored_icon, get_padded_colored_icon, SharedMoreMenu
 from .common.action_context_menu import ActionContextMenu
 from .common.weather_icon_label import WeatherIconLabel
 from .utils.window_drag_controller import WindowDragController
@@ -1200,6 +1201,14 @@ class MonthWindow(FramelessMainWindow):
     schedule_detail_requested = pyqtSignal(object, object)
     schedule_display_mode_requested = pyqtSignal(str)
 
+    def apply_schedule_display_mode(self, mode_id):
+        if mode_id not in {"card", "timetable"}:
+            return
+        self.schedule_display_mode = mode_id
+        for panel in list(getattr(self, "open_day_panels", [])):
+            if panel is not None and hasattr(panel, "set_schedule_display_mode"):
+                panel.set_schedule_display_mode(mode_id)
+
     def set_schedule_display_mode(self, mode_id):
         self.schedule_display_mode_requested.emit(mode_id)
 
@@ -1220,6 +1229,10 @@ class MonthWindow(FramelessMainWindow):
         self.schedule_marker_count_cache = {}
         self.hover_schedule_cache = {}
         self.open_day_panels = []
+        self.schedule_display_mode = get_timetable_preferences().get(
+            "display_mode",
+            "card",
+        )
         self.hovered_date = None
         self.hover_preview_popup = None
         self.context_menu_date = None
@@ -1451,15 +1464,17 @@ class MonthWindow(FramelessMainWindow):
         self.search_box.setPlaceholderText("搜索...")
         self.search_box.setFixedHeight(20)
         
-        small_pixmap = get_colored_icon("search.svg", "#FFFFFF", 10)
-        canvas = QPixmap(16, 16)
-        canvas.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(canvas)
-        painter.drawPixmap(3, 3, small_pixmap)
-        painter.end()
-        
-        self.search_box.addAction(QIcon(canvas), QLineEdit.ActionPosition.LeadingPosition)
-        self.search_box.setStyleSheet(StyleManager.get_search_input_style() + " QLineEdit { font-size: 11px; padding: 0px 3px; border-radius: 10px; }")
+        search_pixmap = get_padded_colored_icon(
+            "search.svg",
+            "#FFFFFF",
+            icon_size=10,
+            canvas_size=16,
+        )
+        self.search_box.addAction(
+            QIcon(search_pixmap) if not search_pixmap.isNull() else QIcon("assets/icons/search.svg"),
+            QLineEdit.ActionPosition.LeadingPosition,
+        )
+        self.search_box.setStyleSheet(StyleManager.get_search_input_style() + " QLineEdit { font-size: 11px; padding: 0px 1px; border-radius: 10px; }")
         
         bottom_tools_vbox.addWidget(self.search_box)
 
@@ -1786,6 +1801,7 @@ class MonthWindow(FramelessMainWindow):
 
         schedules = self.hover_schedule_cache.get(qdate.toPyDate(), [])
         panel = MonthDayPanel(qdate, schedules)
+        panel.set_schedule_display_mode(self.schedule_display_mode)
         panel.closed.connect(self._remove_day_panel)
         panel.schedule_double_clicked.connect(self.schedule_detail_requested.emit)
         panel.schedule_status_requested.connect(self._change_schedule_status_from_day_panel)

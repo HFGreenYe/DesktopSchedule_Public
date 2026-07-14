@@ -779,11 +779,26 @@ class TimetablePlaceholderFrame(QFrame):
             start_time, end_time = end_time, start_time
         return start_time, end_time
 
+    @staticmethod
+    def _point_time_for_edit(schedule):
+        start_time = getattr(schedule, "start_time", None)
+        end_time = getattr(schedule, "end_time", None)
+        if start_time is not None and end_time is not None and start_time != end_time:
+            return None
+        point_time = end_time if end_time is not None else start_time
+        if point_time is None:
+            return None
+        return point_time
+
     def _time_edit_action_for_region(self, region, position):
-        if region is None or region.get("kind") != "interval":
+        if region is None:
             return None
         schedule = region.get("schedule")
         if not self._is_schedule_selected(schedule):
+            return None
+        if region.get("kind") == "ddl":
+            return "move_point" if self._point_time_for_edit(schedule) is not None else None
+        if region.get("kind") != "interval":
             return None
         start_time, end_time = self._interval_times_for_edit(schedule)
         if start_time is None or end_time is None:
@@ -799,7 +814,7 @@ class TimetablePlaceholderFrame(QFrame):
     def _set_cursor_for_time_edit_action(self, action):
         if action in {"resize_start", "resize_end"}:
             self.setCursor(Qt.CursorShape.SizeVerCursor)
-        elif action == "move":
+        elif action in {"move", "move_point"}:
             self.setCursor(Qt.CursorShape.OpenHandCursor)
         else:
             self.unsetCursor()
@@ -847,10 +862,13 @@ class TimetablePlaceholderFrame(QFrame):
             "resize_start": f"开始 {self._format_time_edit_point(start_time)}",
             "resize_end": f"结束 {self._format_time_edit_point(end_time)}",
             "move": "移动日程",
+            "move_point": f"移动到 {self._format_time_edit_point(end_time)}",
         }.get(edit_state.get("action"), "调整日程")
-        self._time_edit_hint.setText(
-            f"{action_text}\n{self._format_time_edit_range(start_time, end_time)}"
-        )
+        if edit_state.get("action") == "move_point":
+            detail_text = end_time.strftime("%H:%M")
+        else:
+            detail_text = self._format_time_edit_range(start_time, end_time)
+        self._time_edit_hint.setText(f"{action_text}\n{detail_text}")
         self._time_edit_hint.adjustSize()
 
         global_pos = self.mapToGlobal(position.toPoint())
@@ -877,20 +895,37 @@ class TimetablePlaceholderFrame(QFrame):
         action = self._time_edit_action_for_region(region, position)
         if action is None:
             return None
-        start_time, end_time = self._interval_times_for_edit(region["schedule"])
-        if start_time is None or end_time is None:
-            return None
+        schedule = region["schedule"]
+        start_time = getattr(schedule, "start_time", None)
+        end_time = getattr(schedule, "end_time", None)
+        point_time = None
+        if action == "move_point":
+            point_time = self._point_time_for_edit(schedule)
+            if point_time is None:
+                return None
+        else:
+            interval_start, interval_end = self._interval_times_for_edit(schedule)
+            if interval_start is None or interval_end is None:
+                return None
+            start_time = interval_start
+            end_time = interval_end
         rect = region["rect"]
         return {
-            "schedule": region["schedule"],
+            "schedule": schedule,
             "action": action,
             "press_pos": QPointF(position),
             "locked_left": float(rect.left()),
             "locked_width": float(rect.width()),
             "original_start": start_time,
             "original_end": end_time,
+            "original_point": point_time,
             "preview_start": start_time,
             "preview_end": end_time,
+            "preview_point": point_time,
+            "update_start_time": start_time is not None and (
+                action != "move_point" or end_time is None or start_time == end_time
+            ),
+            "update_end_time": end_time is not None,
             "visible_start_minutes": self.visible_start_minutes,
             "changed": False,
         }
@@ -924,6 +959,24 @@ class TimetablePlaceholderFrame(QFrame):
             delta = datetime.timedelta(minutes=delta_minutes)
             next_start = original_start + delta
             next_end = original_end + delta
+        elif edit_state["action"] == "move_point":
+            delta = datetime.timedelta(minutes=delta_minutes)
+            next_point = edit_state["original_point"] + delta
+            next_start = next_point if edit_state["update_start_time"] else original_start
+            next_end = next_point if edit_state["update_end_time"] else original_end
+            self._show_time_edit_hint(edit_state, next_point, next_point, position)
+            if next_point == edit_state["preview_point"]:
+                return
+
+            if edit_state["update_start_time"]:
+                schedule.start_time = next_point
+            if edit_state["update_end_time"]:
+                schedule.end_time = next_point
+            edit_state["preview_point"] = next_point
+            edit_state["preview_start"] = next_start
+            edit_state["preview_end"] = next_end
+            edit_state["changed"] = True
+            return
         elif edit_state["action"] == "resize_start":
             next_start = original_start + datetime.timedelta(minutes=delta_minutes)
             next_end = original_end
@@ -1391,6 +1444,9 @@ class TimetablePlaceholderFrame(QFrame):
                     segment_width + segment_gap
                 )
                 line_width = segment_width
+                if self._is_active_time_edit_schedule(ddl_point["schedule"]):
+                    line_x = self._active_time_edit["locked_left"]
+                    line_width = self._active_time_edit["locked_width"]
                 line_rect = QRectF(
                     line_x,
                     line_y - self.DDL_LINE_HEIGHT / 2,

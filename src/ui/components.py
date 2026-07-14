@@ -1031,3 +1031,40 @@ def get_colored_icon(icon_name, color, target_size=12):
     pixmap = QPixmap.fromImage(image)
     pixmap.setDevicePixelRatio(scale_ratio)
     return pixmap
+
+
+def get_padded_colored_icon(icon_name, color, icon_size=10, canvas_size=16):
+    import os
+    from PyQt6.QtCore import QRectF, Qt
+    from PyQt6.QtGui import QColor, QImage, QPainter, QPixmap
+    from PyQt6.QtSvg import QSvgRenderer
+
+    path = f"assets/icons/{icon_name}"
+    if not os.path.exists(path):
+        return QPixmap()
+
+    renderer = QSvgRenderer(path)
+    if not renderer.isValid():
+        return QPixmap()
+
+    scale_ratio = 4.0
+    high_res_canvas = int(canvas_size * scale_ratio)
+    high_res_icon = int(icon_size * scale_ratio)
+    offset = (high_res_canvas - high_res_icon) / 2
+
+    image = QImage(high_res_canvas, high_res_canvas, QImage.Format.Format_ARGB32)
+    image.fill(Qt.GlobalColor.transparent)
+
+    painter = QPainter(image)
+    renderer.render(painter, QRectF(offset, offset, high_res_icon, high_res_icon))
+    painter.end()
+
+    painter = QPainter(image)
+    painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+    color_obj = QColor(color) if isinstance(color, str) else color
+    painter.fillRect(image.rect(), color_obj)
+    painter.end()
+
+    pixmap = QPixmap.fromImage(image)
+    pixmap.setDevicePixelRatio(scale_ratio)
+    return pixmap

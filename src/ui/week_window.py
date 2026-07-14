@@ -5,8 +5,8 @@ import random
 import time
 from types import SimpleNamespace
 
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-                             QPushButton, QFrame, QToolButton, QLineEdit, QSizePolicy, QStackedWidget, QScrollArea)
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+                             QPushButton, QFrame, QToolButton, QLineEdit, QSizePolicy, QStackedWidget, QScrollArea, QApplication)
 from PyQt6.QtCore import Qt, pyqtSignal, QDate, QTime, QTimer, QPointF, QRectF, QSize, QSettings
 from PyQt6.QtGui import QPainter, QPainterPath, QColor, QBrush, QLinearGradient, QIcon, QPixmap, QCursor, QPen, QFont, QFontMetrics, QImage
 from PyQt6.QtSvg import QSvgRenderer
@@ -19,6 +19,7 @@ from ..utils.win_api import apply_24h2_border_fix
 from ..utils.styles import StyleManager
 from ..utils.timetable_preferences import (
     get_timetable_preferences,
+    set_timetable_drag_snap_minutes,
     set_timetable_schedule_color,
 )
 
@@ -32,7 +33,7 @@ from ..services.schedule_query_service import ScheduleQueryService
 from ..services.schedule_sort_service import ScheduleSortService
 from .header import ToolTipFilter
 from .dashboard import AdaptiveLabel 
-from .components import CountdownToolTipFilter, get_colored_icon
+from .components import CountdownToolTipFilter, get_colored_icon, get_padded_colored_icon
 from .common.week_day_block import DayBlock
 from .common.action_context_menu import ActionContextMenu
 from .common.weather_icon_label import WeatherIconLabel
@@ -278,6 +279,8 @@ class WeekTimetableBoard(QFrame):
     schedule_context_requested = pyqtSignal(object, object)
     empty_area_context_requested = pyqtSignal(object)
     day_selected = pyqtSignal(QDate)
+    schedule_time_changed = pyqtSignal(object, object, object)
+    time_edit_week_turn_requested = pyqtSignal(int, int, int)
 
     DAY_COUNT = 7
     HOUR_ROWS = 7
@@ -286,6 +289,16 @@ class WeekTimetableBoard(QFrame):
     EVENT_GAP = 2.0
     EVENT_COLUMN_GAP = 2.0
     EVENT_RADIUS = 3.0
+    EDIT_EDGE_HANDLE_PX = 8.0
+    EDIT_SNAP_MINUTES = 1
+    EDIT_MIN_DURATION_MINUTES = 5
+    EDIT_AUTO_SCROLL_MARGIN_PX = 22.0
+    EDIT_AUTO_SCROLL_INTERVAL_MS = 650
+    EDIT_WEEK_TURN_EDGE_PX = 28.0
+    EDIT_WEEK_TURN_Y_TOLERANCE_PX = 30.0
+    EDIT_WEEK_TURN_DELAY_SEC = 0.45
+    EDIT_WEEK_TURN_INTERVAL_SEC = 0.7
+    SELECTION_COLOR = QColor("#FFD700")
     EVENT_PALETTE = (
         "#ff6b6b",
         "#4d96ff",
@@ -307,15 +320,20 @@ class WeekTimetableBoard(QFrame):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setProperty("windowDragDisabled", True)
         today = QDate.currentDate()
         self.current_monday = today.addDays(-(today.dayOfWeek() - 1))
         self.schedules_by_day = {day_index: [] for day_index in range(self.DAY_COUNT)}
         self.category_map = {}
         self._visible_start_hours = {}
         self._visible_hours_anchor = None
+        preferences = get_timetable_preferences()
         self._schedule_colors = {}
         self._schedule_color_overrides = dict(
-            get_timetable_preferences().get("schedule_colors", {})
+            preferences.get("schedule_colors", {})
+        )
+        self.edit_snap_minutes = self._normalize_edit_snap_minutes(
+            preferences.get("drag_snap_minutes", self.EDIT_SNAP_MINUTES)
         )
         self._palette_order = list(self.EVENT_PALETTE)
         random.SystemRandom().shuffle(self._palette_order)
@@ -325,10 +343,20 @@ class WeekTimetableBoard(QFrame):
         self._visible_ddl_labels = []
         self._dark_mode = False
         self._occupied_label_rects = []
+        self._selected_interval_rects = []
+        self._selected_ddl_rects = []
+        self._selected_schedule_id = None
         self.selected_day_index = None
         self._hovered_schedule = None
         self._pressed_schedule = None
+        self._pending_time_edit = None
+        self._active_time_edit = None
+        self._last_time_edit_pos = None
+        self._time_edit_week_turn_direction = 0
+        self._time_edit_week_turn_entered_at = 0.0
+        self._time_edit_week_turn_last_at = 0.0
         self._hover_preview = None
+        self._time_edit_hint = self._create_time_edit_hint()
         try:
             from .popups.schedule_axis_board import _AxisSchedulePreview
 
@@ -337,6 +365,16 @@ class WeekTimetableBoard(QFrame):
             self._hover_preview = None
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setMouseTracking(True)
+        self._time_edit_scroll_timer = QTimer(self)
+        self._time_edit_scroll_timer.setInterval(self.EDIT_AUTO_SCROLL_INTERVAL_MS)
+        self._time_edit_scroll_timer.timeout.connect(
+            self._handle_time_edit_auto_scroll
+        )
+        self._time_edit_week_turn_timer = QTimer(self)
+        self._time_edit_week_turn_timer.setInterval(80)
+        self._time_edit_week_turn_timer.timeout.connect(
+            self._handle_time_edit_week_turn
+        )
         self.setStyleSheet("background: transparent; border: none;")
 
     def set_dark_mode(self, dark):
@@ -349,6 +387,32 @@ class WeekTimetableBoard(QFrame):
 
     def reset_to_current_time(self):
         self._reset_visible_start_hours()
+        self.update()
+
+    @staticmethod
+    def _normalize_edit_snap_minutes(minutes):
+        try:
+            normalized = int(minutes)
+        except (TypeError, ValueError):
+            return 1
+        return normalized if normalized in {1, 5} else 1
+
+    def set_drag_snap_minutes(self, minutes):
+        self.edit_snap_minutes = self._normalize_edit_snap_minutes(minutes)
+
+    def set_visible_start_hour_for_day(self, day_index, hour):
+        if not (0 <= int(day_index) < self.DAY_COUNT):
+            return
+        max_start_hour = max(0, 24 - self.HOUR_ROWS)
+        try:
+            normalized_hour = int(hour)
+        except (TypeError, ValueError):
+            normalized_hour = 0
+        self._ensure_visible_start_hours()
+        self._visible_start_hours[int(day_index)] = min(
+            max(normalized_hour, 0),
+            max_start_hour,
+        )
         self.update()
 
     def set_week_data(self, current_monday, schedules_by_day, category_map=None):
@@ -365,6 +429,18 @@ class WeekTimetableBoard(QFrame):
             for schedule in schedules
         ]
         self._ensure_schedule_colors(all_schedules)
+        active_schedule_id = (
+            self._schedule_id(self._active_time_edit.get("schedule"))
+            if self._active_time_edit is not None
+            else None
+        )
+        if (
+            self._selected_schedule_id is not None
+            and self._selected_schedule_id
+            not in {self._schedule_id(schedule) for schedule in all_schedules}
+            and self._selected_schedule_id != active_schedule_id
+        ):
+            self._selected_schedule_id = None
         self.update()
 
     def set_selected_day(self, qdate):
@@ -562,6 +638,517 @@ class WeekTimetableBoard(QFrame):
             "border": QColor(255, 255, 255, 245),
         }
 
+    @staticmethod
+    def _schedule_id(schedule):
+        return getattr(schedule, "id", None)
+
+    def _is_schedule_selected(self, schedule):
+        schedule_id = self._schedule_id(schedule)
+        return schedule_id is not None and schedule_id == self._selected_schedule_id
+
+    def _set_selected_schedule(self, schedule):
+        selected_id = self._schedule_id(schedule)
+        if selected_id != self._selected_schedule_id:
+            self._selected_schedule_id = selected_id
+            self.update()
+
+    def _clear_selected_schedule(self):
+        self._pending_time_edit = None
+        self._active_time_edit = None
+        self._last_time_edit_pos = None
+        self._time_edit_scroll_timer.stop()
+        self._reset_time_edit_week_turn_state()
+        self._hide_time_edit_hint()
+        if self._selected_schedule_id is not None:
+            self._selected_schedule_id = None
+            self.update()
+
+    @staticmethod
+    def _interval_times_for_edit(schedule):
+        start_time = getattr(schedule, "start_time", None)
+        end_time = getattr(schedule, "end_time", None)
+        if start_time is None or end_time is None or start_time == end_time:
+            return None, None
+        if start_time > end_time:
+            start_time, end_time = end_time, start_time
+        return start_time, end_time
+
+    @staticmethod
+    def _point_time_for_edit(schedule):
+        start_time = getattr(schedule, "start_time", None)
+        end_time = getattr(schedule, "end_time", None)
+        if start_time is not None and end_time is not None and start_time != end_time:
+            return None
+        point_time = end_time if end_time is not None else start_time
+        if point_time is None:
+            return None
+        return point_time
+
+    def _schedule_region_at_position(self, position):
+        for region in reversed(self._hit_regions):
+            if region["rect"].contains(position):
+                return region
+        return None
+
+    def _day_start_datetime(self, day_index):
+        day_date = self.current_monday.addDays(day_index).toPyDate()
+        return datetime.combine(day_date, datetime.min.time())
+
+    def _board_metrics(self):
+        board_rect = QRectF(0.0, 0.0, float(self.width()), float(self.height()))
+        day_width = board_rect.width() / max(1, self.DAY_COUNT)
+        row_height = board_rect.height() / max(1, self.HOUR_ROWS)
+        return board_rect, day_width, row_height
+
+    def _minutes_at_position(self, day_index, position):
+        _, _, row_height = self._board_metrics()
+        y_value = max(0.0, min(float(self.height()), float(position.y())))
+        visible_start = self._visible_start_hour_for_day(day_index) * 60
+        minutes = visible_start + y_value / max(1.0, row_height) * 60.0
+        return max(0.0, min(float(self.DAY_MINUTES), minutes))
+
+    def _datetime_for_day_minutes(self, day_index, minutes):
+        return self._day_start_datetime(day_index) + timedelta(minutes=minutes)
+
+    def _time_edit_action_for_region(self, region, position):
+        if region is None:
+            return None
+        schedule = region.get("schedule")
+        if not self._is_schedule_selected(schedule):
+            return None
+        if region.get("kind") == "ddl":
+            return "move_point" if self._point_time_for_edit(schedule) is not None else None
+        if region.get("kind") != "interval":
+            return None
+        start_time, end_time = self._interval_times_for_edit(schedule)
+        if start_time is None or end_time is None:
+            return None
+
+        rect = region["rect"]
+        if position.y() <= rect.top() + self.EDIT_EDGE_HANDLE_PX:
+            return "resize_start"
+        if position.y() >= rect.bottom() - self.EDIT_EDGE_HANDLE_PX:
+            return "resize_end"
+        return "move"
+
+    def _set_cursor_for_time_edit_action(self, action):
+        if action in {"resize_start", "resize_end"}:
+            self.setCursor(Qt.CursorShape.SizeVerCursor)
+        elif action in {"move", "move_point"}:
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+        else:
+            self.unsetCursor()
+
+    def _create_time_edit_hint(self):
+        hint = QLabel()
+        hint.setWindowFlags(
+            Qt.WindowType.ToolTip
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+        )
+        hint.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        hint.setStyleSheet(
+            """
+            QLabel {
+                background: rgba(43, 43, 43, 235);
+                color: white;
+                border: 1px solid rgba(255, 255, 255, 220);
+                border-radius: 6px;
+                padding: 6px 8px;
+                font-family: 'Microsoft YaHei';
+                font-size: 12px;
+            }
+            """
+        )
+        return hint
+
+    def _hide_time_edit_hint(self):
+        if self._time_edit_hint is not None:
+            self._time_edit_hint.hide()
+
+    @staticmethod
+    def _format_time_edit_point(date_time):
+        return f"{date_time:%m-%d %H:%M}"
+
+    @staticmethod
+    def _format_time_edit_range(start_time, end_time):
+        return f"{start_time:%m-%d %H:%M} - {end_time:%m-%d %H:%M}"
+
+    def _show_time_edit_hint(self, edit_state, start_time, end_time, position):
+        if self._time_edit_hint is None:
+            return
+        action_text = {
+            "resize_start": f"开始 {start_time:%m-%d %H:%M}",
+            "resize_end": f"结束 {end_time:%m-%d %H:%M}",
+            "move": f"移动到 {start_time:%m-%d %H:%M}",
+        }.get(edit_state.get("action"), "调整日程")
+        self._time_edit_hint.setText(
+            f"{action_text}\n{self._format_time_edit_range(start_time, end_time)}"
+        )
+        self._time_edit_hint.adjustSize()
+        if edit_state.get("action") == "move_point":
+            self._time_edit_hint.setText(
+                f"移动到 {self._format_time_edit_point(end_time)}\n{end_time:%H:%M}"
+            )
+            self._time_edit_hint.adjustSize()
+
+        global_pos = self.mapToGlobal(position.toPoint())
+        window_left = self.window().frameGeometry().left()
+        target_x = window_left - self._time_edit_hint.width() - 8
+        target_y = global_pos.y() - self._time_edit_hint.height() // 2
+
+        screen = QApplication.screenAt(global_pos)
+        if screen is not None:
+            available = screen.availableGeometry()
+            target_x = max(
+                available.left() + 4,
+                min(target_x, available.right() - self._time_edit_hint.width() - 4),
+            )
+            target_y = max(
+                available.top() + 4,
+                min(target_y, available.bottom() - self._time_edit_hint.height() - 4),
+            )
+
+        self._time_edit_hint.move(int(target_x), int(target_y))
+        self._time_edit_hint.show()
+
+    def _build_time_edit_state(self, region, position):
+        action = self._time_edit_action_for_region(region, position)
+        if action is None:
+            return None
+        schedule = region["schedule"]
+        start_time = getattr(schedule, "start_time", None)
+        end_time = getattr(schedule, "end_time", None)
+        point_time = None
+        if action == "move_point":
+            point_time = self._point_time_for_edit(schedule)
+            if point_time is None:
+                return None
+        else:
+            interval_start, interval_end = self._interval_times_for_edit(schedule)
+            if interval_start is None or interval_end is None:
+                return None
+            start_time = interval_start
+            end_time = interval_end
+
+        day_index = int(region.get("day_index", self._day_index_at_x(position.x())))
+        board_rect, day_width, _ = self._board_metrics()
+        day_left = board_rect.left() + day_index * day_width
+        press_offset = 0.0
+        if action != "move_point":
+            press_time = self._datetime_for_day_minutes(
+                day_index,
+                self._minutes_at_position(day_index, position),
+            )
+            press_offset = (press_time - start_time).total_seconds() / 60.0
+        rect = region["rect"]
+        return {
+            "schedule": schedule,
+            "action": action,
+            "press_pos": QPointF(position),
+            "original_day_index": day_index,
+            "preview_day_index": day_index,
+            "locked_inset": float(rect.left() - day_left),
+            "locked_width": float(rect.width()),
+            "press_offset_minutes": press_offset,
+            "original_start": start_time,
+            "original_end": end_time,
+            "original_point": point_time,
+            "preview_start": start_time,
+            "preview_end": end_time,
+            "preview_point": point_time,
+            "update_start_time": start_time is not None and (
+                action != "move_point" or end_time is None or start_time == end_time
+            ),
+            "update_end_time": end_time is not None,
+            "changed": False,
+        }
+
+    def _snap_minutes(self, raw_minutes):
+        snap = max(1, int(getattr(self, "edit_snap_minutes", self.EDIT_SNAP_MINUTES)))
+        return int(round(raw_minutes / snap) * snap)
+
+    def _apply_time_edit_preview(self, edit_state, position):
+        if edit_state is None:
+            return
+
+        schedule = edit_state["schedule"]
+        min_duration = timedelta(minutes=self.EDIT_MIN_DURATION_MINUTES)
+        original_start = edit_state["original_start"]
+        original_end = edit_state["original_end"]
+
+        if edit_state["action"] == "move":
+            duration = original_end - original_start
+            target_day = self._day_index_at_x(position.x())
+            target_minutes = self._minutes_at_position(target_day, position)
+            next_start_minutes = self._snap_minutes(
+                target_minutes - edit_state["press_offset_minutes"]
+            )
+            next_start_minutes = max(
+                0,
+                min(self.DAY_MINUTES - 1, next_start_minutes),
+            )
+            next_start = self._datetime_for_day_minutes(
+                target_day,
+                next_start_minutes,
+            )
+            next_end = next_start + duration
+            edit_state["preview_day_index"] = target_day
+            self.selected_day_index = target_day
+        elif edit_state["action"] == "move_point":
+            target_day = self._day_index_at_x(position.x())
+            next_point_minutes = self._snap_minutes(
+                self._minutes_at_position(target_day, position)
+            )
+            next_point_minutes = max(
+                0,
+                min(self.DAY_MINUTES - 1, next_point_minutes),
+            )
+            next_point = self._datetime_for_day_minutes(target_day, next_point_minutes)
+            next_start = next_point if edit_state["update_start_time"] else original_start
+            next_end = next_point if edit_state["update_end_time"] else original_end
+            edit_state["preview_day_index"] = target_day
+            self.selected_day_index = target_day
+            self._show_time_edit_hint(edit_state, next_point, next_point, position)
+            if next_point == edit_state["preview_point"]:
+                return
+
+            if edit_state["update_start_time"]:
+                schedule.start_time = next_point
+            if edit_state["update_end_time"]:
+                schedule.end_time = next_point
+            edit_state["preview_point"] = next_point
+            edit_state["preview_start"] = next_start
+            edit_state["preview_end"] = next_end
+            edit_state["changed"] = True
+            return
+        elif edit_state["action"] == "resize_start":
+            day_index = edit_state["original_day_index"]
+            next_start_minutes = self._snap_minutes(
+                self._minutes_at_position(day_index, position)
+            )
+            next_start = self._datetime_for_day_minutes(day_index, next_start_minutes)
+            next_end = original_end
+            if next_end - next_start < min_duration:
+                next_start = next_end - min_duration
+            edit_state["preview_day_index"] = day_index
+            self.selected_day_index = day_index
+        elif edit_state["action"] == "resize_end":
+            day_index = edit_state["original_day_index"]
+            next_start = original_start
+            next_end_minutes = self._snap_minutes(
+                self._minutes_at_position(day_index, position)
+            )
+            next_end = self._datetime_for_day_minutes(day_index, next_end_minutes)
+            if next_end - next_start < min_duration:
+                next_end = next_start + min_duration
+            edit_state["preview_day_index"] = day_index
+            self.selected_day_index = day_index
+        else:
+            return
+
+        self._show_time_edit_hint(edit_state, next_start, next_end, position)
+
+        if (
+            next_start == edit_state["preview_start"]
+            and next_end == edit_state["preview_end"]
+        ):
+            return
+
+        schedule.start_time = next_start
+        schedule.end_time = next_end
+        edit_state["preview_start"] = next_start
+        edit_state["preview_end"] = next_end
+        edit_state["changed"] = True
+
+    def _time_edit_auto_scroll_day(self, position):
+        if self._active_time_edit is None:
+            return None
+        if self._active_time_edit.get("action") in {"move", "move_point"}:
+            return self._day_index_at_x(position.x())
+        return self._active_time_edit.get("original_day_index")
+
+    def _time_edit_auto_scroll_direction(self, position):
+        if position.y() < self.EDIT_AUTO_SCROLL_MARGIN_PX:
+            return -1
+        if position.y() > self.height() - self.EDIT_AUTO_SCROLL_MARGIN_PX:
+            return 1
+        return 0
+
+    def _reset_time_edit_week_turn_state(self, stop_timer=True):
+        self._time_edit_week_turn_direction = 0
+        self._time_edit_week_turn_entered_at = 0.0
+        self._time_edit_week_turn_last_at = 0.0
+        if stop_timer:
+            self._time_edit_week_turn_timer.stop()
+
+    def _time_edit_week_turn_direction_at(self, position):
+        if self._active_time_edit is None:
+            return 0
+        if self._active_time_edit.get("action") not in {"move", "move_point"}:
+            return 0
+        if (
+            position.y() < -self.EDIT_WEEK_TURN_Y_TOLERANCE_PX
+            or position.y() > self.height() + self.EDIT_WEEK_TURN_Y_TOLERANCE_PX
+        ):
+            return 0
+        if position.x() <= self.EDIT_WEEK_TURN_EDGE_PX:
+            return -1
+        if position.x() >= self.width() - self.EDIT_WEEK_TURN_EDGE_PX:
+            return 1
+        return 0
+
+    def _update_time_edit_week_turn(self, position):
+        direction = self._time_edit_week_turn_direction_at(position)
+        now = time.monotonic()
+        if direction != self._time_edit_week_turn_direction:
+            self._time_edit_week_turn_direction = direction
+            self._time_edit_week_turn_entered_at = now if direction else 0.0
+            self._time_edit_week_turn_last_at = 0.0
+            if direction:
+                if not self._time_edit_week_turn_timer.isActive():
+                    self._time_edit_week_turn_timer.start()
+            else:
+                self._time_edit_week_turn_timer.stop()
+            return
+
+        if direction and not self._time_edit_week_turn_timer.isActive():
+            self._time_edit_week_turn_timer.start()
+
+    def _update_time_edit_auto_scroll(self, position):
+        self._last_time_edit_pos = QPointF(position)
+        if self._active_time_edit is None:
+            self._time_edit_scroll_timer.stop()
+            self._reset_time_edit_week_turn_state()
+            return
+        self._update_time_edit_week_turn(position)
+        if self._time_edit_auto_scroll_direction(position):
+            if not self._time_edit_scroll_timer.isActive():
+                self._time_edit_scroll_timer.start()
+        else:
+            self._time_edit_scroll_timer.stop()
+
+    def _handle_time_edit_auto_scroll(self):
+        if self._active_time_edit is None or self._last_time_edit_pos is None:
+            self._time_edit_scroll_timer.stop()
+            return
+        direction = self._time_edit_auto_scroll_direction(self._last_time_edit_pos)
+        day_index = self._time_edit_auto_scroll_day(self._last_time_edit_pos)
+        if direction == 0 or day_index is None or not (0 <= day_index < self.DAY_COUNT):
+            self._time_edit_scroll_timer.stop()
+            return
+
+        max_start_hour = max(0, 24 - self.HOUR_ROWS)
+        current_hour = self._visible_start_hour_for_day(day_index)
+        next_hour = min(max(current_hour + direction, 0), max_start_hour)
+        if next_hour == current_hour:
+            return
+        self._visible_start_hours[day_index] = next_hour
+        self._apply_time_edit_preview(
+            self._active_time_edit,
+            self._last_time_edit_pos,
+        )
+        self.update()
+
+    def _handle_time_edit_week_turn(self):
+        if self._active_time_edit is None or self._last_time_edit_pos is None:
+            self._reset_time_edit_week_turn_state()
+            return
+
+        direction = self._time_edit_week_turn_direction_at(self._last_time_edit_pos)
+        if direction == 0:
+            self._reset_time_edit_week_turn_state()
+            return
+
+        now = time.monotonic()
+        if direction != self._time_edit_week_turn_direction:
+            self._time_edit_week_turn_direction = direction
+            self._time_edit_week_turn_entered_at = now
+            self._time_edit_week_turn_last_at = 0.0
+            return
+        if now - self._time_edit_week_turn_entered_at < self.EDIT_WEEK_TURN_DELAY_SEC:
+            return
+        if (
+            self._time_edit_week_turn_last_at
+            and now - self._time_edit_week_turn_last_at < self.EDIT_WEEK_TURN_INTERVAL_SEC
+        ):
+            return
+
+        day_index = self._time_edit_auto_scroll_day(self._last_time_edit_pos)
+        if day_index is None or not (0 <= day_index < self.DAY_COUNT):
+            return
+        visible_start_hour = self._visible_start_hour_for_day(day_index)
+        self._time_edit_week_turn_last_at = now
+        self._time_edit_week_turn_entered_at = now
+        self.time_edit_week_turn_requested.emit(
+            direction,
+            int(day_index),
+            int(visible_start_hour),
+        )
+        if self._active_time_edit is not None:
+            self._apply_time_edit_preview(
+                self._active_time_edit,
+                self._last_time_edit_pos,
+            )
+            self.update()
+
+    def _restore_time_edit_original(self, edit_state):
+        if edit_state is None:
+            return
+        schedule = edit_state["schedule"]
+        schedule.start_time = edit_state["original_start"]
+        schedule.end_time = edit_state["original_end"]
+
+    def _finish_time_edit(self, commit):
+        edit_state = self._active_time_edit or self._pending_time_edit
+        self._time_edit_scroll_timer.stop()
+        self._reset_time_edit_week_turn_state()
+        self._hide_time_edit_hint()
+        self._pending_time_edit = None
+        self._active_time_edit = None
+        self._last_time_edit_pos = None
+        self._pressed_schedule = None
+        self.unsetCursor()
+
+        if edit_state is None:
+            return
+        if not commit or not edit_state.get("changed"):
+            self._restore_time_edit_original(edit_state)
+            self.update()
+            return
+        self.schedule_time_changed.emit(
+            edit_state["schedule"],
+            edit_state["preview_start"],
+            edit_state["preview_end"],
+        )
+
+    def _maybe_activate_pending_time_edit(self, position, buttons=Qt.MouseButton.NoButton):
+        if self._pending_time_edit is None or self._active_time_edit is not None:
+            return False
+        if not (buttons & Qt.MouseButton.LeftButton):
+            self._finish_time_edit(False)
+            return False
+        drag_distance = (
+            position - self._pending_time_edit["press_pos"]
+        ).manhattanLength()
+        if drag_distance < QApplication.startDragDistance():
+            return False
+
+        self._active_time_edit = self._pending_time_edit
+        self._pending_time_edit = None
+        self._hide_hover_preview()
+        self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        self._update_time_edit_auto_scroll(position)
+        self._apply_time_edit_preview(self._active_time_edit, position)
+        self.update()
+        return True
+
+    def _is_active_time_edit_schedule(self, schedule):
+        return (
+            self._active_time_edit is not None
+            and self._active_time_edit.get("schedule") is schedule
+        )
+
     def _datetime_value(self, value):
         if value is None:
             return None
@@ -580,7 +1167,25 @@ class WeekTimetableBoard(QFrame):
         intervals = []
         ddl_points = []
 
-        for schedule in self.schedules_by_day.get(day_index, []):
+        active_schedule = (
+            self._active_time_edit.get("schedule")
+            if self._active_time_edit is not None
+            else None
+        )
+        active_day_index = (
+            self._active_time_edit.get("preview_day_index")
+            if self._active_time_edit is not None
+            else None
+        )
+        day_schedules = [
+            schedule
+            for schedule in self.schedules_by_day.get(day_index, [])
+            if schedule is not active_schedule
+        ]
+        if active_schedule is not None and active_day_index == day_index:
+            day_schedules.append(active_schedule)
+
+        for schedule in day_schedules:
             if getattr(schedule, "status", 0) == 2:
                 continue
             if ScheduleQueryService.is_todo(schedule):
@@ -680,8 +1285,12 @@ class WeekTimetableBoard(QFrame):
     def _minute_to_y(self, minute_value, visible_start, top, row_height):
         return top + ((minute_value - visible_start) / 60.0) * row_height
 
-    def _draw_interval_items(self, painter, intervals, visible_start, top, bottom, day_left, day_width, row_height):
-        for interval in intervals:
+    def _draw_interval_items(self, painter, intervals, visible_start, top, bottom, day_left, day_width, row_height, day_index):
+        ordered_intervals = sorted(
+            intervals,
+            key=lambda item: self._is_active_time_edit_schedule(item["schedule"]),
+        )
+        for interval in ordered_intervals:
             column_count = interval["column_count"]
             available_width = max(
                 1.0,
@@ -691,6 +1300,9 @@ class WeekTimetableBoard(QFrame):
             rect_x = day_left + self.EVENT_COLUMN_GAP + interval["column"] * (
                 rect_width + self.EVENT_COLUMN_GAP
             )
+            if self._is_active_time_edit_schedule(interval["schedule"]):
+                rect_x = day_left + self._active_time_edit["locked_inset"]
+                rect_width = self._active_time_edit["locked_width"]
             rect_y = self._minute_to_y(interval["visible_start"], visible_start, top, row_height)
             rect_bottom = self._minute_to_y(interval["visible_end"], visible_start, top, row_height)
             rect_y = max(top + self.EVENT_GAP, rect_y + self.EVENT_GAP)
@@ -710,10 +1322,14 @@ class WeekTimetableBoard(QFrame):
                 painter.setPen(QPen(display_style["border"], 1))
                 painter.drawPath(event_path)
                 painter.restore()
+            if self._is_schedule_selected(interval["schedule"]):
+                self._selected_interval_rects.append(event_rect)
             self._hit_regions.append(
                 {
                     "rect": event_rect,
                     "schedule": interval["schedule"],
+                    "kind": "interval",
+                    "day_index": day_index,
                 }
             )
             self._occupied_label_rects.append(event_rect)
@@ -873,7 +1489,7 @@ class WeekTimetableBoard(QFrame):
                         "...",
                     )
 
-    def _draw_ddl_items(self, painter, ddl_points, visible_start, top, day_left, day_width, row_height):
+    def _draw_ddl_items(self, painter, ddl_points, visible_start, top, day_left, day_width, row_height, day_index):
         if not ddl_points:
             return
 
@@ -893,6 +1509,9 @@ class WeekTimetableBoard(QFrame):
                 line_x = day_left + self.EVENT_COLUMN_GAP + index * (
                     line_width + self.EVENT_COLUMN_GAP
                 )
+                if self._is_active_time_edit_schedule(point["schedule"]):
+                    line_x = day_left + self._active_time_edit["locked_inset"]
+                    line_width = self._active_time_edit["locked_width"]
                 line_y = self._minute_to_y(point["point"], visible_start, top, row_height)
                 line_rect = QRectF(
                     line_x,
@@ -901,10 +1520,14 @@ class WeekTimetableBoard(QFrame):
                     self.DDL_LINE_HEIGHT,
                 )
                 painter.fillRect(line_rect, self._display_style_for_schedule(point["schedule"])["line"])
+                if self._is_schedule_selected(point["schedule"]):
+                    self._selected_ddl_rects.append(line_rect)
                 self._hit_regions.append(
                     {
                         "rect": line_rect.adjusted(0.0, -4.0, 0.0, 4.0),
                         "schedule": point["schedule"],
+                        "kind": "ddl",
+                        "day_index": day_index,
                     }
                 )
                 # 收集 DDL 时间标签
@@ -1040,6 +1663,7 @@ class WeekTimetableBoard(QFrame):
             day_left,
             day_width,
             row_height,
+            day_index,
         )
         self._draw_ddl_items(
             painter,
@@ -1049,6 +1673,7 @@ class WeekTimetableBoard(QFrame):
             day_left,
             day_width,
             row_height,
+            day_index,
         )
 
     def _draw_current_time_line(self, painter, board_rect, day_width, row_height):
@@ -1087,6 +1712,22 @@ class WeekTimetableBoard(QFrame):
         )
         painter.restore()
 
+    def _draw_selected_schedule_overlays(self, painter):
+        if not self._selected_interval_rects and not self._selected_ddl_rects:
+            return
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(self.SELECTION_COLOR, 2))
+        for rect in self._selected_interval_rects:
+            painter.drawRoundedRect(rect, self.EVENT_RADIUS, self.EVENT_RADIUS)
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(self.SELECTION_COLOR)
+        for rect in self._selected_ddl_rects:
+            painter.drawRect(rect)
+        painter.restore()
+
     def paintEvent(self, event):
         painter = QPainter(self)
         width = self.width()
@@ -1121,6 +1762,8 @@ class WeekTimetableBoard(QFrame):
         self._visible_event_labels = []
         self._visible_ddl_labels = []
         self._occupied_label_rects = []
+        self._selected_interval_rects = []
+        self._selected_ddl_rects = []
         for day_index in range(self.DAY_COUNT):
             self._draw_day_schedules(
                 painter,
@@ -1135,6 +1778,7 @@ class WeekTimetableBoard(QFrame):
         self._draw_ddl_labels(painter)
         painter.restore()
         self._draw_current_time_line(painter, board_rect, day_width, row_height)
+        self._draw_selected_schedule_overlays(painter)
 
         # 空日程占位文字
         days_with_content = set()
@@ -1189,13 +1833,25 @@ class WeekTimetableBoard(QFrame):
             self._hover_preview.hide()
 
     def _schedule_at_position(self, position):
-        for region in reversed(self._hit_regions):
-            if region["rect"].contains(position):
-                return region["schedule"]
-        return None
+        region = self._schedule_region_at_position(position)
+        return region["schedule"] if region is not None else None
 
     def mouseMoveEvent(self, event):
-        schedule = self._schedule_at_position(event.position())
+        if self._active_time_edit is not None:
+            self._apply_time_edit_preview(self._active_time_edit, event.position())
+            self._update_time_edit_auto_scroll(event.position())
+            self.update()
+            event.accept()
+            return
+
+        if self._maybe_activate_pending_time_edit(event.position(), event.buttons()):
+            event.accept()
+            return
+
+        region = self._schedule_region_at_position(event.position())
+        action = self._time_edit_action_for_region(region, event.position())
+        self._set_cursor_for_time_edit_action(action)
+        schedule = region["schedule"] if region is not None else None
         if schedule is None:
             self._hide_hover_preview()
             super().mouseMoveEvent(event)
@@ -1212,12 +1868,27 @@ class WeekTimetableBoard(QFrame):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self._pressed_schedule = self._schedule_at_position(event.position())
+            self._pending_time_edit = None
+            region = self._schedule_region_at_position(event.position())
+            self._pressed_schedule = region["schedule"] if region is not None else None
             if self._pressed_schedule is not None:
+                self._set_selected_schedule(self._pressed_schedule)
+                self.selected_day_index = int(
+                    region.get("day_index", self._day_index_at_x(event.position().x()))
+                )
+                self._pending_time_edit = self._build_time_edit_state(
+                    region,
+                    event.position(),
+                )
+                if self._pending_time_edit is not None:
+                    self._set_cursor_for_time_edit_action(
+                        self._pending_time_edit["action"]
+                    )
                 event.accept()
                 return
             day_index = self._day_index_at_x(event.position().x())
             if 0 <= day_index < self.DAY_COUNT:
+                self._clear_selected_schedule()
                 self.selected_day_index = day_index
                 selected_date = self.current_monday.addDays(day_index)
                 self.day_selected.emit(selected_date)
@@ -1228,37 +1899,70 @@ class WeekTimetableBoard(QFrame):
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
+            if self._active_time_edit is not None:
+                self._apply_time_edit_preview(self._active_time_edit, event.position())
+                self._finish_time_edit(True)
+                event.accept()
+                return
+            if self._pending_time_edit is not None:
+                self._finish_time_edit(False)
+                event.accept()
+                return
             released_schedule = self._schedule_at_position(event.position())
             if (
                 released_schedule is not None
                 and released_schedule is self._pressed_schedule
             ):
-                self._hide_hover_preview()
-                self.schedule_clicked.emit(
-                    released_schedule,
-                    self._color_for_schedule(released_schedule),
-                )
                 self._pressed_schedule = None
                 event.accept()
                 return
             self._pressed_schedule = None
         super().mouseReleaseEvent(event)
 
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._finish_time_edit(False)
+            schedule = self._schedule_at_position(event.position())
+            if schedule is not None:
+                self._set_selected_schedule(schedule)
+                self._hide_hover_preview()
+                self.schedule_clicked.emit(
+                    schedule,
+                    self._color_for_schedule(schedule),
+                )
+                event.accept()
+                return
+        super().mouseDoubleClickEvent(event)
+
     def contextMenuEvent(self, event):
-        schedule = self._schedule_at_position(QPointF(event.pos()))
-        if schedule is None:
+        region = self._schedule_region_at_position(QPointF(event.pos()))
+        if region is None:
             self.empty_area_context_requested.emit(event.globalPos())
             event.accept()
             return
 
+        schedule = region["schedule"]
         self._hide_hover_preview()
+        self._set_selected_schedule(schedule)
+        self.selected_day_index = int(
+            region.get("day_index", self._day_index_at_x(event.pos().x()))
+        )
         self.schedule_context_requested.emit(schedule, event.globalPos())
         event.accept()
 
     def leaveEvent(self, event):
+        if self._active_time_edit is not None or self._pending_time_edit is not None:
+            super().leaveEvent(event)
+            return
         self._pressed_schedule = None
         self._hide_hover_preview()
         super().leaveEvent(event)
+
+    def hideEvent(self, event):
+        if self._active_time_edit is not None or self._pending_time_edit is not None:
+            self._finish_time_edit(False)
+        self._hide_time_edit_hint()
+        super().hideEvent(event)
 
 
 from .todo import TodoListContainer
@@ -1438,7 +2142,11 @@ class WeekWindow(FramelessMainWindow):
         self.search_box = QLineEdit()
         self.search_box.setPlaceholderText("搜索日程...")
         self.search_box.setFixedSize(123, 18) 
-        self.search_box.setStyleSheet(StyleManager.get_search_input_style() + " QLineEdit { font-size: 10px; padding: 0px 4px; }")
+        self.search_action = self.search_box.addAction(
+            QIcon(),
+            QLineEdit.ActionPosition.LeadingPosition,
+        )
+        self.search_box.setStyleSheet(StyleManager.get_search_input_style() + " QLineEdit { font-size: 10px; padding: 0px 1px; }")
         
         # 2. 视图选择器 
         self.view_selector_container = QFrame()
@@ -1695,6 +2403,12 @@ class WeekWindow(FramelessMainWindow):
         self.page_week_timetable_placeholder.schedule_clicked.connect(
             self.request_timetable_schedule_detail.emit
         )
+        self.page_week_timetable_placeholder.schedule_time_changed.connect(
+            self._handle_timetable_time_changed
+        )
+        self.page_week_timetable_placeholder.time_edit_week_turn_requested.connect(
+            self._handle_timetable_week_turn_during_edit
+        )
         self.page_week_timetable_placeholder.schedule_context_requested.connect(
             self._show_timetable_schedule_context_menu
         )
@@ -1761,7 +2475,7 @@ class WeekWindow(FramelessMainWindow):
                 border-radius: 6px;
                 color: {foreground};
                 placeholder-text-color: {placeholder};
-                padding: 0px 4px;
+                padding: 0px 1px;
                 font-family: "Microsoft YaHei UI";
                 font-size: 10px;
             }}
@@ -1872,6 +2586,14 @@ class WeekWindow(FramelessMainWindow):
         for vid, button in getattr(self, "view_selector_buttons", {}).items():
             button.setStyleSheet(self._view_selector_button_style(selected=(vid == "week")))
 
+    def _apply_search_icon(self):
+        if not hasattr(self, "search_action"):
+            return
+
+        foreground = self._header_foreground_color()
+        pixmap = get_padded_colored_icon("search.svg", foreground, icon_size=10, canvas_size=16)
+        self.search_action.setIcon(QIcon(pixmap) if not pixmap.isNull() else QIcon("assets/icons/search.svg"))
+
     def _apply_week_header_foreground(self):
         foreground = self._header_foreground_color()
 
@@ -1900,6 +2622,7 @@ class WeekWindow(FramelessMainWindow):
 
         if hasattr(self, "search_box"):
             self.search_box.setStyleSheet(self._search_input_style())
+            self._apply_search_icon()
         if hasattr(self, "view_selector_container"):
             self.view_selector_container.setStyleSheet(self._view_selector_style())
             self._apply_view_selector_button_styles()
@@ -2824,15 +3547,93 @@ class WeekWindow(FramelessMainWindow):
             QColor(color).name(),
         )
 
+    def _handle_timetable_time_changed(self, schedule_data, start_time, end_time):
+        """课表模式下拖拽 / 拉伸修改时间。"""
+        schedule_id = getattr(schedule_data, "id", None)
+        if schedule_id is None:
+            self.refresh_week_data()
+            return
+
+        if getattr(schedule_data, "group_id", None):
+            success = db_manager.update_schedule_with_repeat(
+                schedule_id,
+                {
+                    "start_time": start_time,
+                    "end_time": end_time,
+                },
+                update_future=False,
+            )
+            if success:
+                schedule_data.group_id = None
+        else:
+            success = db_manager.update_schedule_fields(
+                schedule_id,
+                start_time=start_time,
+                end_time=end_time,
+            )
+
+        if not success:
+            self.refresh_week_data()
+            return
+
+        schedule_data.start_time = start_time
+        schedule_data.end_time = end_time
+        selected_time = start_time or end_time
+        if selected_time is None:
+            self.refresh_week_data()
+            return
+        self.current_selected_date = QDate(
+            selected_time.year,
+            selected_time.month,
+            selected_time.day,
+        )
+        self.current_monday = self._get_monday(self.current_selected_date)
+        self.refresh_week_data()
+        self.schedule_updated.emit(schedule_data)
+
+    def _handle_timetable_week_turn_during_edit(
+        self,
+        direction,
+        day_index,
+        visible_start_hour,
+    ):
+        if direction not in (-1, 1):
+            return
+        if not hasattr(self, "page_week_timetable_placeholder"):
+            return
+
+        try:
+            normalized_day_index = int(day_index)
+        except (TypeError, ValueError):
+            normalized_day_index = 0
+        normalized_day_index = min(max(normalized_day_index, 0), 6)
+
+        self.current_monday = self.current_monday.addDays(direction * 7)
+        self.current_selected_date = self.current_monday.addDays(normalized_day_index)
+        self.refresh_week_data()
+        self.page_week_timetable_placeholder.set_visible_start_hour_for_day(
+            normalized_day_index,
+            visible_start_hour,
+        )
+
     def _show_timetable_empty_area_context_menu(self, global_pos):
         """课表板空白区右键 → 页面级菜单"""
         from .common.action_context_menu import ActionContextMenu
 
-        menu = ActionContextMenu(self)
+        menu = ActionContextMenu(
+            self,
+            show_drag_options=True,
+            drag_snap_minutes=self.page_week_timetable_placeholder.edit_snap_minutes,
+        )
         menu.action_requested.connect(self._handle_week_context_action)
         menu.view_requested.connect(self._handle_week_context_view)
         menu.mode_requested.connect(self._handle_week_context_mode)
+        menu.drag_snap_requested.connect(self._handle_timetable_drag_snap_change)
         menu.exec(global_pos)
+
+    def _handle_timetable_drag_snap_change(self, minutes):
+        self.page_week_timetable_placeholder.set_drag_snap_minutes(minutes)
+        set_timetable_drag_snap_minutes(minutes)
 
     def _show_timetable_schedule_context_menu(self, schedule_obj, global_pos):
         from .components import ScheduleContextMenu

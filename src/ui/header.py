@@ -107,6 +107,7 @@ class ClickableIcon(QLabel):
 class HeaderBar(QWidget):
     suspend_requested = pyqtSignal(bool)
     action_requested = pyqtSignal(str)
+    search_requested = pyqtSignal()
     req_open_calendar = pyqtSignal()
     midnight_rollover = pyqtSignal()
     weather_updated = pyqtSignal(dict)
@@ -186,7 +187,14 @@ class HeaderBar(QWidget):
         self.search.setFixedHeight(26)
         self.search.setPlaceholderText("搜索日程...")
         icon_path = "assets/icons/search.svg"
-        self.search.addAction(QIcon(icon_path), QLineEdit.ActionPosition.LeadingPosition)
+        self.search_action = self.search.addAction(
+            QIcon(icon_path),
+            QLineEdit.ActionPosition.LeadingPosition,
+        )
+        self.search_action.setToolTip("搜索 / 筛选")
+        self.search_action.triggered.connect(
+            lambda _checked=False: self.search_requested.emit()
+        )
         self.search.setStyleSheet(StyleManager.get_search_input_style())
 
     def _setup_hud_ui(self):

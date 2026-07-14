@@ -46,6 +46,7 @@ class MainWindow(FramelessMainWindow):
         self.main_controller = MainController()
         self.axis_board = None
         self.weather_board = None
+        self.search_filter_panel = None
         self._vertical_resize_margin = 8
         self._vertical_resize_edge = None
         self._vertical_resize_start_pos = QPoint()
@@ -179,6 +180,7 @@ class MainWindow(FramelessMainWindow):
         self.header.suspend_requested.connect(self.switch_to_suspend)
         self.suspend_window.restore_requested.connect(self.switch_to_normal)
         self.header.action_requested.connect(self.handle_header_action)
+        self.header.search_requested.connect(self.toggle_search_filter_panel)
         self.header.view_requested.connect(self.switch_view)
         self.header.mode_requested.connect(self.set_schedule_display_mode)
         # 实例化日历弹窗
@@ -279,14 +281,72 @@ class MainWindow(FramelessMainWindow):
         self.page_dashboard.set_schedule_display_mode(mode_id)
         if hasattr(self.week_window, "apply_schedule_display_mode"):
             self.week_window.apply_schedule_display_mode(mode_id)
+        if hasattr(self.month_window, "apply_schedule_display_mode"):
+            self.month_window.apply_schedule_display_mode(mode_id)
         if hasattr(self.header, "set_schedule_display_mode"):
             self.header.set_schedule_display_mode(mode_id)
+        if mode_id != "card":
+            self._hide_search_filter_panel()
         if persist:
             set_timetable_display_mode(mode_id)
 
     def reset_timetable_view_to_now(self):
         self.on_calendar_date_picked(datetime.now().date())
         self.page_dashboard.reset_timetable_to_current_time()
+
+    def toggle_search_filter_panel(self):
+        if self.body_stack.currentWidget() != self.page_dashboard:
+            self.show_toast("搜索面板先支持日界面")
+            return
+        if getattr(self.page_dashboard, "schedule_display_mode", "card") != "card":
+            self.show_toast("搜索面板先支持卡片模式")
+            return
+
+        if self.search_filter_panel is not None and self.search_filter_panel.isVisible():
+            self.search_filter_panel.close()
+            return
+
+        if self.search_filter_panel is None:
+            from .popups.schedule_search_panel import ScheduleSearchPanel
+
+            self.search_filter_panel = ScheduleSearchPanel(self)
+            self.search_filter_panel.apply_requested.connect(
+                self._handle_search_filter_apply
+            )
+            self.search_filter_panel.cleared.connect(
+                lambda: self.show_toast("已清空查询条件")
+            )
+
+        self._position_search_filter_panel()
+        self.search_filter_panel.show()
+        self.search_filter_panel.raise_()
+        self.search_filter_panel.activateWindow()
+
+    def _handle_search_filter_apply(self, options):
+        self.show_toast("查询生效逻辑下一步接入")
+
+    def _hide_search_filter_panel(self):
+        if self.search_filter_panel is not None and self.search_filter_panel.isVisible():
+            self.search_filter_panel.close()
+
+    def _position_search_filter_panel(self):
+        if self.search_filter_panel is None:
+            return
+
+        panel = self.search_filter_panel
+        window_geometry = self.frameGeometry()
+        x = window_geometry.left() - panel.width() - 8
+        y = window_geometry.top() + self.header.height() - 8
+
+        screen = QApplication.screenAt(window_geometry.center()) or QApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            if x < available.left():
+                x = window_geometry.left() + 8
+            x = max(available.left(), min(x, available.right() - panel.width() + 1))
+            y = max(available.top(), min(y, available.bottom() - panel.height() + 1))
+
+        panel.move(x, y)
 
     def toggle_axis_board(self, anchor_window=None):
         from PyQt6.QtGui import QGuiApplication
@@ -842,6 +902,7 @@ class MainWindow(FramelessMainWindow):
                 apply_24h2_border_fix(int(window.winId()))
             
     def switch_to_add_page(self):
+        self._hide_search_filter_panel()
         current_widget = self.body_stack.currentWidget()
         
         # 只有在日视图（看板）且日期过期时，才禁止添加
@@ -878,6 +939,8 @@ class MainWindow(FramelessMainWindow):
     def switch_view(self, view_name):
         route_action = ViewRouter.classify_main_view(view_name)
         self._sync_view_selector_state(route_action)
+        if route_action != "day":
+            self._hide_search_filter_panel()
 
         # 切换前，先把可能处于打开状态的视图选择菜单隐藏掉
         if hasattr(self, 'page_dashboard'):
@@ -1105,6 +1168,8 @@ class MainWindow(FramelessMainWindow):
             self.axis_board.close()
         if self.weather_board is not None:
             self.weather_board.close()
+        if self.search_filter_panel is not None:
+            self.search_filter_panel.close()
         super().closeEvent(event)
 
     def switch_week_to_suspend(self):
