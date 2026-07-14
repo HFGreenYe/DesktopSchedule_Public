@@ -287,8 +287,6 @@ class MainWindow(FramelessMainWindow):
             self.month_window.apply_schedule_display_mode(mode_id)
         if hasattr(self.header, "set_schedule_display_mode"):
             self.header.set_schedule_display_mode(mode_id)
-        if mode_id != "card":
-            self._hide_day_query_panels()
         if persist:
             set_timetable_display_mode(mode_id)
 
@@ -299,9 +297,6 @@ class MainWindow(FramelessMainWindow):
     def _can_open_day_query_panel(self, panel_name):
         if self.body_stack.currentWidget() != self.page_dashboard:
             self.show_toast(f"{panel_name}先支持日界面")
-            return False
-        if getattr(self.page_dashboard, "schedule_display_mode", "card") != "card":
-            self.show_toast(f"{panel_name}先支持卡片模式")
             return False
         return True
 

@@ -1909,6 +1909,8 @@ class DashboardView(QWidget):
         self._last_search_scope = "title"
         self._last_match_mode = "fuzzy"
         self._card_schedule_source = []
+        self._timetable_schedule_source = []
+        self._schedule_category_map = {}
         
         self._setup_ui()
         
@@ -2019,14 +2021,14 @@ class DashboardView(QWidget):
 
     def apply_filter_options(self, options):
         self._filter_options = options
-        self._render_card_query_results()
+        self._render_query_results()
 
     def apply_search_options(self, options):
         self._search_options = options
         self._last_search_scope = options.search_scope
         self._last_match_mode = options.match_mode
         if self._search_keyword:
-            self._render_card_query_results()
+            self._render_query_results()
 
     def set_search_keyword(self, keyword):
         normalized_keyword = str(keyword or "").strip()
@@ -2037,7 +2039,7 @@ class DashboardView(QWidget):
         else:
             self._search_keyword = ""
             self._search_options = None
-        self._render_card_query_results()
+        self._render_query_results()
 
     def has_active_filter(self):
         return self._filter_options.has_filter_constraints()
@@ -2045,7 +2047,7 @@ class DashboardView(QWidget):
     def has_active_query(self):
         return bool(self._search_keyword) or self.has_active_filter()
 
-    def _apply_card_query(self, schedules):
+    def _apply_schedule_query(self, schedules):
         if self._search_keyword:
             options = self._search_options or self.search_options_for_panel()
             return ScheduleQueryService.apply_options(
@@ -2066,7 +2068,7 @@ class DashboardView(QWidget):
 
     def _render_card_query_results(self):
         self._clear_schedule_cards()
-        dashboard_schedules = self._apply_card_query(self._card_schedule_source)
+        dashboard_schedules = self._apply_schedule_query(self._card_schedule_source)
         dashboard_schedules = ScheduleSortService.sort_for_day_view(dashboard_schedules)
 
         for index, item in enumerate(dashboard_schedules):
@@ -2084,6 +2086,20 @@ class DashboardView(QWidget):
             else "您还没有日程记录，请点击添加"
         )
         self._sync_schedule_area_visibility(bool(dashboard_schedules))
+
+    def _render_timetable_query_results(self):
+        timetable_schedules = self._apply_schedule_query(
+            self._timetable_schedule_source
+        )
+        self.timetable_placeholder.set_schedule_data(
+            self.current_date,
+            timetable_schedules,
+            self._schedule_category_map,
+        )
+
+    def _render_query_results(self):
+        self._render_card_query_results()
+        self._render_timetable_query_results()
 
     def reset_timetable_to_current_time(self):
         self.timetable_placeholder.reset_to_current_time()
@@ -2274,21 +2290,19 @@ class DashboardView(QWidget):
                 continue
             timetable_schedules.append(schedule)
             seen_timetable_ids.add(schedule_id)
-        self.timetable_placeholder.set_schedule_data(
-            self.current_date,
-            timetable_schedules,
-            db_manager.get_category_map(),
-        )
-        
-        dashboard_schedules = []
-        for s in schedules:
-            if getattr(s, 'status', 0) == 2:
-                continue
-                
-            if not ScheduleQueryService.is_todo(s):
-                dashboard_schedules.append(s)
-        self._card_schedule_source = dashboard_schedules
-        self._render_card_query_results()
+
+        def visible_schedules(source):
+            return [
+                schedule
+                for schedule in source
+                if getattr(schedule, "status", 0) != 2
+                and not ScheduleQueryService.is_todo(schedule)
+            ]
+
+        self._card_schedule_source = visible_schedules(schedules)
+        self._timetable_schedule_source = visible_schedules(timetable_schedules)
+        self._schedule_category_map = db_manager.get_category_map()
+        self._render_query_results()
 
     # 弹出并管理详情面板
     def _show_detail_popup(
@@ -2353,6 +2367,12 @@ class DashboardView(QWidget):
             for schedule in self._card_schedule_source
             if getattr(schedule, "id", None) != schedule_id
         ]
+        self._timetable_schedule_source = [
+            schedule
+            for schedule in self._timetable_schedule_source
+            if getattr(schedule, "id", None) != schedule_id
+        ]
+        self._render_timetable_query_results()
         sender_card = self.sender()
         if sender_card:
             self.list_layout.removeWidget(sender_card)
