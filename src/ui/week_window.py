@@ -29,7 +29,10 @@ from .time_picker_week import TimePickerViewWeek
 from .alarm_picker_week import AlarmPickerViewWeek
 from .list_picker import ListPickerView
 from ..data.database import db_manager
-from ..services.schedule_query_service import ScheduleQueryService
+from ..services.schedule_query_service import (
+    ScheduleQueryService,
+    WeekScheduleQueryOptions,
+)
 from ..services.schedule_sort_service import ScheduleSortService
 from .header import ToolTipFilter
 from .dashboard import AdaptiveLabel 
@@ -2004,6 +2007,13 @@ class WeekWindow(FramelessMainWindow):
         self._active_drag_card = None
         self._drag_edge_direction = 0
         self.schedule_display_mode = "card"
+        self._filter_options = WeekScheduleQueryOptions()
+        self._search_options = None
+        self._search_keyword = ""
+        self._last_search_scope = "title"
+        self._last_match_mode = "fuzzy"
+        self._search_options_panel = None
+        self._filter_options_panel = None
         self._drag_edge_entered_at = 0.0
         self._drag_last_turn_at = 0.0
         self._drag_edge_timer = QTimer(self)
@@ -2133,6 +2143,8 @@ class WeekWindow(FramelessMainWindow):
                 btn.clicked.connect(self.switch_to_add_page)
             elif icon_name == "sort.svg":
                 btn.clicked.connect(self._on_refresh_clicked)
+            elif icon_name == "filter.svg":
+                btn.clicked.connect(self.toggle_filter_options_panel)
 
             icons_row.addWidget(btn)
         icons_row.addStretch()
@@ -2146,6 +2158,18 @@ class WeekWindow(FramelessMainWindow):
             QIcon(),
             QLineEdit.ActionPosition.LeadingPosition,
         )
+        self.search_action.setToolTip("周搜索设置")
+        self.search_action.triggered.connect(
+            lambda _checked=False: self.toggle_search_options_panel()
+        )
+        self.search_clear_action = self.search_box.addAction(
+            QIcon(),
+            QLineEdit.ActionPosition.TrailingPosition,
+        )
+        self.search_clear_action.setToolTip("清空搜索")
+        self.search_clear_action.setVisible(False)
+        self.search_clear_action.triggered.connect(self.search_box.clear)
+        self.search_box.textChanged.connect(self._on_search_text_changed)
         self.search_box.setStyleSheet(StyleManager.get_search_input_style() + " QLineEdit { font-size: 10px; padding: 0px 1px; }")
         
         # 2. 视图选择器 
@@ -2593,6 +2617,18 @@ class WeekWindow(FramelessMainWindow):
         foreground = self._header_foreground_color()
         pixmap = get_padded_colored_icon("search.svg", foreground, icon_size=10, canvas_size=16)
         self.search_action.setIcon(QIcon(pixmap) if not pixmap.isNull() else QIcon("assets/icons/search.svg"))
+        if hasattr(self, "search_clear_action"):
+            clear_pixmap = get_padded_colored_icon(
+                "search_clear.svg",
+                foreground,
+                icon_size=8,
+                canvas_size=14,
+            )
+            self.search_clear_action.setIcon(
+                QIcon(clear_pixmap)
+                if not clear_pixmap.isNull()
+                else QIcon("assets/icons/search_clear.svg")
+            )
 
     def _apply_week_header_foreground(self):
         foreground = self._header_foreground_color()
@@ -2810,6 +2846,7 @@ class WeekWindow(FramelessMainWindow):
         self.page_list.confirm_requested.connect(self.on_list_confirmed)
 
     def switch_to_add_page(self):
+        self._hide_week_query_panels()
         if self.body_stack.currentWidget() == self.page_add:
             self.switch_to_main_board()
             return
@@ -2980,6 +3017,10 @@ class WeekWindow(FramelessMainWindow):
         super().showEvent(event)
         self.refresh_week_data()
 
+    def hideEvent(self, event):
+        self._hide_week_query_panels()
+        super().hideEvent(event)
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if hasattr(self, 'btn_prev') and hasattr(self, 'btn_next'):
@@ -3077,6 +3118,137 @@ class WeekWindow(FramelessMainWindow):
         self.lbl_week_num.setText(f"{month}月 第{week_num}周")
         self.load_week_schedules_from_db()
 
+    def filter_options(self):
+        return self._filter_options
+
+    def search_options_for_panel(self):
+        if self._search_options is not None:
+            return self._search_options
+        return self._filter_options.with_search_preferences(
+            self._last_search_scope,
+            self._last_match_mode,
+        )
+
+    def apply_filter_options(self, options):
+        self._filter_options = options
+        self.refresh_week_data()
+
+    def apply_search_options(self, options):
+        self._search_options = options
+        self._last_search_scope = options.search_scope
+        self._last_match_mode = options.match_mode
+        if self._search_keyword:
+            self.refresh_week_data()
+
+    def set_search_keyword(self, keyword):
+        normalized_keyword = str(keyword or "").strip()
+        if normalized_keyword:
+            if self._search_options is None:
+                self._search_options = self.search_options_for_panel()
+            self._search_keyword = normalized_keyword
+        else:
+            self._search_keyword = ""
+            self._search_options = None
+        self.refresh_week_data()
+
+    def _active_query_options(self):
+        if self._search_keyword:
+            return self._search_options or self.search_options_for_panel()
+        return self._filter_options
+
+    def _apply_schedule_query(self, schedules, day_index):
+        options = self._active_query_options()
+        if day_index not in options.weekdays:
+            return []
+        return ScheduleQueryService.apply_options(
+            schedules,
+            options,
+            self._search_keyword,
+        )
+
+    def _on_search_text_changed(self, text):
+        self.search_clear_action.setVisible(bool(text))
+        self.set_search_keyword(text)
+
+    def toggle_search_options_panel(self):
+        panel = self._ensure_week_query_panel("search")
+        if panel.isVisible():
+            panel.close()
+            return
+        if self._filter_options_panel is not None:
+            self._filter_options_panel.close()
+        panel.set_options(
+            self.search_options_for_panel(),
+            db_manager.get_active_categories("schedule"),
+        )
+        self._show_week_query_panel(panel)
+
+    def toggle_filter_options_panel(self):
+        panel = self._ensure_week_query_panel("filter")
+        if panel.isVisible():
+            panel.close()
+            return
+        if self._search_options_panel is not None:
+            self._search_options_panel.close()
+        panel.set_options(
+            self.filter_options(),
+            db_manager.get_active_categories("schedule"),
+        )
+        self._show_week_query_panel(panel)
+
+    def _ensure_week_query_panel(self, panel_mode):
+        from .popups.week_query_options_panel import WeekQueryOptionsPanel
+
+        attribute_name = (
+            "_search_options_panel"
+            if panel_mode == "search"
+            else "_filter_options_panel"
+        )
+        panel = getattr(self, attribute_name)
+        if panel is None:
+            panel = WeekQueryOptionsPanel(panel_mode, self)
+            if panel_mode == "search":
+                panel.options_changed.connect(self.apply_search_options)
+                panel.applied.connect(self._handle_search_options_applied)
+            else:
+                panel.applied.connect(self._handle_filter_options_applied)
+            setattr(self, attribute_name, panel)
+        return panel
+
+    def _handle_search_options_applied(self, options):
+        self.apply_search_options(options)
+        if self._search_options_panel is not None:
+            self._search_options_panel.close()
+
+    def _handle_filter_options_applied(self, options):
+        self.apply_filter_options(options)
+        if self._filter_options_panel is not None:
+            self._filter_options_panel.close()
+
+    def _show_week_query_panel(self, panel):
+        self._position_week_query_panel(panel)
+        panel.show()
+        panel.raise_()
+        panel.activateWindow()
+
+    def _position_week_query_panel(self, panel):
+        window_geometry = self.frameGeometry()
+        x = window_geometry.left() - panel.width() - 8
+        y = window_geometry.top() + 8
+        screen = QApplication.screenAt(window_geometry.center()) or QApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            if x < available.left():
+                x = window_geometry.left() + 8
+            x = max(available.left(), min(x, available.right() - panel.width() + 1))
+            y = max(available.top(), min(y, available.bottom() - panel.height() + 1))
+        panel.move(x, y)
+
+    def _hide_week_query_panels(self):
+        for panel in (self._search_options_panel, self._filter_options_panel):
+            if panel is not None and panel.isVisible():
+                panel.close()
+
     def load_week_schedules_from_db(self):
         """直接从数据库读取本周所有数据，并渲染到 7 个面板"""
         has_any_schedule = False
@@ -3117,6 +3289,10 @@ class WeekWindow(FramelessMainWindow):
                 if ScheduleQueryService.is_schedule(s)
                 and getattr(s, "status", 0) != 2
             ]
+            valid_schedules = self._apply_schedule_query(
+                valid_schedules,
+                day_index,
+            )
             week_timetable_schedules[day_index] = list(valid_schedules)
 
             if valid_schedules:
@@ -3314,6 +3490,7 @@ class WeekWindow(FramelessMainWindow):
 
     def _on_window_drag_started(self):
         self.close_view_selector()
+        self._hide_week_query_panels()
 
     def eventFilter(self, obj, event):
         from PyQt6.QtCore import QEvent
@@ -3463,6 +3640,7 @@ class WeekWindow(FramelessMainWindow):
 
     def open_view_selector(self):
         """隐藏搜索框，显示视图选择器，并高亮顶部视图图标"""
+        self._hide_week_query_panels()
         self.search_box.hide()
         self.view_selector_container.show()
         self._apply_week_header_foreground()

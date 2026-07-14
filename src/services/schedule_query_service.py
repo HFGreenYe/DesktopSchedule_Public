@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import date
-from typing import Iterable, List, Optional, Sequence, TypeVar
+from typing import ClassVar, Iterable, List, Optional, Sequence, TypeVar
 
 
 T = TypeVar("T")
@@ -37,6 +37,31 @@ class ScheduleQueryOptions:
             self,
             search_scope=search_scope,
             match_mode=match_mode,
+        )
+
+
+@dataclass(frozen=True)
+class WeekScheduleQueryOptions(ScheduleQueryOptions):
+    ALL_WEEKDAYS: ClassVar[tuple[int, ...]] = tuple(range(7))
+
+    weekdays: tuple[int, ...] = ALL_WEEKDAYS
+
+    def __post_init__(self):
+        normalized = tuple(
+            sorted(
+                {
+                    int(weekday)
+                    for weekday in self.weekdays
+                    if 0 <= int(weekday) <= 6
+                }
+            )
+        )
+        object.__setattr__(self, "weekdays", normalized)
+
+    def has_filter_constraints(self) -> bool:
+        return (
+            super().has_filter_constraints()
+            or self.weekdays != self.ALL_WEEKDAYS
         )
 
 
