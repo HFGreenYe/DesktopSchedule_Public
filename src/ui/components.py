@@ -835,7 +835,24 @@ class SharedMoreMenu(QMenu):
         self.chk_startup.blockSignals(False)
         
     def _on_export_schedule(self):
-        print(f"[{self.parent_window.__class__.__name__}] 点击了导出日程")
+        from src.ui.popups.export_schedule_panel import ExportSchedulePanel
+
+        if (
+            not hasattr(self.parent_window, "export_schedule_panel")
+            or self.parent_window.export_schedule_panel is None
+        ):
+            self.parent_window.export_schedule_panel = ExportSchedulePanel(
+                self.parent_window
+            )
+
+        panel = self.parent_window.export_schedule_panel
+        if panel.isVisible():
+            panel.hide()
+            return
+        panel.reset_geometry_for_parent()
+        panel.show()
+        panel.raise_()
+        panel.activateWindow()
 
     def _on_show_history(self):
         from src.ui.popups.all_schedules_panel import AllSchedulesPanel

@@ -1,10 +1,12 @@
 import os
+from bisect import bisect_right
 from datetime import datetime
 
 from PyQt6.QtCore import (
     QEvent,
     QPointF,
     QPropertyAnimation,
+    QRect,
     QRectF,
     QSize,
     Qt,
@@ -12,9 +14,12 @@ from PyQt6.QtCore import (
     pyqtSignal,
 )
 from PyQt6.QtGui import (
+    QAction,
     QBrush,
     QColor,
     QFont,
+    QFontMetrics,
+    QGuiApplication,
     QIcon,
     QImage,
     QLinearGradient,
@@ -31,6 +36,8 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMenu,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -115,12 +122,13 @@ class _DotOptionButton(QPushButton):
 
 class _AllScheduleResultCard(QFrame):
     detail_requested = pyqtSignal(object)
+    context_requested = pyqtSignal(object, object)
 
     def __init__(self, schedule, category_name, parent=None):
         super().__init__(parent)
         self.schedule = schedule
         self.setObjectName("allScheduleResultCard")
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setStyleSheet(
             """
             QFrame#allScheduleResultCard {
@@ -154,7 +162,8 @@ class _AllScheduleResultCard(QFrame):
 
         title_label = QLabel(str(getattr(schedule, "title", "") or "未命名日程"))
         title_label.setStyleSheet(
-            "color: #111111; font-size: 12px; font-weight: bold;"
+            f"color: {AppConfig.COLOR_GRADIENT_START}; "
+            "font-size: 12px; font-weight: bold;"
         )
         title_label.setWordWrap(True)
         title_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
@@ -180,11 +189,13 @@ class _AllScheduleResultCard(QFrame):
             description_label.setStyleSheet(
                 "color: rgba(35, 35, 35, 0.86); font-size: 10px;"
             )
+            description_label.installEventFilter(self)
             layout.addWidget(description_label)
 
         time_label = QLabel(self._time_text(schedule))
         time_label.setWordWrap(True)
         time_label.setStyleSheet("color: rgba(45, 45, 45, 0.78); font-size: 10px;")
+        time_label.installEventFilter(self)
         layout.addWidget(time_label)
 
         meta_label = QLabel(
@@ -193,6 +204,7 @@ class _AllScheduleResultCard(QFrame):
         )
         meta_label.setWordWrap(True)
         meta_label.setStyleSheet("color: rgba(45, 45, 45, 0.72); font-size: 10px;")
+        meta_label.installEventFilter(self)
         layout.addWidget(meta_label)
 
     def eventFilter(self, obj, event):
@@ -202,7 +214,14 @@ class _AllScheduleResultCard(QFrame):
         ):
             self.detail_requested.emit(self.schedule)
             return True
+        if event.type() == QEvent.Type.ContextMenu and hasattr(event, "globalPos"):
+            self.context_requested.emit(self.schedule, event.globalPos())
+            return True
         return super().eventFilter(obj, event)
+
+    def contextMenuEvent(self, event):
+        self.context_requested.emit(self.schedule, event.globalPos())
+        event.accept()
 
     @staticmethod
     def _priority_color(schedule):
@@ -292,6 +311,8 @@ class AllSchedulesPanel(QWidget):
     OPTION_TITLE_WIDTH = 52
     OPTION_ROW_SPACING = 2
     OPTION_GRID_COLUMNS = 5
+    VIRTUAL_BUFFER_ITEMS = 4
+    VIRTUAL_ROW_SPACING = 6
 
     def __init__(self, parent_window=None):
         super().__init__(
@@ -310,6 +331,13 @@ class AllSchedulesPanel(QWidget):
         self._settings_icon_source = QPixmap()
         self._category_map = {}
         self._detail_signal_bound = False
+        self._result_items = []
+        self._result_records = []
+        self._result_heights = []
+        self._result_offsets = []
+        self._virtual_total_height = 0
+        self._virtual_render_range = (-1, -1)
+        self._virtual_width = 0
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setMouseTracking(True)
         self._setup_ui()
@@ -329,10 +357,30 @@ class AllSchedulesPanel(QWidget):
         self.setFixedWidth(width)
         self.setMinimumHeight(height)
         self.resize(width, height)
-        self.move(
-            parent_rect.left() + (parent_rect.width() - width) // 2,
-            parent_rect.top() + (parent_rect.height() - height) // 2,
-        )
+        gap = 8
+        preferred_x = parent_rect.x() + parent_rect.width() + gap
+        fallback_x = parent_rect.x() - width - gap
+        x = preferred_x
+        y = parent_rect.y()
+
+        screen = QGuiApplication.screenAt(parent_rect.center()) or QGuiApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            if preferred_x + width <= available.right() + 1:
+                x = preferred_x
+            elif fallback_x >= available.left():
+                x = fallback_x
+            else:
+                x = max(
+                    available.left(),
+                    min(preferred_x, available.right() - width + 1),
+                )
+            y = max(
+                available.top(),
+                min(y, available.bottom() - height + 1),
+            )
+
+        self.move(x, y)
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -541,7 +589,7 @@ class AllSchedulesPanel(QWidget):
 
         self.scroll_area = QScrollArea()
         self.scroll_area.setObjectName("allSchedulesScrollArea")
-        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setWidgetResizable(False)
         self.scroll_area.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
@@ -580,7 +628,8 @@ class AllSchedulesPanel(QWidget):
         self.results_container.setStyleSheet("background: transparent;")
         self.results_layout = QVBoxLayout(self.results_container)
         self.results_layout.setContentsMargins(0, 0, 0, 0)
-        self.results_layout.setSpacing(6)
+        self.results_layout.setSpacing(0)
+        self.results_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.empty_label = QLabel("暂无日程数据")
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.empty_label.setStyleSheet(
@@ -588,6 +637,9 @@ class AllSchedulesPanel(QWidget):
             "font-family: 'Microsoft YaHei UI'; background: transparent; border: none;"
         )
         self.scroll_area.setWidget(self.results_container)
+        self.scroll_area.verticalScrollBar().valueChanged.connect(
+            self._render_virtual_results
+        )
 
         display_layout.addWidget(self.scroll_area, 1)
         layout.addWidget(self.search_options_area, 0)
@@ -902,24 +954,77 @@ class AllSchedulesPanel(QWidget):
         )
         self.results_layout.addWidget(line)
 
-    def _category_name_for(self, schedule):
-        category = self._category_map.get(getattr(schedule, "category_id", None))
-        return getattr(category, "name", None) or "未分类"
+    def _add_virtual_spacer(self, height):
+        spacer = QWidget(self.results_container)
+        spacer.setObjectName("allSchedulesVirtualSpacer")
+        spacer.setFixedHeight(max(0, int(height)))
+        spacer.setStyleSheet("background: transparent; border: none;")
+        self.results_layout.addWidget(spacer)
 
-    def refresh_results(self, *_args):
-        if not hasattr(self, "results_layout"):
-            return
+    def _result_text_width(self):
+        viewport_width = 0
+        if hasattr(self, "scroll_area"):
+            viewport_width = self.scroll_area.viewport().width()
+        return max(80, int(viewport_width) - 8)
 
-        self._clear_results_layout()
-        results = self._filtered_results()
-        if not results:
-            self._show_empty_result()
-            return
+    @staticmethod
+    def _wrapped_text_height(text, width, point_size, bold=False):
+        text = str(text or "")
+        if not text:
+            return 0
+        font = QFont("Microsoft YaHei UI")
+        font.setPointSize(point_size)
+        font.setBold(bold)
+        metrics = QFontMetrics(font)
+        rect = metrics.boundingRect(
+            QRect(0, 0, max(1, int(width)), 10000),
+            Qt.TextFlag.TextWordWrap.value,
+            text,
+        )
+        return max(metrics.height(), rect.height())
 
-        self.empty_label.hide()
+    def _estimate_record_height(self, record, width):
+        kind, schedule = record
+        if kind == "separator":
+            return 1 + self.VIRTUAL_ROW_SPACING
+
+        title_height = self._wrapped_text_height(
+            getattr(schedule, "title", "") or "未命名日程",
+            width,
+            12,
+            bold=True,
+        )
+        description = str(getattr(schedule, "description", "") or "").strip()
+        description_height = self._wrapped_text_height(description, width, 10)
+        time_height = self._wrapped_text_height(
+            _AllScheduleResultCard._time_text(schedule),
+            width,
+            10,
+        )
+        meta_height = self._wrapped_text_height(
+            f"{self._category_name_for(schedule)} · "
+            f"{_AllScheduleResultCard._priority_text(schedule)} · "
+            f"{_AllScheduleResultCard._status_text(schedule)} · "
+            f"{_AllScheduleResultCard._repeat_text(schedule)}",
+            width,
+            10,
+        )
+        text_count = 3 + (1 if description else 0)
+        return (
+            11
+            + title_height
+            + description_height
+            + time_height
+            + meta_height
+            + max(0, text_count - 1) * 4
+            + self.VIRTUAL_ROW_SPACING
+        )
+
+    def _build_result_records(self, results):
         has_schedule = any(not ScheduleQueryService.is_todo(item) for item in results)
         has_todo = any(ScheduleQueryService.is_todo(item) for item in results)
         separator_added = False
+        records = []
         for schedule in results:
             if (
                 has_schedule
@@ -927,18 +1032,209 @@ class AllSchedulesPanel(QWidget):
                 and not separator_added
                 and ScheduleQueryService.is_todo(schedule)
             ):
-                self._add_todo_separator()
+                records.append(("separator", None))
                 separator_added = True
+            records.append(("schedule", schedule))
+        return records
+
+    def _rebuild_virtual_metrics(self):
+        width = self._result_text_width()
+        self._virtual_width = width
+        self._result_heights = [
+            self._estimate_record_height(record, width)
+            for record in self._result_records
+        ]
+        offsets = []
+        current = 0
+        for height in self._result_heights:
+            offsets.append(current)
+            current += int(height)
+        self._result_offsets = offsets
+        self._virtual_total_height = max(0, int(current))
+        self.results_container.setFixedSize(
+            max(1, self.scroll_area.viewport().width()),
+            max(self.scroll_area.viewport().height(), self._virtual_total_height),
+        )
+        self._virtual_render_range = (-1, -1)
+
+    def _render_virtual_results(self, *_args):
+        if not hasattr(self, "results_layout"):
+            return
+        if not self._result_records:
+            return
+
+        current_width = self._result_text_width()
+        if current_width != self._virtual_width:
+            self._rebuild_virtual_metrics()
+
+        viewport_height = max(1, self.scroll_area.viewport().height())
+        scroll_value = self.scroll_area.verticalScrollBar().value()
+        start = max(
+            0,
+            bisect_right(self._result_offsets, scroll_value)
+            - 1
+            - self.VIRTUAL_BUFFER_ITEMS,
+        )
+        end = min(
+            len(self._result_records),
+            bisect_right(
+                self._result_offsets,
+                scroll_value + viewport_height,
+            )
+            + 1
+            + self.VIRTUAL_BUFFER_ITEMS,
+        )
+
+        if (start, end) == self._virtual_render_range:
+            return
+        self._virtual_render_range = (start, end)
+        self._clear_results_layout()
+
+        top_height = self._result_offsets[start] if start < len(self._result_offsets) else 0
+        self._add_virtual_spacer(top_height)
+
+        for index in range(start, end):
+            kind, schedule = self._result_records[index]
+            if kind == "separator":
+                self._add_todo_separator()
+                continue
             card = _AllScheduleResultCard(
                 schedule,
                 self._category_name_for(schedule),
                 self.results_container,
             )
             card.detail_requested.connect(self.schedule_detail_requested.emit)
-            self.results_layout.addWidget(
-                card
+            card.context_requested.connect(self._show_result_context_menu)
+            card.setFixedHeight(max(1, int(self._result_heights[index])))
+            self.results_layout.addWidget(card)
+
+        bottom_height = self._virtual_total_height
+        if end > 0 and end <= len(self._result_offsets):
+            bottom_height -= self._result_offsets[end - 1] + self._result_heights[end - 1]
+        self._add_virtual_spacer(bottom_height)
+
+    def _category_name_for(self, schedule):
+        category = self._category_map.get(getattr(schedule, "category_id", None))
+        return getattr(category, "name", None) or "未分类"
+
+    def _show_result_context_menu(self, schedule, global_pos):
+        menu = QMenu(self)
+        menu.setStyleSheet(
+            """
+            QMenu {
+                background-color: rgba(255, 255, 255, 0.96);
+                border: 1px solid rgba(0, 0, 0, 0.12);
+                border-radius: 6px;
+                padding: 5px;
+                color: #333333;
+                font-family: "Microsoft YaHei UI";
+                font-size: 12px;
+            }
+            QMenu::item {
+                background: transparent;
+                padding: 5px 18px;
+                border-radius: 4px;
+            }
+            QMenu::item:selected {
+                background-color: rgba(0, 102, 204, 0.10);
+                color: #0066cc;
+            }
+            """
+        )
+
+        open_action = QAction("打开详情", menu)
+        open_action.triggered.connect(lambda: self.schedule_detail_requested.emit(schedule))
+        menu.addAction(open_action)
+        menu.addSeparator()
+
+        is_completed = int(getattr(schedule, "status", 0) or 0) == 1
+        status_action = QAction("撤销完成" if is_completed else "完成日程", menu)
+        status_action.triggered.connect(
+            lambda: self._handle_status_change(schedule, 0 if is_completed else 1)
+        )
+        menu.addAction(status_action)
+
+        delete_action = QAction("删除日程", menu)
+        delete_action.triggered.connect(lambda: self._handle_delete_schedule(schedule))
+        menu.addAction(delete_action)
+
+        menu.exec(global_pos)
+
+    def _handle_status_change(self, schedule, new_status):
+        schedule_id = getattr(schedule, "id", None)
+        if schedule_id is None:
+            return
+        try:
+            from src.data.database import db_manager
+
+            if db_manager.update_schedule_status(schedule_id, new_status):
+                try:
+                    schedule.status = new_status
+                except Exception:
+                    pass
+                self.refresh_results()
+                self._notify_schedule_changed(schedule)
+        except Exception as exc:
+            print(f"[AllSchedulesPanel] update status failed: {exc}")
+
+    def _handle_delete_schedule(self, schedule):
+        schedule_id = getattr(schedule, "id", None)
+        if schedule_id is None:
+            return
+        title = str(getattr(schedule, "title", "") or "未命名日程")
+        reply = QMessageBox.question(
+            self,
+            "确认删除",
+            f"确定删除“{title}”吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            from src.data.database import db_manager
+
+            if db_manager.delete_schedule(schedule_id):
+                self.refresh_results()
+                self._notify_schedule_changed(None)
+        except Exception as exc:
+            print(f"[AllSchedulesPanel] delete schedule failed: {exc}")
+
+    def _notify_schedule_changed(self, schedule):
+        parent = self.parent_window
+        if parent is None:
+            return
+        if hasattr(parent, "_refresh_dashboard_todo_week"):
+            parent._refresh_dashboard_todo_week()
+            return
+        signal = getattr(parent, "schedule_updated", None)
+        if signal is not None and hasattr(signal, "emit"):
+            signal.emit(schedule)
+
+    def refresh_results(self, *_args):
+        if not hasattr(self, "results_layout"):
+            return
+
+        self._clear_results_layout()
+        results = self._filtered_results()
+        self._result_items = list(results)
+        self._result_records = self._build_result_records(self._result_items)
+        if not results:
+            self._result_records = []
+            self._result_heights = []
+            self._result_offsets = []
+            self._virtual_total_height = 0
+            self.results_container.setFixedSize(
+                max(1, self.scroll_area.viewport().width()),
+                max(1, self.scroll_area.viewport().height()),
             )
-        self.results_layout.addStretch(1)
+            self._show_empty_result()
+            return
+
+        self.empty_label.hide()
+        self._rebuild_virtual_metrics()
+        self.scroll_area.verticalScrollBar().setValue(0)
+        self._render_virtual_results()
 
     def _load_tinted_pixmap(self, icon_name, color, target_size=16):
         path = f"assets/icons/{icon_name}"
@@ -1096,6 +1392,9 @@ class AllSchedulesPanel(QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._update_header_button_positions()
+        if getattr(self, "_result_records", None):
+            self._rebuild_virtual_metrics()
+            self._render_virtual_results()
 
     def _install_resize_event_filters(self):
         for widget in (
