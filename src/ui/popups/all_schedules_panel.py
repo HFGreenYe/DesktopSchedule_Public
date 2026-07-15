@@ -1,6 +1,16 @@
 import os
+from datetime import datetime
 
-from PyQt6.QtCore import QEvent, QPointF, QPropertyAnimation, QRectF, QSize, Qt, pyqtProperty
+from PyQt6.QtCore import (
+    QEvent,
+    QPointF,
+    QPropertyAnimation,
+    QRectF,
+    QSize,
+    Qt,
+    pyqtProperty,
+    pyqtSignal,
+)
 from PyQt6.QtGui import (
     QBrush,
     QColor,
@@ -29,6 +39,8 @@ from PyQt6.QtWidgets import (
 )
 
 from src.config import AppConfig
+from src.services.schedule_query_service import ScheduleQueryOptions, ScheduleQueryService
+from src.services.schedule_sort_service import ScheduleSortOptions, ScheduleSortService
 from src.ui.popups.day_query_options_panel import DayQueryOptionsPanel
 from src.utils.window_preferences import set_window_pin_state
 
@@ -62,20 +74,37 @@ class _DotOptionButton(QPushButton):
         radius = 3.0
         dot_gap = 3.0
         edge_padding = 1.0
-        text_width = painter.fontMetrics().horizontalAdvance(self.text())
         text_left = edge_padding
-        text_rect = QRectF(text_left, 0, text_width, self.height())
-        painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self.text())
+        dot_size = radius * 2.0
+        available_text_width = max(
+            0,
+            int(self.width() - edge_padding * 2.0 - dot_size - dot_gap),
+        )
+        display_text = painter.fontMetrics().elidedText(
+            self.text(),
+            Qt.TextElideMode.ElideRight,
+            available_text_width,
+        )
+        text_width = min(
+            painter.fontMetrics().horizontalAdvance(display_text),
+            available_text_width,
+        )
+        text_rect = QRectF(text_left, 0, available_text_width, self.height())
+        painter.drawText(
+            text_rect,
+            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+            display_text,
+        )
 
         dot_x = min(
-            text_rect.right() + dot_gap,
-            self.width() - radius * 2.0 - edge_padding,
+            text_left + text_width + dot_gap,
+            self.width() - dot_size - edge_padding,
         )
         dot_rect = QRectF(
             dot_x,
             self.height() / 2.0 - radius,
-            radius * 2.0,
-            radius * 2.0,
+            dot_size,
+            dot_size,
         )
         painter.setPen(QPen(QColor(255, 255, 255, 230), 1))
         selected_color = QColor(255, 255, 255, 191)
@@ -84,7 +113,181 @@ class _DotOptionButton(QPushButton):
         painter.end()
 
 
+class _AllScheduleResultCard(QFrame):
+    detail_requested = pyqtSignal(object)
+
+    def __init__(self, schedule, category_name, parent=None):
+        super().__init__(parent)
+        self.schedule = schedule
+        self.setObjectName("allScheduleResultCard")
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.setStyleSheet(
+            """
+            QFrame#allScheduleResultCard {
+                background: transparent;
+                border: none;
+            }
+            QLabel {
+                background: transparent;
+                border: none;
+                font-family: "Microsoft YaHei UI";
+            }
+            """
+        )
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(2, 3, 2, 8)
+        layout.setSpacing(4)
+
+        top_row = QHBoxLayout()
+        top_row.setContentsMargins(0, 0, 0, 0)
+        top_row.setSpacing(0)
+
+        dot = QLabel()
+        dot.setFixedSize(8, 8)
+        dot.setStyleSheet(
+            f"background-color: {self._priority_color(schedule)}; "
+            "border-radius: 4px; border: none;"
+        )
+        dot.setVisible(False)
+        top_row.addWidget(dot, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        title_label = QLabel(str(getattr(schedule, "title", "") or "未命名日程"))
+        title_label.setStyleSheet(
+            "color: #111111; font-size: 12px; font-weight: bold;"
+        )
+        title_label.setWordWrap(True)
+        title_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        title_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        title_label.installEventFilter(self)
+        self.title_label = title_label
+        top_row.addWidget(title_label, 1)
+
+        type_label = QLabel(self._type_text(schedule))
+        type_label.setStyleSheet("color: rgba(45, 45, 45, 0.76); font-size: 10px;")
+        type_label.setVisible(False)
+        top_row.addWidget(type_label, alignment=Qt.AlignmentFlag.AlignRight)
+        layout.addLayout(top_row)
+
+        description = str(getattr(schedule, "description", "") or "").strip()
+        if description:
+            description_label = QLabel(description)
+            description_label.setWordWrap(True)
+            description_label.setSizePolicy(
+                QSizePolicy.Policy.Ignored,
+                QSizePolicy.Policy.Preferred,
+            )
+            description_label.setStyleSheet(
+                "color: rgba(35, 35, 35, 0.86); font-size: 10px;"
+            )
+            layout.addWidget(description_label)
+
+        time_label = QLabel(self._time_text(schedule))
+        time_label.setWordWrap(True)
+        time_label.setStyleSheet("color: rgba(45, 45, 45, 0.78); font-size: 10px;")
+        layout.addWidget(time_label)
+
+        meta_label = QLabel(
+            f"{category_name} · {self._priority_text(schedule)} · "
+            f"{self._status_text(schedule)} · {self._repeat_text(schedule)}"
+        )
+        meta_label.setWordWrap(True)
+        meta_label.setStyleSheet("color: rgba(45, 45, 45, 0.72); font-size: 10px;")
+        layout.addWidget(meta_label)
+
+    def eventFilter(self, obj, event):
+        if (
+            obj is getattr(self, "title_label", None)
+            and event.type() == QEvent.Type.MouseButtonDblClick
+        ):
+            self.detail_requested.emit(self.schedule)
+            return True
+        return super().eventFilter(obj, event)
+
+    @staticmethod
+    def _priority_color(schedule):
+        return {2: "#ff4d4f", 1: "#faad14", 0: "#52c41a"}.get(
+            int(getattr(schedule, "priority", 0) or 0),
+            "#52c41a",
+        )
+
+    @staticmethod
+    def _priority_text(schedule):
+        return {2: "高重要性", 1: "中重要性", 0: "低重要性"}.get(
+            int(getattr(schedule, "priority", 0) or 0),
+            "低重要性",
+        )
+
+    @staticmethod
+    def _status_text(schedule):
+        status = int(getattr(schedule, "status", 0) or 0)
+        if status == 1:
+            return "已完成"
+        if status == 2:
+            return "已隐藏"
+        if _AllScheduleResultCard._is_overdue(schedule):
+            return "已过期"
+        return "未完成"
+
+    @staticmethod
+    def _repeat_text(schedule):
+        rule = str(getattr(schedule, "repeat_rule", "") or "").strip()
+        if not rule or rule in {"none", "无", "不重复"}:
+            return "不重复"
+        return rule
+
+    @staticmethod
+    def _type_text(schedule):
+        if ScheduleQueryService.is_todo(schedule):
+            return "待办"
+        if _AllScheduleResultCard._is_interval(schedule):
+            return "时间段"
+        return "DDL"
+
+    @staticmethod
+    def _is_interval(schedule):
+        start_time = getattr(schedule, "start_time", None)
+        end_time = getattr(schedule, "end_time", None)
+        return bool(start_time and end_time and start_time != end_time)
+
+    @staticmethod
+    def _effective_time(schedule):
+        if _AllScheduleResultCard._is_interval(schedule):
+            return getattr(schedule, "end_time", None)
+        return (
+            getattr(schedule, "end_time", None)
+            or getattr(schedule, "start_time", None)
+            or getattr(schedule, "created_at", None)
+        )
+
+    @staticmethod
+    def _is_overdue(schedule):
+        if int(getattr(schedule, "status", 0) or 0) == 1:
+            return False
+        effective_time = _AllScheduleResultCard._effective_time(schedule)
+        return isinstance(effective_time, datetime) and effective_time < datetime.now()
+
+    @staticmethod
+    def _format_dt(value):
+        return value.strftime("%Y-%m-%d %H:%M") if isinstance(value, datetime) else ""
+
+    @classmethod
+    def _time_text(cls, schedule):
+        start_time = getattr(schedule, "start_time", None)
+        end_time = getattr(schedule, "end_time", None)
+        if start_time and end_time and start_time != end_time:
+            return f"{cls._format_dt(start_time)} → {cls._format_dt(end_time)}"
+        if end_time:
+            return f"截止：{cls._format_dt(end_time)}"
+        if start_time:
+            return cls._format_dt(start_time)
+        created_at = getattr(schedule, "created_at", None)
+        return f"创建：{cls._format_dt(created_at)}" if created_at else "未设置时间"
+
+
 class AllSchedulesPanel(QWidget):
+    schedule_detail_requested = pyqtSignal(object)
+
     RESIZE_MARGIN = 14
     OPTION_TITLE_WIDTH = 52
     OPTION_ROW_SPACING = 2
@@ -105,6 +308,8 @@ class AllSchedulesPanel(QWidget):
         self._search_options_visible = False
         self._settings_icon_angle = 0.0
         self._settings_icon_source = QPixmap()
+        self._category_map = {}
+        self._detail_signal_bound = False
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setMouseTracking(True)
         self._setup_ui()
@@ -264,43 +469,49 @@ class AllSchedulesPanel(QWidget):
         settings_layout = QGridLayout(self.settings_area)
         settings_layout.setContentsMargins(0, 0, 0, 0)
         self._prepare_option_grid(settings_layout)
-        self._add_option_row(
+        self.completion_buttons = self._add_compact_option_row(
             settings_layout,
             "完成情况",
             ["已完成", "已过期", "未完成", "全部"],
             checked_index=3,
+            values=["completed", "overdue", "active", "all"],
         )
-        self._add_option_row(
+        self.type_buttons = self._add_option_row(
             settings_layout,
             "日程类型",
             ["日程", "DDL", "时间段", "待办", "全部"],
             checked_index=4,
+            values=["schedule", "point", "interval", "todo", "all"],
         )
-        self._add_option_row(
+        self.priority_buttons = self._add_compact_option_row(
             settings_layout,
             "重要性",
             ["低", "中", "高", "全部"],
             checked_index=3,
+            values=[0, 1, 2, None],
         )
-        self._add_option_row(
+        self.reminder_buttons = self._add_compact_option_row(
             settings_layout,
             "提醒",
             ["提醒", "无提醒", "全部"],
             checked_index=2,
+            values=["with", "without", "all"],
         )
-        self._add_option_row(
+        self.repeat_buttons = self._add_compact_option_row(
             settings_layout,
             "重复",
             ["重复", "不重复", "全部"],
             checked_index=2,
+            values=["repeated", "none", "all"],
         )
         self.category_combo = self._create_category_combo()
         self._add_combo_row(settings_layout, "清单", self.category_combo)
-        self._add_option_row(
+        self.sort_buttons = self._add_compact_option_row(
             settings_layout,
             "排序方式",
-            ["按重要性", "按时间"],
+            ["重要性", "时间", "创建时间"],
             checked_index=1,
+            values=["priority", "time", "created"],
         )
         self.settings_area.hide()
 
@@ -312,17 +523,19 @@ class AllSchedulesPanel(QWidget):
         search_options_layout = QGridLayout(self.search_options_area)
         search_options_layout.setContentsMargins(0, 0, 0, 0)
         self._prepare_option_grid(search_options_layout)
-        self._add_option_row(
+        self.search_scope_buttons = self._add_option_row(
             search_options_layout,
             "搜索范围",
             ["标题", "标题+详情"],
             checked_index=0,
+            values=["title", "title_description"],
         )
-        self._add_option_row(
+        self.search_match_buttons = self._add_option_row(
             search_options_layout,
             "搜索设置",
             ["模糊搜索", "精准搜索"],
             checked_index=0,
+            values=["fuzzy", "exact"],
         )
         self.search_options_area.hide()
 
@@ -330,6 +543,9 @@ class AllSchedulesPanel(QWidget):
         self.scroll_area.setObjectName("allSchedulesScrollArea")
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.scroll_area.setVerticalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
         self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
@@ -344,12 +560,13 @@ class AllSchedulesPanel(QWidget):
             }
             QScrollBar:vertical {
                 background: transparent;
-                width: 6px;
+                width: 0px;
                 margin: 0px;
             }
             QScrollBar::handle:vertical {
-                background: rgba(255, 255, 255, 0.55);
-                border-radius: 3px;
+                background: transparent;
+                border: none;
+                border-radius: 0px;
                 min-height: 24px;
             }
             QScrollBar::add-line:vertical,
@@ -361,18 +578,15 @@ class AllSchedulesPanel(QWidget):
         )
         self.results_container = QWidget()
         self.results_container.setStyleSheet("background: transparent;")
-        results_layout = QVBoxLayout(self.results_container)
-        results_layout.setContentsMargins(0, 0, 0, 0)
-        results_layout.setSpacing(6)
+        self.results_layout = QVBoxLayout(self.results_container)
+        self.results_layout.setContentsMargins(0, 0, 0, 0)
+        self.results_layout.setSpacing(6)
         self.empty_label = QLabel("暂无日程数据")
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.empty_label.setStyleSheet(
             "color: rgba(0, 102, 204, 0.72); font-size: 12px; "
             "font-family: 'Microsoft YaHei UI'; background: transparent; border: none;"
         )
-        results_layout.addStretch(1)
-        results_layout.addWidget(self.empty_label)
-        results_layout.addStretch(1)
         self.scroll_area.setWidget(self.results_container)
 
         display_layout.addWidget(self.scroll_area, 1)
@@ -380,9 +594,12 @@ class AllSchedulesPanel(QWidget):
         layout.addWidget(self.settings_area, 0)
         layout.addWidget(self.display_frame, 1)
         self.search_box.installEventFilter(self)
+        self.search_box.textChanged.connect(self.refresh_results)
+        self.category_combo.currentIndexChanged.connect(self.refresh_results)
         self._install_resize_event_filters()
         self._update_header_icons()
         self._update_header_button_positions()
+        self.refresh_results()
 
     def _prepare_option_grid(self, grid):
         grid.setHorizontalSpacing(self.OPTION_ROW_SPACING)
@@ -408,7 +625,7 @@ class AllSchedulesPanel(QWidget):
             return [(2, 2), (4, 2)]
         return [(1, self.OPTION_GRID_COLUMNS)]
 
-    def _add_option_row(self, parent_layout, title, options, checked_index=0):
+    def _add_option_row(self, parent_layout, title, options, checked_index=0, values=None):
         row = self._next_grid_row(parent_layout)
         title_label = QLabel(title)
         title_label.setFixedWidth(self.OPTION_TITLE_WIDTH)
@@ -423,6 +640,9 @@ class AllSchedulesPanel(QWidget):
         positions = self._option_grid_positions(len(options))
         for index, text in enumerate(options):
             button = _DotOptionButton(text)
+            button.setToolTip(text)
+            option_values = values if values is not None else options
+            button.setProperty("option_value", option_values[index])
             button.setChecked(index == checked_index)
             column, span = positions[index]
             parent_layout.addWidget(button, row, column, 1, span)
@@ -435,6 +655,45 @@ class AllSchedulesPanel(QWidget):
                     current,
                 )
             )
+        return buttons
+
+    def _add_compact_option_row(self, parent_layout, title, options, checked_index=0, values=None):
+        row = self._next_grid_row(parent_layout)
+        title_label = QLabel(title)
+        title_label.setFixedWidth(self.OPTION_TITLE_WIDTH)
+        title_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        title_label.setStyleSheet(
+            "color: white; font-family: 'Microsoft YaHei UI'; font-size: 10px; "
+            "background: transparent; border: none;"
+        )
+        parent_layout.addWidget(title_label, row, 0)
+
+        option_widget = QWidget()
+        option_widget.setStyleSheet("background: transparent; border: none;")
+        option_layout = QHBoxLayout(option_widget)
+        option_layout.setContentsMargins(0, 0, 0, 0)
+        option_layout.setSpacing(2)
+
+        buttons = []
+        option_values = values if values is not None else options
+        for index, text in enumerate(options):
+            button = _DotOptionButton(text)
+            button.setToolTip(text)
+            button.setProperty("option_value", option_values[index])
+            button.setChecked(index == checked_index)
+            option_layout.addWidget(button, 1)
+            buttons.append(button)
+
+        parent_layout.addWidget(option_widget, row, 1, 1, self.OPTION_GRID_COLUMNS)
+
+        for button in buttons:
+            button.clicked.connect(
+                lambda checked=False, current=button, group=buttons: self._select_option_button(
+                    group,
+                    current,
+                )
+            )
+        return buttons
 
     def _add_combo_row(self, parent_layout, title, combo):
         row = self._next_grid_row(parent_layout)
@@ -452,15 +711,7 @@ class AllSchedulesPanel(QWidget):
         combo = QComboBox()
         combo.setFixedHeight(22)
         combo.setCursor(Qt.CursorShape.PointingHandCursor)
-        combo.addItem("全部清单", None)
-        combo.addItem("未分类", "__uncategorized__")
-        try:
-            from src.data.database import db_manager
-
-            for category in db_manager.get_active_categories():
-                combo.addItem(getattr(category, "name", "未命名清单"), getattr(category, "id", None))
-        except Exception:
-            pass
+        self._populate_category_combo(combo)
         combo.setStyleSheet(
             """
             QComboBox {
@@ -498,9 +749,196 @@ class AllSchedulesPanel(QWidget):
         combo.setFixedHeight(22)
         return combo
 
+    def _populate_category_combo(self, combo, selected_value=None):
+        combo.blockSignals(True)
+        try:
+            combo.clear()
+            combo.addItem("全部清单", ScheduleQueryOptions.ALL_CATEGORIES)
+            combo.addItem("未分类", ScheduleQueryOptions.UNCATEGORIZED)
+            try:
+                from src.data.database import db_manager
+
+                for category in db_manager.get_active_categories():
+                    combo.addItem(
+                        getattr(category, "name", "未命名清单"),
+                        getattr(category, "id", None),
+                    )
+            except Exception:
+                pass
+
+            if selected_value is not None:
+                index = combo.findData(selected_value)
+                if index >= 0:
+                    combo.setCurrentIndex(index)
+        finally:
+            combo.blockSignals(False)
+
+    def _reload_category_options(self):
+        if hasattr(self, "category_combo"):
+            self._populate_category_combo(
+                self.category_combo,
+                self.category_combo.currentData(),
+            )
+
     def _select_option_button(self, buttons, selected_button):
         for button in buttons:
             button.setChecked(button is selected_button)
+        self.refresh_results()
+
+    def _selected_value(self, buttons, fallback=None):
+        for button in buttons:
+            if button.isChecked():
+                return button.property("option_value")
+        return fallback
+
+    def _current_query_options(self):
+        return ScheduleQueryOptions(
+            category_id=self.category_combo.currentData(),
+            priority=self._selected_value(self.priority_buttons),
+            reminder_state=self._selected_value(self.reminder_buttons, "all") or "all",
+            repeat_kind=self._selected_value(self.repeat_buttons, "all") or "all",
+            search_scope=self._selected_value(self.search_scope_buttons, "title") or "title",
+            match_mode=self._selected_value(self.search_match_buttons, "fuzzy") or "fuzzy",
+        )
+
+    def _current_sort_options(self):
+        return ScheduleSortOptions(
+            include_completed=True,
+            include_overdue=True,
+            item_scope="all",
+            scheme=self._selected_value(self.sort_buttons, "time") or "time",
+            enabled=True,
+        )
+
+    def _load_all_schedules(self):
+        try:
+            from src.data.database import db_manager
+
+            self._category_map = db_manager.get_category_map()
+            return db_manager.get_all_schedules()
+        except Exception as exc:
+            print(f"[AllSchedulesPanel] load schedules failed: {exc}")
+            self._category_map = {}
+            return []
+
+    def _apply_completion_filter(self, items):
+        completion = self._selected_value(self.completion_buttons, "all") or "all"
+        if completion == "all":
+            return list(items)
+
+        filtered = []
+        for item in items:
+            status = int(getattr(item, "status", 0) or 0)
+            if status == 2:
+                continue
+            is_completed = status == 1
+            is_overdue = _AllScheduleResultCard._is_overdue(item)
+            if completion == "completed" and is_completed:
+                filtered.append(item)
+            elif completion == "overdue" and is_overdue:
+                filtered.append(item)
+            elif completion == "active" and not is_completed and not is_overdue:
+                filtered.append(item)
+        return filtered
+
+    def _apply_type_filter(self, items):
+        selected_type = self._selected_value(self.type_buttons, "all") or "all"
+        if selected_type == "all":
+            return list(items)
+
+        filtered = []
+        for item in items:
+            is_todo = ScheduleQueryService.is_todo(item)
+            is_interval = _AllScheduleResultCard._is_interval(item)
+            if selected_type == "todo" and is_todo:
+                filtered.append(item)
+            elif selected_type == "schedule" and not is_todo:
+                filtered.append(item)
+            elif selected_type == "interval" and not is_todo and is_interval:
+                filtered.append(item)
+            elif selected_type == "point" and not is_todo and not is_interval:
+                filtered.append(item)
+        return filtered
+
+    def _filtered_results(self):
+        items = self._load_all_schedules()
+        items = self._apply_completion_filter(items)
+        items = self._apply_type_filter(items)
+        items = ScheduleQueryService.apply_options(
+            items,
+            self._current_query_options(),
+            self.search_box.text(),
+        )
+        return ScheduleSortService.sort_for_all_schedules(
+            items,
+            self._current_sort_options(),
+        )
+
+    def _clear_results_layout(self):
+        while self.results_layout.count():
+            item = self.results_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None and widget is not self.empty_label:
+                widget.deleteLater()
+
+    def _show_empty_result(self):
+        self.empty_label.setText("暂无符合条件的日程数据")
+        self.empty_label.show()
+        self.results_layout.addStretch(1)
+        self.results_layout.addWidget(self.empty_label)
+        self.results_layout.addStretch(1)
+
+    def _add_todo_separator(self):
+        line = QFrame(self.results_container)
+        line.setObjectName("allSchedulesTodoSeparator")
+        line.setFixedHeight(1)
+        line.setStyleSheet(
+            """
+            QFrame#allSchedulesTodoSeparator {
+                background-color: rgba(45, 45, 45, 0.32);
+                border: none;
+            }
+            """
+        )
+        self.results_layout.addWidget(line)
+
+    def _category_name_for(self, schedule):
+        category = self._category_map.get(getattr(schedule, "category_id", None))
+        return getattr(category, "name", None) or "未分类"
+
+    def refresh_results(self, *_args):
+        if not hasattr(self, "results_layout"):
+            return
+
+        self._clear_results_layout()
+        results = self._filtered_results()
+        if not results:
+            self._show_empty_result()
+            return
+
+        self.empty_label.hide()
+        has_schedule = any(not ScheduleQueryService.is_todo(item) for item in results)
+        has_todo = any(ScheduleQueryService.is_todo(item) for item in results)
+        separator_added = False
+        for schedule in results:
+            if (
+                has_schedule
+                and has_todo
+                and not separator_added
+                and ScheduleQueryService.is_todo(schedule)
+            ):
+                self._add_todo_separator()
+                separator_added = True
+            card = _AllScheduleResultCard(
+                schedule,
+                self._category_name_for(schedule),
+                self.results_container,
+            )
+            card.detail_requested.connect(self.schedule_detail_requested.emit)
+            self.results_layout.addWidget(
+                card
+            )
+        self.results_layout.addStretch(1)
 
     def _load_tinted_pixmap(self, icon_name, color, target_size=16):
         path = f"assets/icons/{icon_name}"
@@ -649,6 +1087,11 @@ class AllSchedulesPanel(QWidget):
         self.is_pinned = bool(enabled)
         set_window_pin_state(self, self.is_pinned)
         self._update_header_icons()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._reload_category_options()
+        self.refresh_results()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

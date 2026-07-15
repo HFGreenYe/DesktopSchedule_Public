@@ -222,6 +222,8 @@ class ScheduleQueryService:
         rule = ScheduleQueryService._normalize_repeat_rule(
             getattr(item, "repeat_rule", "")
         )
+        if repeat_kind == "none":
+            return rule is None
         if repeat_kind == "repeated":
             return rule is not None
         if repeat_kind in {"daily", "weekly", "monthly"}:

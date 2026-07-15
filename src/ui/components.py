@@ -847,6 +847,7 @@ class SharedMoreMenu(QMenu):
             self.parent_window.all_schedules_panel = AllSchedulesPanel(self.parent_window)
 
         panel = self.parent_window.all_schedules_panel
+        self._bind_all_schedules_panel_routes(panel)
         if panel.isVisible():
             panel.hide()
             return
@@ -854,6 +855,28 @@ class SharedMoreMenu(QMenu):
         panel.show()
         panel.raise_()
         panel.activateWindow()
+
+    def _bind_all_schedules_panel_routes(self, panel):
+        if getattr(panel, "_detail_signal_bound", False):
+            return
+
+        if hasattr(self.parent_window, "open_schedule_detail_from_all_schedules"):
+            panel.schedule_detail_requested.connect(
+                self.parent_window.open_schedule_detail_from_all_schedules
+            )
+        elif hasattr(self.parent_window, "request_schedule_detail"):
+            panel.schedule_detail_requested.connect(
+                self.parent_window.request_schedule_detail.emit
+            )
+        elif hasattr(self.parent_window, "schedule_detail_requested"):
+            panel.schedule_detail_requested.connect(
+                lambda schedule, owner=self.parent_window: owner.schedule_detail_requested.emit(
+                    schedule,
+                    None,
+                )
+            )
+
+        panel._detail_signal_bound = True
 
     def _on_show_axis(self):
         global_signals.axis_board_requested.emit(self.parent_window)

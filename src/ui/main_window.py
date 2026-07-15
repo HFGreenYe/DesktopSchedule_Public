@@ -120,7 +120,9 @@ class MainWindow(FramelessMainWindow):
         self.page_todo.req_change_view.connect(self.switch_view)
         self.page_todo.req_refresh_all.connect(self.page_dashboard.refresh_data)
         self.page_todo.req_refresh_all.connect(self._refresh_axis_if_visible)
+        self.page_todo.req_refresh_all.connect(self._refresh_all_schedules_panels)
         self.page_dashboard.req_refresh_all.connect(self.page_todo.refresh_data)
+        self.page_dashboard.req_refresh_all.connect(self._refresh_all_schedules_panels)
         self.suspend_window = SuspendWindow()
         self.week_window = WeekWindow()
         self.month_window = MonthWindow()
@@ -269,11 +271,51 @@ class MainWindow(FramelessMainWindow):
         self.main_controller.request_refresh_many(
             ("dashboard", "todo", "week_if_visible", "axis_if_visible")
         )
+        self._refresh_all_schedules_panels()
         global_signals.refresh_requested.emit("dashboard_todo_week")
 
     def _refresh_axis_if_visible(self):
         if self.axis_board is not None and self.axis_board.isVisible():
             self.axis_board.refresh_data()
+
+    def _refresh_all_schedules_panels(self):
+        owners = [self]
+        for attr in ("week_window", "month_window"):
+            owner = getattr(self, attr, None)
+            if owner is not None:
+                owners.append(owner)
+
+        for owner in owners:
+            panel = getattr(owner, "all_schedules_panel", None)
+            if panel is None:
+                continue
+            if hasattr(panel, "_reload_category_options"):
+                panel._reload_category_options()
+            if hasattr(panel, "refresh_results"):
+                panel.refresh_results()
+
+    def open_schedule_detail_from_all_schedules(self, schedule_data):
+        if self.week_window.isVisible():
+            self.week_window.request_schedule_detail.emit(schedule_data)
+            return
+
+        if self.month_window.isVisible():
+            self.open_schedule_detail_from_month_panel(schedule_data)
+            return
+
+        todo_board = getattr(self, "todo_board", None)
+        if todo_board is not None and todo_board.isVisible():
+            self.page_dashboard._show_detail_popup(
+                schedule_data,
+                source_view="todo_board",
+            )
+            return
+
+        if self.body_stack.currentWidget() == self.page_todo:
+            self.page_todo._show_detail_popup(schedule_data, source_view="todo")
+            return
+
+        self.page_dashboard._show_detail_popup(schedule_data, source_view="dashboard")
 
     def _restore_schedule_display_mode(self):
         mode_id = get_timetable_preferences().get("display_mode", "card")
