@@ -14,11 +14,22 @@ from PyQt6.QtCore import (
     pyqtSignal,
     QDate,
     QRect,
+    QRectF,
     QSize,
     QEvent,
     QPoint,
 )
-from PyQt6.QtGui import QPainter, QColor, QBrush, QPen, QIcon, QTextCharFormat
+from PyQt6.QtGui import (
+    QBrush,
+    QColor,
+    QIcon,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
+    QPalette,
+    QPen,
+    QTextCharFormat,
+)
 import datetime
 from ..data.database import db_manager
 from ..config import AppConfig
@@ -35,8 +46,9 @@ def _calendar_accent_color():
 
 class HighlightCalendarWidget(QCalendarWidget):
     """自定义日历控件：负责在有日程的日期下方画三色小圆点"""
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, export_theme=False):
         super().__init__(parent)
+        self._export_theme = bool(export_theme)
         self.date_status = {} # 字典，记录具体状态颜色
         self.update_schedule_dates()
 
@@ -73,7 +85,10 @@ class HighlightCalendarWidget(QCalendarWidget):
 
     def paintCell(self, painter, rect, date):
         """重写底层绘制：根据不同颜色画点"""
-        super().paintCell(painter, rect, date)
+        if self._export_theme:
+            self._paint_export_cell(painter, rect, date)
+        else:
+            super().paintCell(painter, rect, date)
         
         py_date = date.toPyDate()
         if py_date in self.date_status:
@@ -99,17 +114,67 @@ class HighlightCalendarWidget(QCalendarWidget):
             painter.drawEllipse(x, y, dot_size, dot_size)
             painter.restore()
 
+    def _paint_export_cell(self, painter, rect, date):
+        overlay_start = QColor(
+            StyleManager.mix_colors(
+                AppConfig.COLOR_GRADIENT_START,
+                "#ffffff",
+                0.30,
+            )
+        )
+        overlay_end = QColor(
+            StyleManager.mix_colors(
+                AppConfig.COLOR_GRADIENT_END,
+                "#ffffff",
+                0.30,
+            )
+        )
+        progress = max(0.0, min(1.0, rect.center().y() / max(1, self.height())))
+        background = QColor(
+            round(overlay_start.red() + (overlay_end.red() - overlay_start.red()) * progress),
+            round(overlay_start.green() + (overlay_end.green() - overlay_start.green()) * progress),
+            round(overlay_start.blue() + (overlay_end.blue() - overlay_start.blue()) * progress),
+        )
+        selected = date == self.selectedDate()
+        painter.save()
+        painter.fillRect(
+            rect,
+            QColor(_calendar_accent_color()) if selected else background,
+        )
+
+        in_current_month = (
+            date.year() == self.yearShown() and date.month() == self.monthShown()
+        )
+        if selected:
+            text_color = QColor("white")
+        elif not in_current_month:
+            text_color = QColor("#999999")
+        elif date.dayOfWeek() in (Qt.DayOfWeek.Saturday, Qt.DayOfWeek.Sunday):
+            text_color = QColor("red")
+        else:
+            text_color = QColor("#333333")
+        is_today = date == QDate.currentDate()
+        if is_today and not selected:
+            text_color = QColor("#FAAD14")
+        font = painter.font()
+        font.setBold(is_today)
+        painter.setFont(font)
+        painter.setPen(text_color)
+        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, str(date.day()))
+        painter.restore()
+
 
 class CalendarPop(QWidget):
     """悬浮日历弹窗容器"""
     date_selected = pyqtSignal(object) 
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, export_theme=False):
         super().__init__(parent)
         self.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedSize(300, 260)
-        
+
+        self._export_theme = bool(export_theme)
         self.drag_pos = None 
         self.current_theme = "dark" 
         self.last_today = QDate.currentDate()
@@ -119,7 +184,7 @@ class CalendarPop(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        self.calendar = HighlightCalendarWidget(self)
+        self.calendar = HighlightCalendarWidget(self, self._export_theme)
         self.calendar.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.calendar.setFirstDayOfWeek(Qt.DayOfWeek.Monday)
         self.calendar.setGridVisible(False) 
@@ -160,6 +225,7 @@ class CalendarPop(QWidget):
 
         # --- 允许拖拽 ---
         nav_bar = self.calendar.findChild(QWidget, "qt_calendar_navigationbar")
+        self._nav_bar = nav_bar
         if nav_bar:
             nav_bar.installEventFilter(self)
             
@@ -172,21 +238,58 @@ class CalendarPop(QWidget):
         #self.theme_toggle_area.mouseDoubleClickEvent = self._toggle_theme 
 
     def _toggle_theme(self, event=None):
+        if self._export_theme:
+            return
         self.current_theme = "light" if self.current_theme == "dark" else "dark"
         self._apply_theme()
         self.update() 
 
     def _apply_theme(self):
-        if self.current_theme == "dark":
+        if self._export_theme:
+            bg_color = "transparent"
+            text_color = "#333333"
+            disable_color = "#999999"
+        elif self.current_theme == "dark":
             bg_color, text_color, disable_color = "#2b2b2b", "white", "#666666"
         else:
             bg_color, text_color, disable_color = "#ffffff", "#333333", "#cccccc"
 
         calendar_accent = _calendar_accent_color()
+        calendar_background = (
+            "background-color: transparent;" if self._export_theme else ""
+        )
+        navigation_background = (
+            "transparent" if self._export_theme else calendar_accent
+        )
+        if self._export_theme:
+            overlay_start = StyleManager.mix_colors(
+                AppConfig.COLOR_GRADIENT_START,
+                "#ffffff",
+                0.30,
+            )
+            overlay_end = StyleManager.mix_colors(
+                AppConfig.COLOR_GRADIENT_END,
+                "#ffffff",
+                0.30,
+            )
+            view_background = f"background-color: {overlay_start};"
+            view_alternate_background = overlay_start
+        else:
+            view_background = f"background-color: {bg_color};"
+            view_alternate_background = bg_color
+        menu_background = (
+            "rgba(255, 255, 255, 0.96)" if self._export_theme else bg_color
+        )
 
         self.calendar.setStyleSheet(f"""
-            QCalendarWidget QWidget {{ alternate-background-color: {bg_color};color: {text_color}; }}
-            QCalendarWidget QWidget#qt_calendar_navigationbar {{ background-color: {calendar_accent}; }}
+            QCalendarWidget {{ {calendar_background} }}
+            QCalendarWidget QWidget {{
+                alternate-background-color: {bg_color}; color: {text_color};
+                {calendar_background}
+            }}
+            QCalendarWidget QWidget#qt_calendar_navigationbar {{
+                background-color: {navigation_background};
+            }}
             
             QCalendarWidget QToolButton {{
                 color: white; background-color: transparent; border: none; 
@@ -196,7 +299,7 @@ class CalendarPop(QWidget):
             QCalendarWidget QToolButton:hover {{ background-color: rgba(0, 0, 0, 0.15); }}
             QCalendarWidget QToolButton:pressed {{ background-color: rgba(0, 0, 0, 0.3); }}
             
-            QCalendarWidget QMenu {{ background-color: {bg_color}; color: {text_color}; border: 1px solid {calendar_accent}; }}
+            QCalendarWidget QMenu {{ background-color: {menu_background}; color: {text_color}; border: 1px solid {calendar_accent}; }}
             
             /* 让箭头与文字紧凑聚拢 */
             QCalendarWidget QSpinBox {{ 
@@ -224,18 +327,41 @@ class CalendarPop(QWidget):
             }}
             
             QCalendarWidget QAbstractItemView:enabled {{
-                background-color: {bg_color}; 
+                {view_background}
+                alternate-background-color: {view_alternate_background};
                 selection-background-color: {calendar_accent}; selection-color: white;
                 font-family: 'Microsoft YaHei'; font-size: 13px; outline: 0px;
             }}
             QCalendarWidget QAbstractItemView:disabled {{ color: {disable_color}; }}
         """)
+        if self._export_theme:
+            calendar_view = self.calendar.findChild(
+                QTableView,
+                "qt_calendar_calendarview",
+            )
+            if calendar_view is not None:
+                calendar_view.viewport().setStyleSheet(view_background)
+                view_palette = calendar_view.palette()
+                view_palette.setColor(
+                    QPalette.ColorRole.Base,
+                    QColor(overlay_start),
+                )
+                view_palette.setColor(
+                    QPalette.ColorRole.AlternateBase,
+                    QColor(overlay_start),
+                )
+                calendar_view.setPalette(view_palette)
+                calendar_view.viewport().setPalette(view_palette)
         self._update_today_highlight()
 
     def _update_today_highlight(self):
         """标黄今天的日期，并处理跨天刷新逻辑"""
         today = QDate.currentDate()
-        today_color = "#FFD700" if self.current_theme == "dark" else "#FAAD14"
+        today_color = (
+            "#FAAD14"
+            if self._export_theme or self.current_theme == "light"
+            else "#FFD700"
+        )
         
         if self.last_today != today:
             # 如果跨天了，清除昨天的黄色格式
@@ -255,7 +381,7 @@ class CalendarPop(QWidget):
         nav_bar = self.calendar.findChild(QWidget, "qt_calendar_navigationbar")
         if obj == nav_bar:
             if event.type() == QEvent.Type.MouseButtonDblClick and event.button() == Qt.MouseButton.LeftButton:
-                self._toggle_theme()  # 触发主题切换
+                self._toggle_theme()
                 return True
             elif event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
                 self.drag_pos = event.globalPosition().toPoint() - self.pos()
@@ -271,6 +397,26 @@ class CalendarPop(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if self._export_theme:
+            outer_path = QPainterPath()
+            outer_path.addRoundedRect(QRectF(self.rect()), 8, 8)
+            gradient = QLinearGradient(0, 0, self.width(), self.height())
+            gradient.setColorAt(0.0, QColor(AppConfig.COLOR_GRADIENT_START))
+            gradient.setColorAt(1.0, QColor(AppConfig.COLOR_GRADIENT_END))
+            painter.fillPath(outer_path, gradient)
+
+            header_height = 32
+            if self._nav_bar is not None:
+                header_height = self._nav_bar.geometry().bottom() + 1
+            painter.save()
+            painter.setClipPath(outer_path)
+            painter.fillRect(
+                QRectF(0, header_height, self.width(), self.height() - header_height),
+                QColor(255, 255, 255, 179),
+            )
+            painter.restore()
+            return
+
         bg = QColor("#2b2b2b") if self.current_theme == "dark" else QColor("#ffffff")
         painter.setBrush(QBrush(bg))
         painter.setPen(QPen(QColor("rgba(255, 255, 255, 0.2)"), 1))

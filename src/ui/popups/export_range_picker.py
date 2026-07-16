@@ -1,7 +1,14 @@
 from datetime import date
 
-from PyQt6.QtCore import QPoint, QRectF, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QGuiApplication, QLinearGradient, QPainter, QPainterPath
+from PyQt6.QtCore import QEvent, QPoint, QRectF, Qt, pyqtSignal
+from PyQt6.QtGui import (
+    QColor,
+    QGuiApplication,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
+    QPen,
+)
 from PyQt6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -15,55 +22,90 @@ from PyQt6.QtWidgets import (
 from src.config import AppConfig
 
 
+class _PeriodBodyFrame(QFrame):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setStyleSheet("background: transparent; border: none;")
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        rect = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+        radius = 8.0
+        path = QPainterPath()
+        path.moveTo(rect.left(), rect.top())
+        path.lineTo(rect.right(), rect.top())
+        path.lineTo(rect.right(), rect.bottom() - radius)
+        path.quadTo(
+            rect.right(),
+            rect.bottom(),
+            rect.right() - radius,
+            rect.bottom(),
+        )
+        path.lineTo(rect.left() + radius, rect.bottom())
+        path.quadTo(
+            rect.left(),
+            rect.bottom(),
+            rect.left(),
+            rect.bottom() - radius,
+        )
+        path.closeSubpath()
+        painter.fillPath(path, QColor(255, 255, 255, 179))
+        painter.setPen(QPen(QColor("white"), 2))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawPath(path)
+
+
 class ExportPeriodPickerPopup(QWidget):
     period_selected = pyqtSignal(int, int)
 
     def __init__(self, mode, parent=None):
         super().__init__(
             parent,
-            Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint,
+            Qt.WindowType.Popup
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.NoDropShadowWindowHint,
         )
         if mode not in {"week", "month"}:
             raise ValueError(f"不支持的周期选择模式：{mode}")
         self.mode = mode
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setFixedSize(258, 146)
+        self._drag_offset = None
         self._setup_ui()
 
     def _setup_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(10, 8, 10, 10)
+        root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        header = QHBoxLayout()
-        header.setContentsMargins(4, 0, 0, 0)
-        title = QLabel("选择周" if self.mode == "week" else "选择月份")
-        title.setStyleSheet(
+        self.header_holder = QWidget()
+        self.header_holder.setFixedHeight(40)
+        header = QHBoxLayout(self.header_holder)
+        header.setContentsMargins(14, 6, 8, 4)
+        self.title = QLabel("选择周" if self.mode == "week" else "选择月份")
+        self.title.setStyleSheet(
             "color: white; font-family: 'Microsoft YaHei UI'; "
             "font-size: 14px; font-weight: bold; background: transparent;"
         )
-        close_button = QPushButton("×")
-        close_button.setFixedSize(24, 24)
-        close_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        close_button.setStyleSheet(
+        self.close_button = QPushButton("×", self)
+        self.close_button.setFixedSize(30, 30)
+        self.close_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.close_button.setStyleSheet(
             "QPushButton { color: white; background: transparent; border: none; "
             "font-size: 18px; } QPushButton:hover { background: #ff4d4f; "
-            "border-radius: 4px; }"
+            "border-top-right-radius: 8px; border-bottom-left-radius: 4px; }"
         )
-        close_button.clicked.connect(self.close)
-        header.addWidget(title)
+        self.close_button.clicked.connect(self.close)
+        header.addWidget(self.title)
         header.addStretch(1)
-        header.addWidget(close_button)
-        root.addLayout(header)
+        root.addWidget(self.header_holder)
 
-        frame = QFrame()
-        frame.setObjectName("exportPeriodPickerFrame")
-        frame.setStyleSheet(
-            "QFrame#exportPeriodPickerFrame { background-color: rgba(255,255,255,0.76); "
-            "border: 2px solid white; border-radius: 7px; }"
-        )
-        frame_layout = QVBoxLayout(frame)
-        frame_layout.setContentsMargins(12, 10, 12, 10)
+        self.body_frame = _PeriodBodyFrame()
+        self.body_frame.setObjectName("exportPeriodPickerFrame")
+        frame_layout = QVBoxLayout(self.body_frame)
+        frame_layout.setContentsMargins(14, 10, 14, 10)
         frame_layout.setSpacing(10)
 
         combo_row = QHBoxLayout()
@@ -90,7 +132,16 @@ class ExportPeriodPickerPopup(QWidget):
         confirm_button.clicked.connect(self._confirm_selection)
         button_row.addWidget(confirm_button)
         frame_layout.addLayout(button_row)
-        root.addWidget(frame)
+        root.addWidget(self.body_frame, 1)
+
+        self._drag_surfaces = (
+            self.header_holder,
+            self.title,
+            self.body_frame,
+        )
+        for surface in self._drag_surfaces:
+            surface.installEventFilter(self)
+        self._update_close_button_position()
 
         current_year = date.today().year
         for year in range(current_year - 50, current_year + 51):
@@ -166,6 +217,61 @@ class ExportPeriodPickerPopup(QWidget):
         self.move(position)
         self.show()
         self.raise_()
+
+    def eventFilter(self, watched, event):
+        if watched in self._drag_surfaces and self._handle_drag_event(event):
+            return True
+        return super().eventFilter(watched, event)
+
+    def mousePressEvent(self, event):
+        if self._handle_drag_event(event):
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._handle_drag_event(event):
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self._handle_drag_event(event):
+            return
+        super().mouseReleaseEvent(event)
+
+    def _handle_drag_event(self, event):
+        if (
+            event.type() == QEvent.Type.MouseButtonPress
+            and event.button() == Qt.MouseButton.LeftButton
+        ):
+            self._drag_offset = (
+                event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            )
+            event.accept()
+            return True
+        if (
+            event.type() == QEvent.Type.MouseMove
+            and self._drag_offset is not None
+            and event.buttons() & Qt.MouseButton.LeftButton
+        ):
+            self.move(event.globalPosition().toPoint() - self._drag_offset)
+            event.accept()
+            return True
+        if (
+            event.type() == QEvent.Type.MouseButtonRelease
+            and self._drag_offset is not None
+        ):
+            self._drag_offset = None
+            event.accept()
+            return True
+        return False
+
+    def _update_close_button_position(self):
+        self.close_button.move(self.width() - self.close_button.width(), 0)
+        self.close_button.raise_()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_close_button_position()
 
     def _confirm_selection(self):
         year = self.year_combo.currentData()

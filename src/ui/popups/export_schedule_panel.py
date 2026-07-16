@@ -2,7 +2,7 @@ from datetime import date, timedelta
 from html import escape
 from pathlib import Path
 
-from PyQt6.QtCore import QPoint, QPointF, QRectF, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QPoint, QPointF, QRectF, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import (
     QColor,
     QGuiApplication,
@@ -36,7 +36,12 @@ from PyQt6.QtWidgets import (
 )
 
 from src.config import AppConfig
-from src.services.schedule_export_service import ExportOptions, ScheduleExportService
+from src.services.schedule_export_service import (
+    ExportOptions,
+    PdfExportStyle,
+    PdfTextStyle,
+    ScheduleExportService,
+)
 from src.ui.calendar_pop import CalendarPop
 from src.ui.common.toast import show_center_toast
 from src.ui.common.themed_color_dialog import ThemedColorDialog
@@ -100,34 +105,34 @@ class _ExportPreviewPopup(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self._source_preview_size = QSize(168, 296)
+        self._drag_offset = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        header_holder = QWidget()
-        header_holder.setFixedHeight(42)
-        header = QHBoxLayout(header_holder)
+        self.header_holder = QWidget()
+        self.header_holder.setFixedHeight(42)
+        header = QHBoxLayout(self.header_holder)
         header.setContentsMargins(14, 8, 14, 2)
         header.setSpacing(0)
-        title = QLabel("导出预览")
-        title.setStyleSheet(
+        self.title = QLabel("导出预览")
+        self.title.setStyleSheet(
             "color: white; font-family: 'Microsoft YaHei UI'; "
             "font-size: 16px; font-weight: bold; background: transparent; border: none;"
         )
-        close_btn = QPushButton("×")
-        close_btn.setFixedSize(24, 24)
-        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        close_btn.setStyleSheet(
+        self.close_btn = QPushButton("×", self)
+        self.close_btn.setFixedSize(30, 30)
+        self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.close_btn.setStyleSheet(
             "QPushButton { color: white; background: transparent; border: none; "
             "font-size: 20px; } QPushButton:hover { background: #ff4d4f; "
-            "border-radius: 4px; }"
+            "border-top-right-radius: 8px; border-bottom-left-radius: 4px; }"
         )
-        close_btn.clicked.connect(self.close)
-        header.addWidget(title)
+        self.close_btn.clicked.connect(self.close)
+        header.addWidget(self.title)
         header.addStretch(1)
-        header.addWidget(close_btn)
-        layout.addWidget(header_holder)
+        layout.addWidget(self.header_holder)
 
         self.content_frame = QFrame()
         self.content_frame.setObjectName("exportPreviewContentFrame")
@@ -159,7 +164,12 @@ class _ExportPreviewPopup(QWidget):
         )
         content_layout.addWidget(self.preview_editor)
         layout.addWidget(self.content_frame, 1)
+        self.header_holder.installEventFilter(self)
+        self.title.installEventFilter(self)
+        self.content_frame.installEventFilter(self)
+        self.preview_editor.viewport().installEventFilter(self)
         self.set_preview_size(self._source_preview_size)
+        self._update_close_button_position()
 
     def set_preview_html(self, html):
         self.preview_editor.setHtml(html)
@@ -177,6 +187,15 @@ class _ExportPreviewPopup(QWidget):
         content_width = max(220, round(self._source_preview_size.width() * scale))
         content_height = max(320, round(self._source_preview_size.height() * scale))
         self.setFixedSize(content_width + 28, content_height + 56)
+        self._update_close_button_position()
+
+    def _update_close_button_position(self):
+        self.close_btn.move(self.width() - self.close_btn.width(), 0)
+        self.close_btn.raise_()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_close_button_position()
 
     def show_near(self, anchor):
         if anchor is not None:
@@ -197,6 +216,54 @@ class _ExportPreviewPopup(QWidget):
         self.show()
         self.raise_()
         self.activateWindow()
+
+    def eventFilter(self, watched, event):
+        header_drag = watched in (self.header_holder, self.title)
+        content_drag = watched is self.content_frame
+        preview_drag = watched is self.preview_editor.viewport()
+        if header_drag or content_drag or preview_drag:
+            if (
+                event.type() == QEvent.Type.MouseButtonPress
+                and event.button() == Qt.MouseButton.LeftButton
+                and (
+                    header_drag
+                    or content_drag
+                    or self._is_preview_blank_position(event.position())
+                )
+            ):
+                self._drag_offset = (
+                    event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+                )
+                event.accept()
+                return True
+            if (
+                event.type() == QEvent.Type.MouseMove
+                and self._drag_offset is not None
+                and event.buttons() & Qt.MouseButton.LeftButton
+            ):
+                self.move(event.globalPosition().toPoint() - self._drag_offset)
+                event.accept()
+                return True
+            if (
+                event.type() == QEvent.Type.MouseButtonRelease
+                and self._drag_offset is not None
+            ):
+                self._drag_offset = None
+                event.accept()
+                return True
+        return super().eventFilter(watched, event)
+
+    def _is_preview_blank_position(self, position):
+        document_position = QPointF(position)
+        document_position += QPointF(
+            self.preview_editor.horizontalScrollBar().value(),
+            self.preview_editor.verticalScrollBar().value(),
+        )
+        hit_position = self.preview_editor.document().documentLayout().hitTest(
+            document_position,
+            Qt.HitTestAccuracy.ExactHit,
+        )
+        return hit_position < 0
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -393,7 +460,10 @@ class ExportSchedulePanel(QWidget):
             "week": today - timedelta(days=today.weekday()),
             "month": today.replace(day=1),
         }
-        self.default_preview_width = 168
+        self.default_preview_height = 298
+        self.default_preview_width = round(
+            self.default_preview_height * 210 / 297
+        )
         self.preview_width = self.default_preview_width
         self._selected_preview_size = "9:16"
         self.export_background_mode = "solid"
@@ -420,10 +490,7 @@ class ExportSchedulePanel(QWidget):
     def reset_geometry_for_parent(self):
         parent = self.parent_window
         width = self._panel_width()
-        height = 384
-        if parent is not None:
-            parent_rect = parent.frameGeometry()
-            height = max(360, int(parent_rect.height() * 2 / 3))
+        height = 360
         self.setFixedSize(width, height)
         if hasattr(self, "preview_box"):
             self._refresh_export_preview()
@@ -529,20 +596,21 @@ class ExportSchedulePanel(QWidget):
             """
         )
         frame_layout = QHBoxLayout(self.settings_frame)
-        frame_layout.setContentsMargins(14, 10, 14, 14)
+        frame_layout.setContentsMargins(14, 10, 14, 10)
         frame_layout.setSpacing(12)
 
         controls_layout = QVBoxLayout()
         controls_layout.setContentsMargins(0, 0, 0, 0)
         controls_layout.setSpacing(6)
-        settings_title = QLabel("导出设置")
-        settings_title.setFixedHeight(22)
-        settings_title.setStyleSheet(
+        self.settings_title = QLabel("导出设置")
+        self.settings_title.setFixedHeight(22)
+        self.settings_title.setStyleSheet(
             "color: #111111; font-family: 'Microsoft YaHei UI'; "
             "font-size: 14px; font-weight: bold; background: transparent; border: none;"
         )
-        controls_layout.addWidget(settings_title)
-        controls_layout.addWidget(self._create_aligned_controls())
+        controls_layout.addWidget(self.settings_title)
+        self.aligned_controls = self._create_aligned_controls()
+        controls_layout.addWidget(self.aligned_controls)
         controls_layout.addStretch(1)
         frame_layout.addLayout(controls_layout)
 
@@ -562,9 +630,16 @@ class ExportSchedulePanel(QWidget):
             "- 导出格式：Markdown"
         )
         self.preview_box.clicked.connect(self._show_preview_popup)
-        self.preview_box.setFixedWidth(self.preview_width)
+        self.preview_box.setFixedSize(
+            self.preview_width,
+            self.default_preview_height,
+        )
         self._apply_preview_surface_styles()
-        frame_layout.addWidget(self.preview_box)
+        frame_layout.addWidget(
+            self.preview_box,
+            0,
+            Qt.AlignmentFlag.AlignTop,
+        )
         frame_layout.addSpacing(4)
 
         root.addWidget(self.settings_frame, 1)
@@ -574,14 +649,15 @@ class ExportSchedulePanel(QWidget):
 
     def _create_aligned_controls(self):
         area = QWidget()
-        area.setFixedSize(240, 270)
+        area.setFixedSize(264, 270)
         grid = QGridLayout(area)
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setHorizontalSpacing(0)
         grid.setVerticalSpacing(2)
         grid.setColumnMinimumWidth(0, 2)
         grid.setColumnMinimumWidth(1, 82)
-        grid.setColumnMinimumWidth(2, 156)
+        grid.setColumnMinimumWidth(2, 10)
+        grid.setColumnMinimumWidth(3, 170)
 
         for row in tuple(range(4)) + tuple(range(5, 10)) + tuple(range(11, 15)):
             grid.setRowMinimumHeight(row, 18)
@@ -597,7 +673,14 @@ class ExportSchedulePanel(QWidget):
             "日程 + 待办",
         )
         self.background_section = self._create_background_settings()
-        grid.addWidget(self.background_section, 0, 2, 4, 1)
+        grid.addWidget(
+            self.background_section,
+            0,
+            3,
+            4,
+            1,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+        )
 
         self._add_option_group_to_grid(
             grid,
@@ -608,7 +691,7 @@ class ExportSchedulePanel(QWidget):
             "某日",
         )
         self.font_section = self._create_font_settings()
-        grid.addWidget(self.font_section, 5, 2, 5, 1)
+        grid.addWidget(self.font_section, 5, 3, 5, 1)
 
         self._add_option_group_to_grid(
             grid,
@@ -619,7 +702,14 @@ class ExportSchedulePanel(QWidget):
             "Markdown",
         )
         self.size_section = self._create_size_settings()
-        grid.addWidget(self.size_section, 11, 2, 4, 1)
+        grid.addWidget(
+            self.size_section,
+            11,
+            3,
+            4,
+            1,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+        )
         return area
 
     def _add_option_group_to_grid(
@@ -677,11 +767,7 @@ class ExportSchedulePanel(QWidget):
             button.setFixedHeight(18)
             button.setFixedWidth(82 if group_key == "schedule_range" else 76)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
-            button.setStyleSheet(
-                radio_style.replace("font-size: 10px", "font-size: 9px")
-                if group_key == "schedule_range"
-                else radio_style
-            )
+            button.setStyleSheet(radio_style)
             button.clicked.connect(
                 lambda checked=False, key=group_key, value=label: self._handle_option_clicked(
                     key,
@@ -783,21 +869,35 @@ class ExportSchedulePanel(QWidget):
 
     def _create_font_settings(self):
         section = QWidget()
-        section.setFixedSize(156, 98)
-        layout = QVBoxLayout(section)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(2)
+        section.setFixedSize(170, 98)
+        grid = QGridLayout(section)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(3)
+        grid.setVerticalSpacing(2)
+        for row in range(5):
+            grid.setRowMinimumHeight(row, 18)
+        for column, width in enumerate((28, 20, 50, 14, 20, 20)):
+            grid.setColumnMinimumWidth(column, width)
 
-        layout.addWidget(self._create_section_title("字体"))
+        grid.addWidget(self._create_section_title("字体"), 0, 0, 1, 6)
 
         self.font_labels = {}
         self.font_combos = {}
         self.font_language_buttons = {}
         self.font_color_chips = {}
-        for label in ("标题", "详情", "备注"):
-            row = QHBoxLayout()
-            row.setContentsMargins(0, 0, 0, 0)
-            row.setSpacing(4)
+        self.emphasis_labels = {}
+        self.emphasis_buttons = {}
+        for column, emphasis in ((4, "加粗"), (5, "斜体")):
+            header = QLabel(emphasis)
+            header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            header.setStyleSheet(
+                "color: #333333; font-family: 'Microsoft YaHei UI'; "
+                "font-size: 9px; background: transparent; border: none;"
+            )
+            grid.addWidget(header, 1, column)
+            self.emphasis_labels[emphasis] = header
+
+        for row_index, label in enumerate(("标题", "详情", "备注"), start=2):
             text_label = QLabel(label)
             text_label.setFixedSize(28, 18)
             text_label.setAlignment(
@@ -809,7 +909,7 @@ class ExportSchedulePanel(QWidget):
             )
 
             language_button = QPushButton("中")
-            language_button.setFixedSize(24, 18)
+            language_button.setFixedSize(20, 18)
             language_button.setCursor(Qt.CursorShape.PointingHandCursor)
             language_button.setToolTip("点击切换为英文字体")
             language_button.setStyleSheet(self._font_language_button_style())
@@ -818,7 +918,7 @@ class ExportSchedulePanel(QWidget):
             )
 
             combo = _ElidedComboBox()
-            combo.setFixedSize(78, 18)
+            combo.setFixedSize(50, 18)
             combo.view().setTextElideMode(Qt.TextElideMode.ElideRight)
             combo.setStyleSheet(self._compact_combo_style())
             combo.currentTextChanged.connect(
@@ -832,49 +932,36 @@ class ExportSchedulePanel(QWidget):
                 lambda _area, field=label: self._handle_font_color_clicked(field)
             )
 
-            row.addWidget(text_label)
-            row.addWidget(language_button)
-            row.addWidget(combo)
-            row.addWidget(color_chip, 0, Qt.AlignmentFlag.AlignVCenter)
-            layout.addLayout(row)
+            grid.addWidget(text_label, row_index, 0)
+            grid.addWidget(language_button, row_index, 1)
+            grid.addWidget(combo, row_index, 2)
+            grid.addWidget(
+                color_chip,
+                row_index,
+                3,
+                alignment=Qt.AlignmentFlag.AlignCenter,
+            )
             self.font_labels[label] = text_label
             self.font_combos[label] = combo
             self.font_language_buttons[label] = language_button
             self.font_color_chips[label] = color_chip
+            self.emphasis_buttons[label] = {}
+            for column, emphasis in ((4, "加粗"), (5, "斜体")):
+                button = QRadioButton()
+                button.setAutoExclusive(False)
+                button.setFixedSize(14, 18)
+                button.setToolTip(f"{label}{emphasis}")
+                button.setStyleSheet(self._mini_radio_style())
+                button.setChecked(label == "标题" and emphasis == "加粗")
+                button.clicked.connect(self._refresh_export_preview)
+                grid.addWidget(
+                    button,
+                    row_index,
+                    column,
+                    alignment=Qt.AlignmentFlag.AlignCenter,
+                )
+                self.emphasis_buttons[label][emphasis] = button
             self._populate_font_combo(label)
-        emphasis_row = QHBoxLayout()
-        emphasis_row.setContentsMargins(0, 0, 0, 0)
-        emphasis_row.setSpacing(0)
-        self.emphasis_labels = {}
-        self.emphasis_buttons = {}
-        for label in ("加粗", "斜体"):
-            holder = QWidget()
-            holder.setFixedSize(58, 18)
-            holder_layout = QHBoxLayout(holder)
-            holder_layout.setContentsMargins(0, 0, 0, 0)
-            holder_layout.setSpacing(8)
-            text_label = QLabel(label)
-            text_label.setFixedSize(36, 18)
-            text_label.setAlignment(
-                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-            )
-            text_label.setStyleSheet(
-                "color: #333333; font-family: 'Microsoft YaHei UI'; "
-                "font-size: 10px; background: transparent; border: none;"
-            )
-            button = QRadioButton()
-            button.setAutoExclusive(False)
-            button.setFixedSize(14, 18)
-            button.setStyleSheet(self._mini_radio_style())
-            button.clicked.connect(self._refresh_export_preview)
-            holder_layout.addWidget(text_label)
-            holder_layout.addWidget(button)
-            emphasis_row.addWidget(holder)
-            self.emphasis_labels[label] = text_label
-            self.emphasis_buttons[label] = button
-            if label == "加粗":
-                emphasis_row.addStretch(1)
-        layout.addLayout(emphasis_row)
         self._apply_font_color_chip_styles()
         return section
 
@@ -1124,19 +1211,14 @@ class ExportSchedulePanel(QWidget):
             )
             popup = (
                 "background: qlineargradient(x1:0, y1:0, x2:0, y2:1, "
-                f"stop:0 {self._rgba_color(self.export_gradient_start, 0.70)}, "
-                f"stop:1 {self._rgba_color(self.export_gradient_end, 0.70)})"
+                f"stop:0 {self.export_gradient_start}, "
+                f"stop:1 {self.export_gradient_end})"
             )
             return embedded, popup
         return (
             f"background-color: {self.export_solid_color}",
-            f"background-color: {self._rgba_color(self.export_solid_color, 0.70)}",
+            f"background-color: {self.export_solid_color}",
         )
-
-    @staticmethod
-    def _rgba_color(color_value, alpha):
-        color = QColor(color_value)
-        return f"rgba({color.red()}, {color.green()}, {color.blue()}, {alpha:.2f})"
 
     def _apply_font_color_chip_styles(self):
         if not hasattr(self, "font_color_chips"):
@@ -1260,7 +1342,7 @@ class ExportSchedulePanel(QWidget):
         selected_date = self._selected_range_dates[range_kind]
         if range_kind == "day":
             if self._day_range_popup is None:
-                self._day_range_popup = CalendarPop(self)
+                self._day_range_popup = CalendarPop(self, export_theme=True)
                 self._day_range_popup.date_selected.connect(
                     self._apply_day_range_selection
                 )
@@ -1374,9 +1456,29 @@ class ExportSchedulePanel(QWidget):
             group_by="date",
         )
 
+    def _current_pdf_style(self):
+        def text_style(field):
+            emphasis = self.emphasis_buttons[field]
+            return PdfTextStyle(
+                font_family=self.font_combos[field].currentText() or "微软雅黑",
+                color=self.export_font_colors[field],
+                bold=emphasis["加粗"].isChecked(),
+                italic=emphasis["斜体"].isChecked(),
+            )
+
+        return PdfExportStyle(
+            background_mode=self.export_background_mode,
+            solid_color=self.export_solid_color,
+            gradient_start=self.export_gradient_start,
+            gradient_end=self.export_gradient_end,
+            title=text_style("标题"),
+            detail=text_style("详情"),
+            note=text_style("备注"),
+        )
+
     def _handle_export_requested(self):
         export_format = self._selected_option("export_format") or "Markdown"
-        if export_format != "Markdown":
+        if export_format not in {"Markdown", "PDF"}:
             show_center_toast(
                 self,
                 f"{export_format} 导出尚未接入",
@@ -1386,28 +1488,41 @@ class ExportSchedulePanel(QWidget):
             return
 
         options = self._current_export_options()
+        extension = ".md" if export_format == "Markdown" else ".pdf"
+        file_filter = (
+            "Markdown 文件 (*.md)"
+            if export_format == "Markdown"
+            else "PDF 文件 (*.pdf)"
+        )
         file_path, _selected_filter = QFileDialog.getSaveFileName(
             self,
-            "导出 Markdown",
-            self._default_markdown_filename(options),
-            "Markdown 文件 (*.md)",
+            f"导出 {export_format}",
+            self._default_export_filename(options, extension),
+            file_filter,
         )
         if not file_path:
             return
 
         target = Path(file_path)
-        if target.suffix.lower() != ".md":
-            target = target.with_suffix(".md")
+        if target.suffix.lower() != extension:
+            target = target.with_suffix(extension)
 
         try:
             if self._export_service is None:
                 self._export_service = ScheduleExportService()
-            exported_path = self._export_service.write_markdown(target, options)
+            if export_format == "Markdown":
+                exported_path = self._export_service.write_markdown(target, options)
+            else:
+                exported_path = self._export_service.write_pdf(
+                    target,
+                    options,
+                    self._current_pdf_style(),
+                )
         except Exception as exc:
             QMessageBox.critical(
                 self,
                 "导出失败",
-                f"Markdown 文件保存失败：\n{exc}",
+                f"{export_format} 文件保存失败：\n{exc}",
             )
             return
 
@@ -1419,7 +1534,7 @@ class ExportSchedulePanel(QWidget):
         )
 
     @staticmethod
-    def _default_markdown_filename(options):
+    def _default_export_filename(options, extension):
         content_text = {
             "schedule": "日程",
             "todo": "待办",
@@ -1435,7 +1550,11 @@ class ExportSchedulePanel(QWidget):
             range_text = f"{target.year}-{target.month:02d}"
         else:
             range_text = "全部"
-        return f"{content_text}_{range_text}.md"
+        return f"{content_text}_{range_text}{extension}"
+
+    @staticmethod
+    def _default_markdown_filename(options):
+        return ExportSchedulePanel._default_export_filename(options, ".md")
 
     def _refresh_export_preview(self):
         if not hasattr(self, "preview_box"):
@@ -1449,6 +1568,12 @@ class ExportSchedulePanel(QWidget):
             export_format = self._selected_option("export_format") or "Markdown"
             if export_format == "Markdown":
                 preview_text = markdown
+            elif export_format == "PDF":
+                preview_text = (
+                    "# PDF 导出预览\n\n"
+                    "当前背景、字体、字体颜色、加粗和斜体设置会应用到 PDF 文件。\n\n"
+                    f"{markdown}"
+                )
             else:
                 preview_text = (
                     f"{export_format} 导出尚未接入，当前先显示同一份导出数据的 "
@@ -1496,13 +1621,10 @@ class ExportSchedulePanel(QWidget):
         else:
             color = self.export_font_colors[field]
             font_family = self.font_combos[field].currentText() or "Microsoft YaHei UI"
-            font_weight = (
-                "700"
-                if self.emphasis_buttons["加粗"].isChecked() or field == "标题"
-                else "400"
-            )
+            emphasis = self.emphasis_buttons[field]
+            font_weight = "700" if emphasis["加粗"].isChecked() else "400"
             font_style = (
-                "italic" if self.emphasis_buttons["斜体"].isChecked() else "normal"
+                "italic" if emphasis["斜体"].isChecked() else "normal"
             )
         return (
             f"color:{color}; font-family:'{escape(font_family, quote=True)}'; "

@@ -1,4 +1,4 @@
-"""Read-only export payload construction and Markdown rendering."""
+"""Read-only export payload construction and file rendering."""
 
 from __future__ import annotations
 
@@ -16,6 +16,27 @@ class ExportOptions:
     range_kind: str = "day"
     target_date: date = field(default_factory=date.today)
     group_by: str = "date"
+
+
+@dataclass(frozen=True)
+class PdfTextStyle:
+    font_family: str = "微软雅黑"
+    color: str = "#0066CC"
+    bold: bool = False
+    italic: bool = False
+
+
+@dataclass(frozen=True)
+class PdfExportStyle:
+    background_mode: str = "solid"
+    solid_color: str = "#ffffff"
+    gradient_start: str = "#0066CC"
+    gradient_end: str = "#0099CC"
+    title: PdfTextStyle = field(
+        default_factory=lambda: PdfTextStyle(bold=True)
+    )
+    detail: PdfTextStyle = field(default_factory=PdfTextStyle)
+    note: PdfTextStyle = field(default_factory=PdfTextStyle)
 
 
 @dataclass(frozen=True)
@@ -256,6 +277,18 @@ class ScheduleExportService:
     def write_markdown(self, file_path, options: ExportOptions) -> Path:
         target = Path(file_path)
         target.write_text(self.render_markdown(options), encoding="utf-8")
+        return target
+
+    def write_pdf(
+        self,
+        file_path,
+        options: ExportOptions,
+        style: PdfExportStyle,
+    ) -> Path:
+        from src.services.schedule_pdf_exporter import SchedulePdfExporter
+
+        target = Path(file_path)
+        SchedulePdfExporter.write(target, self.build_payload(options), style)
         return target
 
     @staticmethod
