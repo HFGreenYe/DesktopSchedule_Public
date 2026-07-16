@@ -768,7 +768,12 @@ class CalendarCellDelegate(QStyledItemDelegate):
         r = int(self.grad_start.red() * (1 - ratio) + self.grad_end.red() * ratio)
         g = int(self.grad_start.green() * (1 - ratio) + self.grad_end.green() * ratio)
         b = int(self.grad_start.blue() * (1 - ratio) + self.grad_end.blue() * ratio)
-        return QColor(r, g, b)
+        mask_ratio = 0.10
+        return QColor(
+            round(r * (1.0 - mask_ratio) + 255 * mask_ratio),
+            round(g * (1.0 - mask_ratio) + 255 * mask_ratio),
+            round(b * (1.0 - mask_ratio) + 255 * mask_ratio),
+        )
 
     def paint(self, painter, option, index):
         painter.save()
@@ -2253,6 +2258,15 @@ class MonthWindow(FramelessMainWindow):
         gradient.setColorAt(0.0, QColor(AppConfig.COLOR_GRADIENT_START)) 
         gradient.setColorAt(1.0, QColor(AppConfig.COLOR_GRADIENT_END))   
         painter.fillPath(path, QBrush(gradient))
+
+        painter.save()
+        painter.setClipPath(path)
+        painter.fillRect(
+            QRectF(0.0, 0.0, float(self.width()), float(self.height())),
+            QColor(255, 255, 255, 26),
+        )
+        painter.restore()
+
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(QPen(QColor(0, 0, 0, 26), 1))
         painter.drawPath(path)
