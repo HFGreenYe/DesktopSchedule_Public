@@ -125,7 +125,7 @@ class ScheduleSortOptionsPanel(QWidget):
             "font-size: 16px; font-weight: bold; } "
             "QPushButton:hover { background: rgba(255,255,255,0.18); border-radius: 12px; }"
         )
-        self.btn_close.clicked.connect(self.close)
+        self.btn_close.clicked.connect(self.exit_sort_mode)
         header.addWidget(self.btn_close)
         outer.addLayout(header)
 

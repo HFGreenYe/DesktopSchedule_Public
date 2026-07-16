@@ -612,10 +612,10 @@ class MainWindow(FramelessMainWindow):
         current_widget = self.body_stack.currentWidget()
         if current_widget == self.page_todo:
             keyword = self.page_todo.search_keyword()
-            placeholder = "鎼滅储寰呭姙..."
+            placeholder = "搜索待办..."
         elif current_widget == self.page_dashboard:
             keyword = self.page_dashboard.search_keyword()
-            placeholder = "鎼滅储鏃ョ▼..."
+            placeholder = "搜索日程..."
         else:
             return
 
@@ -1302,8 +1302,10 @@ class MainWindow(FramelessMainWindow):
             self.month_window.show()
             
         elif route_action == "todo":
-            # 鍒囨崲鍒板緟鍔炶鍥?            self.body_stack.setCurrentWidget(self.page_todo)
-            self.page_todo.refresh_data() # 鍒囪繃鍘荤殑鏃跺€欏埛鏂颁竴涓嬫暟鎹?            self._sync_primary_query_header()
+            # 切换到待办视图
+            self.body_stack.setCurrentWidget(self.page_todo)
+            self.page_todo.refresh_data()
+            self._sync_primary_query_header()
             
         elif route_action == "day":
             # 鍒囨崲鍥炴棩瑙嗗浘 (涓婚潰鏉?

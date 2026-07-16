@@ -1488,7 +1488,7 @@ class MonthWindow(FramelessMainWindow):
         bottom_tools_vbox.addWidget(self.view_selector_container)
         # --- 2.2 搜索框 ---
         self.search_box = QLineEdit()
-        self.search_box.setPlaceholderText("搜索...")
+        self.search_box.setPlaceholderText("搜索日程...")
         self.search_box.setFixedHeight(20)
         
         search_pixmap = get_padded_colored_icon(

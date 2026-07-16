@@ -849,6 +849,12 @@ class SharedMoreMenu(QMenu):
         if panel.isVisible():
             panel.hide()
             return
+        panel.set_pinned(
+            bool(
+                self.parent_window.windowFlags()
+                & Qt.WindowType.WindowStaysOnTopHint
+            )
+        )
         panel.reset_geometry_for_parent()
         panel.show()
         panel.raise_()
@@ -868,6 +874,12 @@ class SharedMoreMenu(QMenu):
         if panel.isVisible():
             panel.hide()
             return
+        panel.set_pinned(
+            bool(
+                self.parent_window.windowFlags()
+                & Qt.WindowType.WindowStaysOnTopHint
+            )
+        )
         panel.reset_geometry_for_parent()
         panel.show()
         panel.raise_()

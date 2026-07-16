@@ -466,11 +466,7 @@ class _ScheduleAxisCanvas(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         self.hit_regions.clear()
-
         canvas_rect = QRectF(self.rect()).adjusted(1.0, 1.0, -1.0, -1.0)
-        painter.setPen(QPen(QColor("#ffffff"), 2.0))
-        painter.setBrush(QColor(255, 255, 255, 190))
-        painter.drawRoundedRect(canvas_rect, 6, 6)
 
         left = 20.0
         right = max(float(self.width() - 20), left + 1)
@@ -2472,8 +2468,8 @@ class ScheduleAxisBoard(QWidget):
             available_width - 40,
             self._month_default_axis_viewport_width + 92,
         )
-        self.setMinimumSize(420, 320)
-        self.resize(max(420, default_board_width), 320)
+        self.setMinimumSize(420, 294)
+        self.resize(max(420, default_board_width), 294)
         self.is_pinned = False
         self._drag_offset = None
         self._detail_opener = None
@@ -2501,14 +2497,14 @@ class ScheduleAxisBoard(QWidget):
         self.persistent_preview = _AxisSchedulePreview(True)
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(10, 10, 10, 10)
+        outer.setContentsMargins(10, 10, 10, 0)
         outer.setSpacing(0)
 
         panel = QFrame()
         panel.setStyleSheet("background: transparent;")
         panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(16, 12, 16, 16)
+        layout.setContentsMargins(16, 12, 16, 0)
         layout.setSpacing(6)
 
         header = QHBoxLayout()
@@ -2593,12 +2589,11 @@ class ScheduleAxisBoard(QWidget):
         self.settings_page.setObjectName("AxisSettingsPage")
         self.settings_page.setStyleSheet(
             "QFrame#AxisSettingsPage { "
-            "background-color: rgba(255, 255, 255, 190); "
-            "border: 2px solid #ffffff; border-radius: 6px; "
+            "background: transparent; border: none; "
             "}"
         )
         settings_layout = QVBoxLayout(self.settings_page)
-        settings_layout.setContentsMargins(0, 0, 0, 0)
+        settings_layout.setContentsMargins(2, 2, 2, 2)
         self.settings_panel = _AxisSettingsPanel(
             ScheduleAxisService.load_category_options(),
             self.settings_page,
@@ -2793,7 +2788,7 @@ class ScheduleAxisBoard(QWidget):
             return
 
         current_canvas_height = max(self.canvas.height(), 1)
-        non_canvas_height = max(74, self.height() - current_canvas_height)
+        non_canvas_height = max(48, self.height() - current_canvas_height)
         target_height = max(
             self.minimumHeight(),
             required_canvas_height + non_canvas_height,
@@ -3026,13 +3021,58 @@ class ScheduleAxisBoard(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        rect = QRectF(10, 10, self.width() - 20, self.height() - 20)
+        rect = QRectF(10, 10, self.width() - 20, self.height() - 10.5)
         path = QPainterPath()
-        path.addRoundedRect(rect, 12, 12)
+        top_radius = 12.0
+        bottom_radius = 6.0
+        path.moveTo(rect.left() + top_radius, rect.top())
+        path.lineTo(rect.right() - top_radius, rect.top())
+        path.quadTo(
+            rect.right(),
+            rect.top(),
+            rect.right(),
+            rect.top() + top_radius,
+        )
+        path.lineTo(rect.right(), rect.bottom() - bottom_radius)
+        path.quadTo(
+            rect.right(),
+            rect.bottom(),
+            rect.right() - bottom_radius,
+            rect.bottom(),
+        )
+        path.lineTo(rect.left() + bottom_radius, rect.bottom())
+        path.quadTo(
+            rect.left(),
+            rect.bottom(),
+            rect.left(),
+            rect.bottom() - bottom_radius,
+        )
+        path.lineTo(rect.left(), rect.top() + top_radius)
+        path.quadTo(
+            rect.left(),
+            rect.top(),
+            rect.left() + top_radius,
+            rect.top(),
+        )
+        path.closeSubpath()
         gradient = QLinearGradient(0, 0, 0, self.height())
         gradient.setColorAt(0.0, QColor(AppConfig.COLOR_GRADIENT_START))
         gradient.setColorAt(1.0, QColor(AppConfig.COLOR_GRADIENT_END))
         painter.fillPath(path, QBrush(gradient))
+
+        if hasattr(self, "content_host"):
+            body_top = self.content_host.mapTo(self, QPoint(0, 0)).y()
+            body_rect = QRectF(
+                rect.left(),
+                body_top,
+                rect.width(),
+                max(0.0, rect.bottom() - body_top + 1.0),
+            )
+            painter.save()
+            painter.setClipPath(path)
+            painter.fillRect(body_rect, QColor(255, 255, 255, 179))
+            painter.restore()
+
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(QPen(QColor(0, 0, 0, 26), 1))
         painter.drawPath(path)

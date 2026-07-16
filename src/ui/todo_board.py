@@ -44,6 +44,14 @@ def get_colored_icon(icon_name, color, target_size=12):
     pixmap.setDevicePixelRatio(scale_ratio)
     return pixmap
 
+
+def get_todo_card_color():
+    return QColor(StyleManager.mix_colors(
+        AppConfig.COLOR_GRADIENT_START,
+        AppConfig.COLOR_GRADIENT_END,
+        0.5,
+    ))
+
 # ==========================================
 # 贴纸风格便签卡片组件 
 # ==========================================
@@ -55,6 +63,7 @@ class StickyNoteCard(QFrame):
     def __init__(self, schedule_data, parent=None):
         super().__init__(parent)
         self.data = schedule_data
+        self.setObjectName("stickyNoteCard")
 
         # 开启自定义右键菜单支持
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -67,17 +76,6 @@ class StickyNoteCard(QFrame):
         main_layout.setContentsMargins(10, 10, 10, 8) 
         main_layout.setSpacing(6)
         
-        # 无边框贴纸样式
-        self.setStyleSheet("""
-            QFrame {
-                background-color: rgba(255, 255, 255, 0.15);
-                border: none;
-                border-radius: 6px;
-            }
-            QFrame:hover {
-                background-color: rgba(255, 255, 255, 0.25);
-            }
-        """)
         #main_layout = QVBoxLayout(self)
         #main_layout.setContentsMargins(10, 10, 10, 8) # 底部边距稍微缩小一点留给文字
         #main_layout.setSpacing(6)
@@ -146,19 +144,23 @@ class StickyNoteCard(QFrame):
     # 应用状态样式（解决置顶的视觉表现）
     def _apply_state_style(self):
         is_pinned = getattr(self.data, 'is_pinned', False)
-        
-        # 如果置顶，背景更亮，边框发白光
-        bg_color = "rgba(255, 255, 255, 0.25)" if is_pinned else "rgba(255, 255, 255, 0.15)"
-        border = "1px solid rgba(255, 255, 255, 0.8)" if is_pinned else "none"
+        base_color = get_todo_card_color()
+        bg_color = base_color.name()
+        hover_color = base_color.lighter(108).name()
+        border = (
+            "1px solid rgba(255, 255, 255, 0.8)"
+            if is_pinned
+            else "none"
+        )
         
         self.setStyleSheet(f"""
-            QFrame {{
+            QFrame#stickyNoteCard {{
                 background-color: {bg_color};
                 border: {border};
                 border-radius: 6px;
             }}
-            QFrame:hover {{
-                background-color: rgba(255, 255, 255, 0.3);
+            QFrame#stickyNoteCard:hover {{
+                background-color: {hover_color};
             }}
         """)
         if hasattr(self, 'title_label'):
@@ -238,7 +240,10 @@ class StickyNoteCard(QFrame):
             if hasattr(self, 'lbl_category'): 
                 self.lbl_category.hide() # 隐藏右下角的清单文字
                 
-            self.setStyleSheet("background: transparent; border: 2px dashed rgba(255, 255, 255, 0.4);")
+            self.setStyleSheet(
+                "QFrame#stickyNoteCard { background: transparent; "
+                "border: 2px dashed rgba(255, 255, 255, 0.4); }"
+            )
             
             drag.exec(Qt.DropAction.MoveAction)
             
@@ -247,7 +252,7 @@ class StickyNoteCard(QFrame):
             if hasattr(self, 'lbl_category'): 
                 self.lbl_category.show() # 恢复右下角的清单文字
                 
-            self.setStyleSheet("background-color: rgba(255, 255, 255, 0.15); border: none;")
+            self._apply_state_style()
             if hasattr(container, 'current_drag_widget'):
                 container.current_drag_widget = None
 
@@ -283,7 +288,92 @@ class DropWidget(QWidget):
             self.container._save_new_order()
         event.accept()
 
-class StickViewContainer(QScrollArea):
+
+class SnapPointScrollArea(QScrollArea):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._scroll_snap_points = [0]
+
+    def _configure_snap_points(self, content_widget, snap_points, preferred_value=None):
+        current_value = self.verticalScrollBar().value()
+        normalized_points = sorted({max(0, int(point)) for point in snap_points}) or [0]
+        scroll_limit = normalized_points[-1]
+        self._scroll_snap_points = normalized_points
+        content_widget.setMinimumHeight(max(1, self.viewport().height()) + scroll_limit)
+
+        if preferred_value is None:
+            target_value = min(
+                normalized_points,
+                key=lambda point: abs(point - current_value),
+            )
+        else:
+            target_value = min(
+                normalized_points,
+                key=lambda point: abs(point - preferred_value),
+            )
+        QTimer.singleShot(
+            0,
+            lambda: self.verticalScrollBar().setValue(
+                min(target_value, self.verticalScrollBar().maximum())
+            ),
+        )
+
+    def wheelEvent(self, event):
+        scroll_bar = self.verticalScrollBar()
+        angle_delta = event.angleDelta().y()
+        if angle_delta == 0 or len(self._scroll_snap_points) <= 1 or scroll_bar.maximum() <= 0:
+            super().wheelEvent(event)
+            return
+
+        current_index = min(
+            range(len(self._scroll_snap_points)),
+            key=lambda index: abs(self._scroll_snap_points[index] - scroll_bar.value()),
+        )
+        notch_count = max(1, abs(angle_delta) // 120)
+        direction = -1 if angle_delta > 0 else 1
+        target_index = max(
+            0,
+            min(len(self._scroll_snap_points) - 1, current_index + direction * notch_count),
+        )
+        scroll_bar.setValue(self._scroll_snap_points[target_index])
+        event.accept()
+
+
+class RowSnapScrollArea(SnapPointScrollArea):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._row_scroll_step = 0
+        self._row_scroll_limit = 0
+
+    def _configure_row_scrolling(self, row_count, card_height, spacing, top_margin, bottom_margin):
+        viewport_height = max(1, self.viewport().height())
+        previous_step = self._row_scroll_step
+        previous_value = self.verticalScrollBar().value()
+        previous_row = round(previous_value / previous_step) if previous_step else 0
+
+        if row_count <= 0 or card_height <= 0:
+            self._row_scroll_step = 0
+            self._row_scroll_limit = 0
+            self._configure_snap_points(self.scroll_content, [0], 0)
+            return
+
+        row_pitch = card_height + spacing
+        usable_height = max(1, viewport_height - top_margin - bottom_margin)
+        visible_rows = max(1, (usable_height + spacing) // row_pitch)
+        hidden_rows = max(0, row_count - visible_rows)
+        scroll_limit = hidden_rows * row_pitch
+
+        self._row_scroll_step = row_pitch
+        self._row_scroll_limit = scroll_limit
+        snap_points = [row_index * row_pitch for row_index in range(hidden_rows + 1)]
+        self._configure_snap_points(
+            self.scroll_content,
+            snap_points,
+            min(previous_row * row_pitch, self._row_scroll_limit),
+        )
+
+
+class StickViewContainer(RowSnapScrollArea):
     req_status = pyqtSignal(int, int)
     req_pin = pyqtSignal(int, bool)
     req_delete = pyqtSignal(int)
@@ -291,7 +381,7 @@ class StickViewContainer(QScrollArea):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWidgetResizable(True)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         
         self.setStyleSheet("""
@@ -308,12 +398,13 @@ class StickViewContainer(QScrollArea):
         if self.viewport():
             self.viewport().setStyleSheet("background: transparent;")
         self.grid_layout = QGridLayout(self.scroll_content)
-        self.grid_layout.setContentsMargins(0, 0, 5, 0)
+        self.grid_layout.setContentsMargins(5, 6, 5, 0)
         self.grid_layout.setSpacing(8) 
         self.grid_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         self.setWidget(self.scroll_content)
         self.cards = []
+        self._column_count = 1
 
     def load_data(self, schedules_list):
         """接收真实列表渲染"""
@@ -331,12 +422,23 @@ class StickViewContainer(QScrollArea):
         for c in range(self.grid_layout.columnCount()):
             self.grid_layout.setColumnStretch(c, 0)
 
-        if item_count == 0: return
+        if item_count == 0:
+            self._column_count = 1
+            margins = self.grid_layout.contentsMargins()
+            self._configure_row_scrolling(
+                0,
+                0,
+                self.grid_layout.verticalSpacing(),
+                margins.top(),
+                margins.bottom(),
+            )
+            return
 
         # 3. 动态列数
         if item_count <= 3: cols = 1
         elif item_count <= 6: cols = 2
         else: cols = 3
+        self._column_count = cols
 
         for c in range(cols):
             self.grid_layout.setColumnStretch(c, 1)
@@ -361,10 +463,19 @@ class StickViewContainer(QScrollArea):
     def update_card_heights(self):
         if not self.cards: return
         vh = self.viewport().height()
-        target_h = int((vh - 16) / 3)-1
+        target_h = int((vh - 26) / 3)-1
         target_h = max(target_h, 50)
         for card in self.cards:
             card.setFixedHeight(target_h)
+        row_count = (len(self.cards) + self._column_count - 1) // self._column_count
+        margins = self.grid_layout.contentsMargins()
+        self._configure_row_scrolling(
+            row_count,
+            target_h,
+            self.grid_layout.verticalSpacing(),
+            margins.top(),
+            margins.bottom(),
+        )
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -493,7 +604,7 @@ class FolderCard(QFrame):
         self.icon_label = QLabel()
         self.icon_label.setFixedSize(45, 45)
         
-        icon_color = "#CCCCCC" if self.is_empty else "#FFFFFF"
+        icon_color = QColor("#999999") if self.is_empty else QColor("#FFFFFF")
         pixmap = get_colored_icon("card_folder.svg", icon_color, 45)
         
         if not pixmap.isNull():
@@ -641,14 +752,14 @@ class FolderCard(QFrame):
 # ==========================================
 # 文件夹视图 3x3 网格容器
 # ==========================================
-class FolderViewContainer(QScrollArea):
+class FolderViewContainer(RowSnapScrollArea):
     folder_opened = pyqtSignal(object, str)
     add_folder_requested = pyqtSignal()
     delete_folder_requested = pyqtSignal(int, str) 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWidgetResizable(True)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         
         self.setStyleSheet("""
@@ -664,7 +775,7 @@ class FolderViewContainer(QScrollArea):
         self.setViewportMargins(0, 0, 0, 0)
         
         self.grid_layout = QGridLayout(self.scroll_content)
-        self.grid_layout.setContentsMargins(0, 0, 14, 0)
+        self.grid_layout.setContentsMargins(8, 17, 14, 0)
         #self.grid_layout.setSpacing(12) 
 
         self.grid_layout.setHorizontalSpacing(12) 
@@ -674,6 +785,7 @@ class FolderViewContainer(QScrollArea):
 
         self.setWidget(self.scroll_content)
         self.cards =[]
+        self._column_count = 3
 
     def load_data(self, folder_data_list, uncategorized_count):
         # 1. 清空旧卡片
@@ -727,6 +839,15 @@ class FolderViewContainer(QScrollArea):
         for card in self.cards:
             card.setFixedHeight(target_h)
             card.setFixedWidth(target_w)
+        row_count = (len(self.cards) + self._column_count - 1) // self._column_count
+        margins = self.grid_layout.contentsMargins()
+        self._configure_row_scrolling(
+            row_count,
+            target_h,
+            self.grid_layout.verticalSpacing(),
+            margins.top(),
+            margins.bottom(),
+        )
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -871,7 +992,7 @@ class ManageListView(QWidget):
         layout.setSpacing(0)
         
         # 滚动区域
-        self.scroll_area = QScrollArea()
+        self.scroll_area = SnapPointScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setStyleSheet("""
             QScrollArea { background: transparent; border: none; }
@@ -982,6 +1103,46 @@ class ManageListView(QWidget):
         self.input_container.setVisible(not self.input_container.isVisible())
         if self.input_container.isVisible():
             self.input_new.setFocus()
+            self._schedule_scroll_geometry(reset_to_top=True)
+        else:
+            self._schedule_scroll_geometry()
+
+    def _schedule_scroll_geometry(self, reset_to_top=False):
+        QTimer.singleShot(0, lambda: self._update_scroll_geometry(reset_to_top))
+
+    def _update_scroll_geometry(self, reset_to_top=False):
+        card_count = self.cards_layout.count()
+        card_height = 45
+        card_spacing = self.cards_layout.spacing()
+        card_pitch = card_height + card_spacing
+        margins = self.content_layout.contentsMargins()
+        usable_height = max(1, self.scroll_area.viewport().height() - margins.top() - margins.bottom())
+        visible_cards = max(1, (usable_height + card_spacing) // card_pitch)
+        hidden_cards = max(0, card_count - visible_cards)
+        input_offset = (
+            self.input_container.height() + self.content_layout.spacing()
+            if self.input_container.isVisible()
+            else 0
+        )
+
+        snap_points = [0]
+        if input_offset:
+            snap_points.append(input_offset)
+        first_card_hide_offset = input_offset + margins.top() + card_height
+        snap_points.extend(
+            first_card_hide_offset + (hidden_index - 1) * card_pitch
+            for hidden_index in range(1, hidden_cards + 1)
+        )
+        preferred_value = 0 if reset_to_top else None
+        self.scroll_area._configure_snap_points(
+            self.content_widget,
+            snap_points,
+            preferred_value,
+        )
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._schedule_scroll_geometry()
             
     def load_data(self):
         self.input_new.clear()
@@ -995,6 +1156,7 @@ class ManageListView(QWidget):
             card = ManageCategoryCard(cat.id, cat.name)
             card.delete_requested.connect(self._delete_category)
             self.cards_layout.addWidget(card)
+        self._schedule_scroll_geometry(reset_to_top=True)
             
     def _add_category(self):
         name = self.input_new.text().strip()
@@ -1456,13 +1618,15 @@ class TodoBoardWindow(QWidget):
         self.bg_frame = QFrame(self)
         self.bg_frame.setStyleSheet("background: transparent;")
         bg_layout = QVBoxLayout(self.bg_frame)
-        bg_layout.setContentsMargins(16, 16, 16, 16)
+        bg_layout.setContentsMargins(16, 16, 16, 6)
         main_layout.addWidget(self.bg_frame)
 
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(0, 0, 70, 10) 
 
         self.title_label = QLabel("待办看板")
+        self.title_label.setFixedHeight(26)
+        self.title_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.title_label.setStyleSheet("font-size: 16px; font-weight: bold; color: white; border: none; background: transparent; font-family: 'Microsoft YaHei';")
         header_layout.addWidget(self.title_label)
 
@@ -1544,6 +1708,7 @@ class TodoBoardWindow(QWidget):
         # 堆栈管理器：负责在空状态、便签、文件夹之间切换
         # ==========================================
         self.view_stack = QStackedWidget()
+        self.view_stack.setStyleSheet("background: transparent; border: none;")
 
         self.manage_list_view = ManageListView(self)
         self.manage_list_view.back_requested.connect(self.back_from_manage_list)
@@ -1582,6 +1747,7 @@ class TodoBoardWindow(QWidget):
         self.inline_add_view.req_open_list_picker.connect(self.go_to_list_picker)
         self.page_list.back_requested.connect(self.back_from_list_picker)
         self.page_list.confirm_requested.connect(self.on_list_confirmed)
+        self.view_stack.currentChanged.connect(self._schedule_body_repaint)
         self.view_stack.setCurrentWidget(self.stick_view)
         bg_layout.addWidget(self.view_stack, 1)
 
@@ -1842,6 +2008,9 @@ class TodoBoardWindow(QWidget):
         super().resizeEvent(event)
         self._update_button_positions()
 
+    def _schedule_body_repaint(self, *_):
+        QTimer.singleShot(0, self.update)
+
     def _update_button_positions(self):
         """动态计算右上角按钮位置，跳过隐藏的按钮防止留空隙"""
         offset = 40  # 初始右边距
@@ -1880,6 +2049,21 @@ class TodoBoardWindow(QWidget):
         gradient.setColorAt(1.0, QColor(AppConfig.COLOR_GRADIENT_END))
         
         painter.fillPath(path, QBrush(gradient))
+
+        if hasattr(self, 'view_stack'):
+            body_top = self.view_stack.mapTo(self, QPoint(0, 0)).y()
+            body_top = max(rect.top(), min(float(body_top), rect.bottom()))
+            body_rect = QRectF(
+                rect.left(),
+                body_top,
+                rect.width(),
+                rect.bottom() - body_top + 1,
+            )
+            painter.save()
+            painter.setClipPath(path)
+            painter.fillRect(body_rect, QColor(255, 255, 255, 179))
+            painter.restore()
+
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(QPen(QColor(0, 0, 0, 26), 1))
         painter.drawPath(path)

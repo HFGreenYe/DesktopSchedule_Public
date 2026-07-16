@@ -76,7 +76,7 @@ class _DotOptionButton(QPushButton):
         font.setBold(self.isChecked())
         painter.setFont(font)
 
-        text_color = QColor(255, 255, 255, 255 if self.isChecked() else 220)
+        text_color = QColor("#333333")
         painter.setPen(text_color)
         radius = 3.0
         dot_gap = 3.0
@@ -113,10 +113,31 @@ class _DotOptionButton(QPushButton):
             dot_size,
             dot_size,
         )
-        painter.setPen(QPen(QColor(255, 255, 255, 230), 1))
-        selected_color = QColor(255, 255, 255, 191)
+        selected_color = QColor(AppConfig.COLOR_GRADIENT_START)
+        painter.setPen(
+            QPen(
+                selected_color if self.isChecked() else QColor("#777777"),
+                1,
+            )
+        )
         painter.setBrush(QBrush(selected_color) if self.isChecked() else Qt.BrushStyle.NoBrush)
         painter.drawEllipse(dot_rect)
+        painter.end()
+
+
+class _ThemeCategoryComboBox(QComboBox):
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        center_x = self.width() - 9.0
+        center_y = self.height() / 2.0
+        arrow = QPainterPath()
+        arrow.moveTo(center_x - 4.0, center_y - 2.0)
+        arrow.lineTo(center_x + 4.0, center_y - 2.0)
+        arrow.lineTo(center_x, center_y + 3.0)
+        arrow.closeSubpath()
+        painter.fillPath(arrow, QColor(AppConfig.COLOR_GRADIENT_START))
         painter.end()
 
 
@@ -307,7 +328,8 @@ class _AllScheduleResultCard(QFrame):
 class AllSchedulesPanel(QWidget):
     schedule_detail_requested = pyqtSignal(object)
 
-    RESIZE_MARGIN = 14
+    TOP_RESIZE_MARGIN = 3
+    BOTTOM_RESIZE_MARGIN = 14
     OPTION_TITLE_WIDTH = 52
     OPTION_ROW_SPACING = 2
     OPTION_GRID_COLUMNS = 5
@@ -345,18 +367,19 @@ class AllSchedulesPanel(QWidget):
 
     def reset_geometry_for_parent(self):
         parent = self.parent_window
+        width = 300
+        minimum_height = 384
+        default_height = 560
         if parent is None:
-            self.setFixedWidth(260)
-            self.setMinimumHeight(384)
-            self.resize(260, 384)
+            self.setFixedWidth(width)
+            self.setMinimumHeight(minimum_height)
+            self.resize(width, default_height)
             return
 
         parent_rect = parent.frameGeometry()
-        width = max(260, int(parent_rect.width() * 0.75))
-        height = max(260, int(parent_rect.height() * 2 / 3))
+        height = default_height
         self.setFixedWidth(width)
-        self.setMinimumHeight(height)
-        self.resize(width, height)
+        self.setMinimumHeight(minimum_height)
         gap = 8
         preferred_x = parent_rect.x() + parent_rect.width() + gap
         fallback_x = parent_rect.x() - width - gap
@@ -366,6 +389,7 @@ class AllSchedulesPanel(QWidget):
         screen = QGuiApplication.screenAt(parent_rect.center()) or QGuiApplication.primaryScreen()
         if screen is not None:
             available = screen.availableGeometry()
+            height = max(minimum_height, min(height, available.height()))
             if preferred_x + width <= available.right() + 1:
                 x = preferred_x
             elif fallback_x >= available.left():
@@ -380,15 +404,17 @@ class AllSchedulesPanel(QWidget):
                 min(y, available.bottom() - height + 1),
             )
 
+        self.resize(width, height)
         self.move(x, y)
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(8)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        header = QVBoxLayout()
-        header.setContentsMargins(0, 0, 0, 0)
+        header_holder = QWidget()
+        header = QVBoxLayout(header_holder)
+        header.setContentsMargins(12, 12, 12, 11)
         header.setSpacing(2)
 
         title_row = QHBoxLayout()
@@ -492,16 +518,31 @@ class AllSchedulesPanel(QWidget):
         search_row.addWidget(self.search_box)
         search_row.addWidget(self.btn_settings)
         header.addLayout(search_row)
-        layout.addLayout(header)
+        layout.addWidget(header_holder)
+
+        self.body_frame = QFrame()
+        self.body_frame.setObjectName("allSchedulesBodyFrame")
+        self.body_frame.setStyleSheet(
+            """
+            QFrame#allSchedulesBodyFrame {
+                background-color: rgba(255, 255, 255, 0.70);
+                border: none;
+                border-bottom-left-radius: 12px;
+                border-bottom-right-radius: 12px;
+            }
+            """
+        )
+        body_layout = QVBoxLayout(self.body_frame)
+        body_layout.setContentsMargins(12, 8, 12, 12)
+        body_layout.setSpacing(6)
 
         self.display_frame = QFrame()
         self.display_frame.setObjectName("allSchedulesDisplayFrame")
         self.display_frame.setStyleSheet(
             """
             QFrame#allSchedulesDisplayFrame {
-                background-color: rgba(255, 255, 255, 0.75);
-                border: 2px solid white;
-                border-radius: 8px;
+                background: transparent;
+                border: none;
             }
             """
         )
@@ -642,9 +683,19 @@ class AllSchedulesPanel(QWidget):
         )
 
         display_layout.addWidget(self.scroll_area, 1)
-        layout.addWidget(self.search_options_area, 0)
-        layout.addWidget(self.settings_area, 0)
-        layout.addWidget(self.display_frame, 1)
+        body_layout.addWidget(self.search_options_area, 0)
+        body_layout.addWidget(self.settings_area, 0)
+        self.settings_separator = QFrame()
+        self.settings_separator.setObjectName("allSchedulesSettingsSeparator")
+        self.settings_separator.setFixedHeight(1)
+        self.settings_separator.setStyleSheet(
+            "QFrame#allSchedulesSettingsSeparator { "
+            "background-color: rgba(45, 45, 45, 0.32); border: none; }"
+        )
+        self.settings_separator.hide()
+        body_layout.addWidget(self.settings_separator, 0)
+        body_layout.addWidget(self.display_frame, 1)
+        layout.addWidget(self.body_frame, 1)
         self.search_box.installEventFilter(self)
         self.search_box.textChanged.connect(self.refresh_results)
         self.category_combo.currentIndexChanged.connect(self.refresh_results)
@@ -683,7 +734,7 @@ class AllSchedulesPanel(QWidget):
         title_label.setFixedWidth(self.OPTION_TITLE_WIDTH)
         title_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         title_label.setStyleSheet(
-            "color: white; font-family: 'Microsoft YaHei UI'; font-size: 10px; "
+            "color: #333333; font-family: 'Microsoft YaHei UI'; font-size: 10px; "
             "background: transparent; border: none;"
         )
         parent_layout.addWidget(title_label, row, 0)
@@ -715,7 +766,7 @@ class AllSchedulesPanel(QWidget):
         title_label.setFixedWidth(self.OPTION_TITLE_WIDTH)
         title_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         title_label.setStyleSheet(
-            "color: white; font-family: 'Microsoft YaHei UI'; font-size: 10px; "
+            "color: #333333; font-family: 'Microsoft YaHei UI'; font-size: 10px; "
             "background: transparent; border: none;"
         )
         parent_layout.addWidget(title_label, row, 0)
@@ -753,23 +804,23 @@ class AllSchedulesPanel(QWidget):
         title_label.setFixedWidth(self.OPTION_TITLE_WIDTH)
         title_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         title_label.setStyleSheet(
-            "color: white; font-family: 'Microsoft YaHei UI'; font-size: 10px; "
+            "color: #333333; font-family: 'Microsoft YaHei UI'; font-size: 10px; "
             "background: transparent; border: none;"
         )
         parent_layout.addWidget(title_label, row, 0)
         parent_layout.addWidget(combo, row, 1, 1, self.OPTION_GRID_COLUMNS)
 
     def _create_category_combo(self):
-        combo = QComboBox()
+        combo = _ThemeCategoryComboBox()
         combo.setFixedHeight(22)
         combo.setCursor(Qt.CursorShape.PointingHandCursor)
         self._populate_category_combo(combo)
         combo.setStyleSheet(
             """
             QComboBox {
-                color: white;
+                color: __ACCENT__;
                 background-color: rgba(255, 255, 255, 0.16);
-                border: 1px solid rgba(255, 255, 255, 0.70);
+                border: 1px solid __ACCENT__;
                 border-radius: 4px;
                 padding: 1px 6px;
                 font-family: 'Microsoft YaHei UI';
@@ -777,25 +828,26 @@ class AllSchedulesPanel(QWidget):
             }
             QComboBox:hover, QComboBox:focus {
                 background-color: rgba(255, 255, 255, 0.22);
-                border: 1px solid white;
+                border: 1px solid __ACCENT__;
             }
             QComboBox::drop-down {
                 border: none;
                 width: 18px;
             }
             QComboBox::down-arrow {
-                image: url(assets/icons/combo_down_white.svg);
+                image: none;
                 width: 9px;
                 height: 6px;
             }
             QComboBox QAbstractItemView {
                 background: white;
-                color: #0066cc;
-                selection-background-color: #0066cc;
+                color: __ACCENT__;
+                selection-background-color: __ACCENT__;
                 selection-color: white;
                 outline: none;
             }
             """
+            .replace("__ACCENT__", AppConfig.COLOR_GRADIENT_START)
         )
         DayQueryOptionsPanel._apply_combo_popup_style(combo)
         combo.setFixedHeight(22)
@@ -1365,6 +1417,10 @@ class AllSchedulesPanel(QWidget):
     def _toggle_settings_area(self):
         self._settings_visible = not self._settings_visible
         self.settings_area.setVisible(self._settings_visible)
+        self.settings_separator.setVisible(self._settings_visible)
+        if not self._settings_visible:
+            self._search_options_visible = False
+            self.search_options_area.hide()
         self._settings_rotation_animation.stop()
         self._settings_rotation_animation.setStartValue(self._settings_icon_angle)
         self._settings_rotation_animation.setEndValue(
@@ -1398,6 +1454,7 @@ class AllSchedulesPanel(QWidget):
 
     def _install_resize_event_filters(self):
         for widget in (
+            self.body_frame,
             self.display_frame,
             self.scroll_area,
             self.scroll_area.viewport(),
@@ -1521,9 +1578,9 @@ class AllSchedulesPanel(QWidget):
         super().leaveEvent(event)
 
     def _hit_resize_edge(self, y):
-        if y <= self.RESIZE_MARGIN:
+        if y <= self.TOP_RESIZE_MARGIN:
             return "top"
-        if y >= self.height() - self.RESIZE_MARGIN:
+        if y >= self.height() - self.BOTTOM_RESIZE_MARGIN:
             return "bottom"
         return None
 

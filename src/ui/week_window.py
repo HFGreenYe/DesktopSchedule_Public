@@ -91,12 +91,18 @@ class WeekContentSurface(QWidget):
         super().__init__(parent)
         self._background_color = QColor("#FFFFFF")
         self._border_color = QColor(120, 120, 120, 72)
+        self._column_backgrounds = []
         self._border_overlay = WeekContentBorderOverlay(self)
 
     def set_surface_colors(self, background_color, border_color):
         self._background_color = QColor(background_color)
         self._border_color = QColor(border_color)
         self._border_overlay.set_border_color(self._border_color)
+        self._border_overlay.raise_()
+        self.update()
+
+    def set_column_backgrounds(self, colors):
+        self._column_backgrounds = [QColor(color) for color in colors]
         self._border_overlay.raise_()
         self.update()
 
@@ -119,6 +125,23 @@ class WeekContentSurface(QWidget):
         fill_path.quadTo(0.0, height, 0.0, height - radius)
         fill_path.lineTo(0.0, 0.0)
         painter.fillPath(fill_path, self._background_color)
+
+        if self._column_backgrounds:
+            inner_left = 1.0
+            inner_width = max(0.0, width - 2.0)
+            inner_height = max(0.0, height - 1.0)
+            column_width = inner_width / len(self._column_backgrounds)
+            for index, color in enumerate(self._column_backgrounds):
+                column_path = QPainterPath()
+                column_path.addRect(
+                    QRectF(
+                        inner_left + index * column_width,
+                        0.0,
+                        column_width,
+                        inner_height,
+                    )
+                )
+                painter.fillPath(fill_path.intersected(column_path), color)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -1817,12 +1840,32 @@ class WeekTimetableBoard(QFrame):
 
     def paintEvent(self, event):
         painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         width = self.width()
         height = self.height()
         if width <= 0 or height <= 0:
             return
 
         board_rect = QRectF(0.0, 0.0, float(width), float(height))
+        radius = 7.0
+        board_clip_path = QPainterPath()
+        board_clip_path.moveTo(board_rect.left(), board_rect.top())
+        board_clip_path.lineTo(board_rect.right(), board_rect.top())
+        board_clip_path.lineTo(board_rect.right(), board_rect.bottom() - radius)
+        board_clip_path.quadTo(
+            board_rect.right(),
+            board_rect.bottom(),
+            board_rect.right() - radius,
+            board_rect.bottom(),
+        )
+        board_clip_path.lineTo(board_rect.left() + radius, board_rect.bottom())
+        board_clip_path.quadTo(
+            board_rect.left(),
+            board_rect.bottom(),
+            board_rect.left(),
+            board_rect.bottom() - radius,
+        )
+        board_clip_path.closeSubpath()
         day_width = board_rect.width() / self.DAY_COUNT
         row_height = board_rect.height() / self.HOUR_ROWS
 
@@ -1836,15 +1879,23 @@ class WeekTimetableBoard(QFrame):
             )
             painter.save()
             painter.setPen(Qt.PenStyle.NoPen)
+            highlight_path = QPainterPath()
+            highlight_path.addRect(highlight_rect)
             if self._dark_mode:
-                painter.fillRect(highlight_rect, QColor(255, 255, 255, 18))
+                painter.fillPath(
+                    board_clip_path.intersected(highlight_path),
+                    QColor(255, 255, 255, 18),
+                )
             else:
-                painter.fillRect(highlight_rect, QColor(0, 0, 0, 15))
+                painter.fillPath(
+                    board_clip_path.intersected(highlight_path),
+                    QColor(0, 0, 0, 15),
+                )
             painter.restore()
 
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.setClipRect(board_rect)
+        painter.setClipPath(board_clip_path)
         self._hit_regions = []
         self._visible_event_labels = []
         self._visible_ddl_labels = []
@@ -2433,6 +2484,7 @@ class WeekWindow(FramelessMainWindow):
             QColor("#FFFFFF"),
             QColor(120, 120, 120, 72),
         )
+        self._week_column_backgrounds = ["#FFFFFF"] * 7
         
         content_layout = QVBoxLayout(self.content_area)
         content_layout.setContentsMargins(1, 0, 1, 1)
@@ -2470,8 +2522,8 @@ class WeekWindow(FramelessMainWindow):
             scroll_area.setStyleSheet(
                 f"QScrollArea#{scroll_area.objectName()} {{ background: transparent; border: none; }}"
             )
-            scroll_area.viewport().setAutoFillBackground(True)
-            scroll_area.viewport().setStyleSheet("background-color: #FFFFFF;")
+            scroll_area.viewport().setAutoFillBackground(False)
+            scroll_area.viewport().setStyleSheet("background: transparent;")
 
             panel = TodoListContainer(self)
             panel.setObjectName(f"week_day_panel_{i}")
@@ -2831,6 +2883,7 @@ class WeekWindow(FramelessMainWindow):
             self.page_week_timetable_placeholder,
         ):
             self.body_stack.setCurrentWidget(self._main_schedule_page())
+        self._sync_content_surface_column_backgrounds()
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -2880,6 +2933,7 @@ class WeekWindow(FramelessMainWindow):
                 QColor(120, 120, 120, 72),
             )
         
+        self._sync_content_surface_column_backgrounds()
         self.update() # 实现 paintEvent 重绘
 
     def show_toast(self, message):
@@ -3218,12 +3272,28 @@ class WeekWindow(FramelessMainWindow):
             scroll_area.setStyleSheet(
                 f"QScrollArea#{scroll_area.objectName()} {{ background: transparent; border: none; }}"
             )
-            scroll_area.viewport().setAutoFillBackground(True)
-            scroll_area.viewport().setStyleSheet(f"background-color: {bg_color};")
+            scroll_area.viewport().setAutoFillBackground(False)
+            scroll_area.viewport().setStyleSheet("background: transparent;")
 
         if hasattr(self, 'bottom_panels') and index < len(self.bottom_panels):
             panel = self.bottom_panels[index]
             panel.setStyleSheet(f"QWidget#{panel.objectName()} {{ background-color: transparent; }}")
+
+        if hasattr(self, '_week_column_backgrounds'):
+            self._week_column_backgrounds[index] = bg_color
+            self._sync_content_surface_column_backgrounds()
+
+    def _sync_content_surface_column_backgrounds(self):
+        if not hasattr(self, 'content_area'):
+            return
+        if (
+            getattr(self, 'schedule_display_mode', 'card') == 'card'
+            and not getattr(self, 'is_edit_mode', False)
+        ):
+            colors = getattr(self, '_week_column_backgrounds', [])
+        else:
+            colors = []
+        self.content_area.set_column_backgrounds(colors)
 
     def refresh_week_data(self):
         for i in range(7):
