@@ -1,5 +1,6 @@
 from datetime import date, timedelta
 from html import escape
+from pathlib import Path
 
 from PyQt6.QtCore import QPoint, QPointF, QRectF, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import (
@@ -19,9 +20,11 @@ from PyQt6.QtWidgets import (
     QGraphicsOpacityEffect,
     QGridLayout,
     QHBoxLayout,
+    QFileDialog,
     QLabel,
     QButtonGroup,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QRadioButton,
     QStyle,
@@ -35,6 +38,7 @@ from PyQt6.QtWidgets import (
 from src.config import AppConfig
 from src.services.schedule_export_service import ExportOptions, ScheduleExportService
 from src.ui.calendar_pop import CalendarPop
+from src.ui.common.toast import show_center_toast
 from src.ui.common.themed_color_dialog import ThemedColorDialog
 from src.ui.popups.export_range_picker import ExportPeriodPickerPopup
 from src.utils.window_preferences import set_window_pin_state
@@ -409,6 +413,7 @@ class ExportSchedulePanel(QWidget):
         self._radio_groups = []
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setMouseTracking(True)
+        self.export_requested.connect(self._handle_export_requested)
         self._setup_ui()
         self.reset_geometry_for_parent()
 
@@ -1368,6 +1373,69 @@ class ExportSchedulePanel(QWidget):
             target_date=target_date,
             group_by="date",
         )
+
+    def _handle_export_requested(self):
+        export_format = self._selected_option("export_format") or "Markdown"
+        if export_format != "Markdown":
+            show_center_toast(
+                self,
+                f"{export_format} 导出尚未接入",
+                attr_name="_export_result_toast",
+                duration_ms=1400,
+            )
+            return
+
+        options = self._current_export_options()
+        file_path, _selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "导出 Markdown",
+            self._default_markdown_filename(options),
+            "Markdown 文件 (*.md)",
+        )
+        if not file_path:
+            return
+
+        target = Path(file_path)
+        if target.suffix.lower() != ".md":
+            target = target.with_suffix(".md")
+
+        try:
+            if self._export_service is None:
+                self._export_service = ScheduleExportService()
+            exported_path = self._export_service.write_markdown(target, options)
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "导出失败",
+                f"Markdown 文件保存失败：\n{exc}",
+            )
+            return
+
+        show_center_toast(
+            self,
+            f"已导出：{exported_path.name}",
+            attr_name="_export_result_toast",
+            duration_ms=1800,
+        )
+
+    @staticmethod
+    def _default_markdown_filename(options):
+        content_text = {
+            "schedule": "日程",
+            "todo": "待办",
+            "all": "日程与待办",
+        }.get(options.content_type, "日程与待办")
+        target = options.target_date
+        if options.range_kind == "day":
+            range_text = target.isoformat()
+        elif options.range_kind == "week":
+            iso_year, iso_week, _weekday = target.isocalendar()
+            range_text = f"{iso_year}年第{iso_week:02d}周"
+        elif options.range_kind == "month":
+            range_text = f"{target.year}-{target.month:02d}"
+        else:
+            range_text = "全部"
+        return f"{content_text}_{range_text}.md"
 
     def _refresh_export_preview(self):
         if not hasattr(self, "preview_box"):
