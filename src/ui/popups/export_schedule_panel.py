@@ -765,7 +765,7 @@ class ExportSchedulePanel(QWidget):
             button.setProperty("option_value", label)
             button.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
             button.setFixedHeight(18)
-            button.setFixedWidth(82 if group_key == "schedule_range" else 76)
+            button.setFixedWidth(76)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setStyleSheet(radio_style)
             button.clicked.connect(
