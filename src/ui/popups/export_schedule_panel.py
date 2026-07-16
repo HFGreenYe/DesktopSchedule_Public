@@ -13,6 +13,8 @@ from PyQt6.QtGui import (
     QPainterPath,
     QPixmap,
 )
+from PyQt6.QtPdf import QPdfDocument
+from PyQt6.QtPdfWidgets import QPdfView
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtWidgets import (
     QComboBox,
@@ -30,6 +32,7 @@ from PyQt6.QtWidgets import (
     QStyle,
     QStyleOptionComboBox,
     QStylePainter,
+    QStackedWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -42,6 +45,7 @@ from src.services.schedule_export_service import (
     PdfTextStyle,
     ScheduleExportService,
 )
+from src.services.schedule_pdf_preview_service import SchedulePdfPreviewController
 from src.ui.calendar_pop import CalendarPop
 from src.ui.common.toast import show_center_toast
 from src.ui.common.themed_color_dialog import ThemedColorDialog
@@ -49,8 +53,112 @@ from src.ui.popups.export_range_picker import ExportPeriodPickerPopup
 from src.utils.window_preferences import set_window_pin_state
 
 
+class _PdfThumbnailSurface(QWidget):
+    clicked = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._image = QImage()
+        self._page_count = 0
+        self._status_text = "正在生成 PDF 预览…"
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def set_loading(self, text="正在生成 PDF 预览…"):
+        self._image = QImage()
+        self._page_count = 0
+        self._status_text = text
+        self.update()
+
+    def set_preview(self, image, page_count):
+        self._image = QImage(image)
+        self._page_count = max(0, int(page_count))
+        self._status_text = ""
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        painter.fillRect(self.rect(), QColor("#D7DADD"))
+        if self._image.isNull():
+            painter.setPen(QColor("#555555"))
+            painter.drawText(
+                self.rect().adjusted(12, 12, -12, -12),
+                Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
+                self._status_text,
+            )
+            return
+
+        footer_height = 24
+        available = QSize(
+            max(1, self.width() - 12),
+            max(1, self.height() - footer_height - 12),
+        )
+        scaled = self._image.scaled(
+            available,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        left = (self.width() - scaled.width()) / 2
+        top = 6 + max(0, (available.height() - scaled.height()) / 2)
+        page_rect = QRectF(left, top, scaled.width(), scaled.height())
+        shadow_rect = page_rect.translated(2, 2)
+        painter.fillRect(shadow_rect, QColor(0, 0, 0, 48))
+        painter.drawImage(page_rect, scaled)
+        painter.setPen(QColor("#8A8A8A"))
+        painter.drawRect(page_rect)
+
+        page_text = f"共 {self._page_count} 页"
+        badge_width = max(52, painter.fontMetrics().horizontalAdvance(page_text) + 16)
+        badge_rect = QRectF(
+            (self.width() - badge_width) / 2,
+            self.height() - footer_height + 2,
+            badge_width,
+            18,
+        )
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(255, 255, 255, 224))
+        painter.drawRoundedRect(badge_rect, 9, 9)
+        painter.setPen(QColor("#4A4A4A"))
+        painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, page_text)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+
 class _ExportPreviewBox(QTextEdit):
     clicked = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.pdf_surface = _PdfThumbnailSurface(self.viewport())
+        self.pdf_surface.clicked.connect(self.clicked)
+        self.pdf_surface.hide()
+
+    def show_text_preview(self):
+        self.pdf_surface.hide()
+
+    def show_pdf_loading(self, text="正在生成 PDF 预览…"):
+        self.clear()
+        self.pdf_surface.setGeometry(self.viewport().rect())
+        self.pdf_surface.set_loading(text)
+        self.pdf_surface.show()
+        self.pdf_surface.raise_()
+
+    def show_pdf_preview(self, image, page_count):
+        self.clear()
+        self.pdf_surface.setGeometry(self.viewport().rect())
+        self.pdf_surface.set_preview(image, page_count)
+        self.pdf_surface.show()
+        self.pdf_surface.raise_()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.pdf_surface.setGeometry(self.viewport().rect())
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -141,6 +249,7 @@ class _ExportPreviewPopup(QWidget):
         content_layout.setContentsMargins(14, 10, 14, 14)
         content_layout.setSpacing(0)
 
+        self.preview_stack = QStackedWidget(self.content_frame)
         self.preview_editor = QTextEdit()
         self.preview_editor.setReadOnly(True)
         self.preview_editor.setVerticalScrollBarPolicy(
@@ -162,17 +271,74 @@ class _ExportPreviewPopup(QWidget):
             }}
             """
         )
-        content_layout.addWidget(self.preview_editor)
+        self.pdf_status = QLabel("正在生成 PDF 预览…")
+        self.pdf_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.pdf_status.setWordWrap(True)
+        self.pdf_status.setStyleSheet(
+            "color: #555555; background: #D7DADD; border: none; "
+            "font-family: 'Microsoft YaHei UI'; font-size: 12px; padding: 16px;"
+        )
+        self.pdf_view = QPdfView(self.preview_stack)
+        self.pdf_view.setPageMode(QPdfView.PageMode.MultiPage)
+        self.pdf_view.setZoomMode(QPdfView.ZoomMode.FitToWidth)
+        self.pdf_view.setPageSpacing(12)
+        self.pdf_view.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.pdf_view.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.pdf_view.setStyleSheet(
+            "QPdfView { background: #D7DADD; border: none; }"
+        )
+        self.pdf_view.pageNavigator().currentPageChanged.connect(
+            self._update_pdf_title
+        )
+        self._pdf_page_count = 0
+        self.preview_stack.addWidget(self.preview_editor)
+        self.preview_stack.addWidget(self.pdf_status)
+        self.preview_stack.addWidget(self.pdf_view)
+        content_layout.addWidget(self.preview_stack)
         layout.addWidget(self.content_frame, 1)
         self.header_holder.installEventFilter(self)
         self.title.installEventFilter(self)
         self.content_frame.installEventFilter(self)
         self.preview_editor.viewport().installEventFilter(self)
+        self.pdf_view.viewport().installEventFilter(self)
         self.set_preview_size(self._source_preview_size)
         self._update_close_button_position()
 
     def set_preview_html(self, html):
         self.preview_editor.setHtml(html)
+        self.title.setText("导出预览")
+        self.preview_stack.setCurrentWidget(self.preview_editor)
+        self.set_preview_size(self._source_preview_size)
+
+    def set_pdf_loading(self, text="正在生成 PDF 预览…"):
+        self.pdf_status.setText(text)
+        self.title.setText("导出预览 · PDF")
+        self.preview_stack.setCurrentWidget(self.pdf_status)
+        self.set_preview_size(self._source_preview_size)
+
+    def set_pdf_document(self, document):
+        self.pdf_view.setDocument(document)
+        self._pdf_page_count = document.pageCount()
+        self.preview_stack.setCurrentWidget(self.pdf_view)
+        self.set_preview_size(self._source_preview_size)
+        self._update_pdf_title(self.pdf_view.pageNavigator().currentPage())
+
+    def clear_pdf_document(self):
+        self.pdf_view.setDocument(None)
+        self._pdf_page_count = 0
+
+    def _update_pdf_title(self, page=0):
+        if self._pdf_page_count <= 0:
+            self.title.setText("导出预览 · PDF")
+            return
+        current_page = max(0, int(page)) + 1
+        self.title.setText(
+            f"导出预览 · PDF {current_page}/{self._pdf_page_count}"
+        )
 
     def set_preview_background(self, background_style):
         self.content_frame.setStyleSheet(
@@ -186,12 +352,22 @@ class _ExportPreviewPopup(QWidget):
         scale = 1.45
         content_width = max(220, round(self._source_preview_size.width() * scale))
         content_height = max(320, round(self._source_preview_size.height() * scale))
-        self.setFixedSize(content_width + 28, content_height + 56)
+        pdf_height_padding = (
+            max(0, self.pdf_view.pageSpacing() - 4)
+            if hasattr(self, "pdf_view")
+            and self.preview_stack.currentWidget() in (self.pdf_status, self.pdf_view)
+            else 0
+        )
+        self.setFixedSize(
+            content_width + 28,
+            content_height + 56 + pdf_height_padding,
+        )
         self._update_close_button_position()
 
     def _update_close_button_position(self):
         self.close_btn.move(self.width() - self.close_btn.width(), 0)
         self.close_btn.raise_()
+        self.title.setMaximumWidth(max(1, self.width() - self.close_btn.width() - 28))
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -221,13 +397,15 @@ class _ExportPreviewPopup(QWidget):
         header_drag = watched in (self.header_holder, self.title)
         content_drag = watched is self.content_frame
         preview_drag = watched is self.preview_editor.viewport()
-        if header_drag or content_drag or preview_drag:
+        pdf_drag = watched is self.pdf_view.viewport()
+        if header_drag or content_drag or preview_drag or pdf_drag:
             if (
                 event.type() == QEvent.Type.MouseButtonPress
                 and event.button() == Qt.MouseButton.LeftButton
                 and (
                     header_drag
                     or content_drag
+                    or pdf_drag
                     or self._is_preview_blank_position(event.position())
                 )
             ):
@@ -454,6 +632,24 @@ class ExportSchedulePanel(QWidget):
         self._day_range_popup = None
         self._period_range_popup = None
         self._export_service = None
+        self._pdf_document = None
+        self._pdf_document_path = ""
+        self._pending_pdf_document = None
+        self._pending_pdf_document_path = ""
+        self._pdf_preview_controller = SchedulePdfPreviewController(
+            self._build_pdf_preview_payload,
+            self,
+            debounce_ms=300,
+        )
+        self._pdf_preview_controller.preview_ready.connect(
+            self._handle_pdf_preview_ready
+        )
+        self._pdf_preview_controller.preview_failed.connect(
+            self._handle_pdf_preview_failed
+        )
+        application = QGuiApplication.instance()
+        if application is not None:
+            application.aboutToQuit.connect(self._shutdown_pdf_preview)
         today = date.today()
         self._selected_range_dates = {
             "day": today,
@@ -1203,6 +1399,11 @@ class ExportSchedulePanel(QWidget):
                 "background-color: rgba(255, 255, 255, 0.96)",
                 "background-color: rgba(255, 255, 255, 0.70)",
             )
+        if export_format == "PDF":
+            return (
+                "background-color: #D7DADD",
+                "background-color: rgba(255, 255, 255, 0.70)",
+            )
         if self.export_background_mode == "gradient":
             embedded = (
                 "background: qlineargradient(x1:0, y1:0, x2:0, y2:1, "
@@ -1279,6 +1480,7 @@ class ExportSchedulePanel(QWidget):
                     changed = True
         if changed:
             self._apply_background_preview_styles()
+            self._refresh_export_preview()
 
     def _handle_font_color_clicked(self, field):
         selected = self._choose_export_color(
@@ -1556,24 +1758,39 @@ class ExportSchedulePanel(QWidget):
     def _default_markdown_filename(options):
         return ExportSchedulePanel._default_export_filename(options, ".md")
 
+    def _build_pdf_preview_payload(self, options):
+        if self._export_service is None:
+            self._export_service = ScheduleExportService()
+        return self._export_service.build_payload(options)
+
     def _refresh_export_preview(self):
         if not hasattr(self, "preview_box"):
             return
+        export_format = self._selected_option("export_format") or "Markdown"
+        if export_format == "PDF":
+            self._clear_pdf_document()
+            self._preview_plain_text = "正在生成 PDF 真实预览…"
+            self._preview_html = ""
+            self.preview_box.show_pdf_loading(self._preview_plain_text)
+            if self._preview_popup is not None:
+                self._preview_popup.set_pdf_loading(self._preview_plain_text)
+            self._apply_preview_surface_styles()
+            self._pdf_preview_controller.schedule(
+                self._current_export_options(),
+                self._current_pdf_style(),
+            )
+            return
+
+        self._pdf_preview_controller.cancel()
+        self._clear_pdf_document()
         try:
             if self._export_service is None:
                 self._export_service = ScheduleExportService()
             markdown = self._export_service.render_markdown(
                 self._current_export_options()
             )
-            export_format = self._selected_option("export_format") or "Markdown"
             if export_format == "Markdown":
                 preview_text = markdown
-            elif export_format == "PDF":
-                preview_text = (
-                    "# PDF 导出预览\n\n"
-                    "当前背景、字体、字体颜色、加粗和斜体设置会应用到 PDF 文件。\n\n"
-                    f"{markdown}"
-                )
             else:
                 preview_text = (
                     f"{export_format} 导出尚未接入，当前先显示同一份导出数据的 "
@@ -1585,9 +1802,108 @@ class ExportSchedulePanel(QWidget):
         preview_html = self._build_preview_html(preview_text)
         self._preview_plain_text = preview_text
         self._preview_html = preview_html
+        self.preview_box.show_text_preview()
         self.preview_box.setHtml(preview_html)
         if self._preview_popup is not None:
             self._preview_popup.set_preview_html(preview_html)
+
+    def _handle_pdf_preview_ready(self, file_path):
+        if self._selected_option("export_format") != "PDF":
+            self._pdf_preview_controller.discard(file_path)
+            return
+        document = QPdfDocument(self)
+        self._pending_pdf_document = document
+        self._pending_pdf_document_path = file_path
+        document.statusChanged.connect(
+            lambda status, current=document, path=file_path: self._handle_pdf_document_status(
+                current,
+                path,
+                status,
+            )
+        )
+        load_error = document.load(file_path)
+        if (
+            load_error != QPdfDocument.Error.None_
+            and self._pending_pdf_document is document
+        ):
+            self._fail_pending_pdf_document(document, file_path, str(load_error))
+            return
+        if self._pending_pdf_document is document:
+            self._handle_pdf_document_status(document, file_path, document.status())
+
+    def _handle_pdf_document_status(self, document, file_path, status):
+        if self._pending_pdf_document is not document:
+            return
+        if status == QPdfDocument.Status.Loading:
+            return
+        if status != QPdfDocument.Status.Ready:
+            self._fail_pending_pdf_document(
+                document,
+                file_path,
+                "Qt PDF 文档加载失败",
+            )
+            return
+        if self._selected_option("export_format") != "PDF":
+            self._fail_pending_pdf_document(document, file_path, "")
+            return
+
+        self._pending_pdf_document = None
+        self._pending_pdf_document_path = ""
+        self._pdf_document = document
+        self._pdf_document_path = file_path
+        page_count = document.pageCount()
+        thumbnail = document.render(0, QSize(420, 594))
+        if thumbnail.isNull() or page_count <= 0:
+            self._clear_pdf_document()
+            self._handle_pdf_preview_failed("PDF 第一页渲染失败")
+            return
+        self._preview_plain_text = f"PDF 真实预览 · 共 {page_count} 页"
+        self.preview_box.show_pdf_preview(thumbnail, page_count)
+        if self._preview_popup is not None:
+            self._preview_popup.set_pdf_document(document)
+
+    def _fail_pending_pdf_document(self, document, file_path, message):
+        if self._pending_pdf_document is document:
+            self._pending_pdf_document = None
+            self._pending_pdf_document_path = ""
+        document.close()
+        document.deleteLater()
+        self._pdf_preview_controller.discard(file_path)
+        if message:
+            self._handle_pdf_preview_failed(message)
+
+    def _handle_pdf_preview_failed(self, message):
+        if self._selected_option("export_format") != "PDF":
+            return
+        preview_text = f"PDF 预览生成失败：{message}"
+        self._preview_plain_text = preview_text
+        self.preview_box.show_pdf_loading(preview_text)
+        if self._preview_popup is not None:
+            self._preview_popup.set_pdf_loading(preview_text)
+
+    def _clear_pdf_document(self):
+        if self._preview_popup is not None:
+            self._preview_popup.clear_pdf_document()
+        if self._pending_pdf_document is not None:
+            pending_document = self._pending_pdf_document
+            pending_path = self._pending_pdf_document_path
+            self._pending_pdf_document = None
+            self._pending_pdf_document_path = ""
+            pending_document.close()
+            pending_document.deleteLater()
+            self._pdf_preview_controller.discard(pending_path)
+        if self._pdf_document is not None:
+            document = self._pdf_document
+            file_path = self._pdf_document_path
+            self._pdf_document = None
+            self._pdf_document_path = ""
+            document.close()
+            document.deleteLater()
+            self._pdf_preview_controller.discard(file_path)
+
+    def _shutdown_pdf_preview(self):
+        self._clear_pdf_document()
+        self._pdf_preview_controller.shutdown()
 
     def _build_preview_html(self, preview_text):
         lines = []
@@ -1726,9 +2042,15 @@ class ExportSchedulePanel(QWidget):
         text = getattr(self, "_preview_plain_text", self.preview_box.toPlainText())
         if self._preview_popup is None:
             self._preview_popup = _ExportPreviewPopup(text, self)
-        self._preview_popup.set_preview_html(
-            getattr(self, "_preview_html", self._build_preview_html(text))
-        )
+        if self._selected_option("export_format") == "PDF":
+            if self._pdf_document is not None:
+                self._preview_popup.set_pdf_document(self._pdf_document)
+            else:
+                self._preview_popup.set_pdf_loading(text)
+        else:
+            self._preview_popup.set_preview_html(
+                getattr(self, "_preview_html", self._build_preview_html(text))
+            )
         self._apply_preview_surface_styles()
         self._preview_popup.set_preview_size(self.preview_box.size())
         self._preview_popup.show_near(self)
@@ -1795,6 +2117,8 @@ class ExportSchedulePanel(QWidget):
         self._update_header_button_positions()
 
     def closeEvent(self, event):
+        self._pdf_preview_controller.cancel()
+        self._clear_pdf_document()
         if self._preview_popup is not None:
             self._preview_popup.close()
         if self._background_popup is not None:

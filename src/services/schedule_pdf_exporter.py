@@ -6,6 +6,7 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from threading import RLock
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -24,6 +25,7 @@ from src.services.schedule_export_service import (
 
 
 _UNIT_PATTERN = re.compile(r"[A-Za-z0-9]+(?:[._:/+\-][A-Za-z0-9]+)*|[ \t]+|.", re.S)
+_PDF_WRITE_LOCK = RLock()
 
 
 @dataclass(frozen=True)
@@ -492,8 +494,9 @@ class SchedulePdfExporter:
         payload: ExportPayload,
         style: PdfExportStyle,
     ) -> Path:
-        exporter = cls(payload, style)
-        exporter._write(target)
+        with _PDF_WRITE_LOCK:
+            exporter = cls(payload, style)
+            exporter._write(target)
         return target
 
     def _write(self, target: Path):
