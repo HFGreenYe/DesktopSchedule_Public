@@ -190,7 +190,7 @@ class ScheduleSearchPanel(QWidget):
         button.setStyleSheet(
             """
             QPushButton {
-                color: #0b78c6;
+                color: __ACCENT__;
                 background: rgba(255, 255, 255, 0.92);
                 border: 1px solid rgba(255, 255, 255, 0.95);
                 border-radius: 5px;
@@ -204,6 +204,7 @@ class ScheduleSearchPanel(QWidget):
                 background: rgba(235, 245, 255, 0.95);
             }
             """
+            .replace("__ACCENT__", AppConfig.COLOR_GRADIENT_START)
         )
         return button
 

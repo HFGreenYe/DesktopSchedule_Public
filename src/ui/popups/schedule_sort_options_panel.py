@@ -72,7 +72,8 @@ class SortSegmentGroup(QWidget):
     def _button_style(checked):
         if checked:
             return (
-                "QPushButton { color: #0b78c6; background: rgba(255,255,255,0.94); "
+                f"QPushButton {{ color: {AppConfig.COLOR_GRADIENT_START}; "
+                "background: rgba(255,255,255,0.94); "
                 "border: 1px solid white; border-radius: 5px; "
                 "font-family: 'Microsoft YaHei'; font-size: 11px; font-weight: bold; }"
             )

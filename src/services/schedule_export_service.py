@@ -32,6 +32,7 @@ class PdfExportStyle:
     solid_color: str = "#ffffff"
     gradient_start: str = "#0066CC"
     gradient_end: str = "#0099CC"
+    default_background_index: int = 0
     title: PdfTextStyle = field(
         default_factory=lambda: PdfTextStyle(bold=True)
     )

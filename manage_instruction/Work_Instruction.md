@@ -49,4 +49,5 @@
 - PDF 保存、ReportLab 排版、字体回退、搜索文本和分页策略已接入。
 - 当前 PDF 会真实使用导出弹窗中所有已启用的 PDF 选项；尺寸仍按设计只属于 PNG。
 - 原 HTML 近似 PDF 预览已移除；预览和保存现在共用同一 ReportLab 排版器。
+- 默认背景选择弹窗已接入 8 组共享程序化图案和 1 张 GreenLeaf 图片；背景图片统一存放在 `assets/Output_Background`。程序化缩略图和 ReportLab 使用同一套上下沿颜色，GreenLeaf 的卡片与 A4 PDF 使用居中等比铺满；PNG 导出、图片裁剪策略和选择持久化仍属于后续工单。
 - PNG 仍只提示尚未接入，下一轮施工前需建立独立合同。

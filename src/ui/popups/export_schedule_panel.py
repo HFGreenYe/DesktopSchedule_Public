@@ -39,6 +39,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.config import AppConfig
+from src.services.export_background_presets import get_export_background_preset
 from src.services.schedule_export_service import (
     ExportOptions,
     PdfExportStyle,
@@ -50,6 +51,10 @@ from src.ui.calendar_pop import CalendarPop
 from src.ui.common.toast import show_center_toast
 from src.ui.common.themed_color_dialog import ThemedColorDialog
 from src.ui.popups.export_range_picker import ExportPeriodPickerPopup
+from src.ui.popups.export_default_background_popup import (
+    ExportDefaultBackgroundPopup,
+    paint_default_background_pattern,
+)
 from src.utils.window_preferences import set_window_pin_state
 
 
@@ -192,7 +197,42 @@ class _ExportClickableColorPreview(QLabel):
     def __init__(self, mode, parent=None):
         super().__init__(parent)
         self.mode = mode
+        self._background_selected = False
+        self._default_background_index = 0
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def set_background_selected(self, selected):
+        self._background_selected = bool(selected)
+        self.update()
+
+    def set_default_background_index(self, index):
+        self._default_background_index = int(index)
+        self.update()
+
+    def paintEvent(self, event):
+        if self.mode != "default":
+            super().paintEvent(event)
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        path = QPainterPath()
+        path.addRoundedRect(rect, 4, 4)
+        painter.save()
+        painter.setClipPath(path)
+        paint_default_background_pattern(
+            painter,
+            rect,
+            self._default_background_index,
+        )
+        painter.restore()
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(
+            QColor("#FFFFFF")
+            if self._background_selected
+            else QColor(120, 120, 120, 166)
+        )
+        painter.drawRoundedRect(rect, 4, 4)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -666,6 +706,7 @@ class ExportSchedulePanel(QWidget):
         self.export_solid_color = "#ffffff"
         self.export_gradient_start = AppConfig.COLOR_GRADIENT_START
         self.export_gradient_end = AppConfig.COLOR_GRADIENT_END
+        self.export_default_background_index = 0
         self.export_font_colors = {
             label: AppConfig.COLOR_GRADIENT_START
             for label in ("标题", "详情", "备注")
@@ -1012,7 +1053,12 @@ class ExportSchedulePanel(QWidget):
         )
         row.addWidget(self.solid_background_preview)
         row.addWidget(self.gradient_background_preview)
-        row.addWidget(self._create_background_preview_item("默认", "disabled", "待"))
+        self.default_background_preview = self._create_background_preview_item(
+            "默认",
+            "default",
+            "图",
+        )
+        row.addWidget(self.default_background_preview)
         row.addWidget(self._create_background_preview_item("自定义", "disabled", "+", 16))
         layout.addLayout(row)
         self._apply_background_preview_styles()
@@ -1044,7 +1090,9 @@ class ExportSchedulePanel(QWidget):
         preview.setFixedSize(36, 42)
         preview.setText(preview_text)
         preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        if mode != "disabled":
+        if mode == "default":
+            preview.clicked.connect(lambda _area: self._toggle_background_popup())
+        elif mode != "disabled":
             preview.clicked.connect(self._handle_background_preview_clicked)
         else:
             preview.setCursor(Qt.CursorShape.ArrowCursor)
@@ -1053,7 +1101,15 @@ class ExportSchedulePanel(QWidget):
             self.solid_background_chip = preview
         elif mode == "gradient":
             self.gradient_background_chip = preview
+        elif mode == "default":
+            self.default_background_chip = preview
+            preview.setText("")
+            preview.setToolTip("选择默认导出背景")
+            preview.setStyleSheet(
+                "QLabel { background: transparent; border: none; }"
+            )
         elif mode == "disabled":
+            self.custom_background_chip = preview
             preview.setStyleSheet(
                 self._preview_chip_style(
                     "background-color: rgba(255, 255, 255, 0.76);",
@@ -1353,11 +1409,26 @@ class ExportSchedulePanel(QWidget):
         """
 
     def _apply_background_preview_styles(self):
+        export_format = self._selected_option("export_format") or "Markdown"
+        selected_mode = (
+            self.export_background_mode
+            if export_format in {"PDF", "PNG"}
+            else ""
+        )
+
+        def border_for(mode):
+            return (
+                "#FFFFFF"
+                if selected_mode == mode
+                else "rgba(120, 120, 120, 0.65)"
+            )
+
         if hasattr(self, "solid_background_chip"):
             self.solid_background_chip.setStyleSheet(
                 self._preview_chip_style(
                     f"background-color: {self.export_solid_color};",
                     8,
+                    border_color=border_for("solid"),
                 )
             )
         if hasattr(self, "gradient_background_chip"):
@@ -1369,6 +1440,22 @@ class ExportSchedulePanel(QWidget):
                     f"stop:0.5 {self.export_gradient_end}, "
                     f"stop:1 {self.export_gradient_end});",
                     8,
+                    border_color=border_for("gradient"),
+                )
+            )
+        if hasattr(self, "default_background_chip"):
+            self.default_background_chip.set_default_background_index(
+                self.export_default_background_index
+            )
+            self.default_background_chip.set_background_selected(
+                selected_mode == "default"
+            )
+        if hasattr(self, "custom_background_chip"):
+            self.custom_background_chip.setStyleSheet(
+                self._preview_chip_style(
+                    "background-color: rgba(255, 255, 255, 0.76);",
+                    16,
+                    border_color="rgba(120, 120, 120, 0.65)",
                 )
             )
         if hasattr(self, "preview_box"):
@@ -1416,6 +1503,15 @@ class ExportSchedulePanel(QWidget):
                 f"stop:1 {self.export_gradient_end})"
             )
             return embedded, popup
+        if self.export_background_mode == "default":
+            preset = get_export_background_preset(
+                self.export_default_background_index
+            )
+            background = (
+                "background: qlineargradient(x1:0, y1:0, x2:0, y2:1, "
+                f"stop:0 {preset.top_color}, stop:1 {preset.bottom_color})"
+            )
+            return background, background
         return (
             f"background-color: {self.export_solid_color}",
             f"background-color: {self.export_solid_color}",
@@ -1433,11 +1529,17 @@ class ExportSchedulePanel(QWidget):
                 )
             )
 
-    def _preview_chip_style(self, background_style, font_size, border_radius=4):
+    def _preview_chip_style(
+        self,
+        background_style,
+        font_size,
+        border_radius=4,
+        border_color="rgba(120, 120, 120, 0.65)",
+    ):
         return f"""
             QLabel {{
                 {background_style}
-                border: 1px solid rgba(120, 120, 120, 0.65);
+                border: 1px solid {border_color};
                 border-radius: {border_radius}px;
                 color: #777777;
                 font-family: "Microsoft YaHei UI";
@@ -1449,17 +1551,17 @@ class ExportSchedulePanel(QWidget):
     def _handle_background_preview_clicked(self, area):
         sender = self.sender()
         mode = getattr(sender, "mode", "")
-        changed = False
+        changed = mode in {"solid", "gradient"}
         if mode == "solid":
+            self.export_background_mode = "solid"
             selected = self._choose_export_color(
                 self.export_solid_color,
                 "选择导出纯色背景颜色",
             )
             if selected:
                 self.export_solid_color = selected
-                self.export_background_mode = "solid"
-                changed = True
         elif mode == "gradient":
+            self.export_background_mode = "gradient"
             if area == "top":
                 selected = self._choose_export_color(
                     self.export_gradient_start,
@@ -1467,8 +1569,6 @@ class ExportSchedulePanel(QWidget):
                 )
                 if selected:
                     self.export_gradient_start = selected
-                    self.export_background_mode = "gradient"
-                    changed = True
             else:
                 selected = self._choose_export_color(
                     self.export_gradient_end,
@@ -1476,8 +1576,6 @@ class ExportSchedulePanel(QWidget):
                 )
                 if selected:
                     self.export_gradient_end = selected
-                    self.export_background_mode = "gradient"
-                    changed = True
         if changed:
             self._apply_background_preview_styles()
             self._refresh_export_preview()
@@ -1510,6 +1608,8 @@ class ExportSchedulePanel(QWidget):
             button.update()
         if group_key == "export_format":
             self._sync_size_button_state()
+            if hasattr(self, "solid_background_chip"):
+                self._apply_background_preview_styles()
         if hasattr(self, "preview_box"):
             self._refresh_export_preview()
 
@@ -1673,6 +1773,7 @@ class ExportSchedulePanel(QWidget):
             solid_color=self.export_solid_color,
             gradient_start=self.export_gradient_start,
             gradient_end=self.export_gradient_end,
+            default_background_index=self.export_default_background_index,
             title=text_style("标题"),
             detail=text_style("详情"),
             note=text_style("备注"),
@@ -2056,7 +2157,27 @@ class ExportSchedulePanel(QWidget):
         self._preview_popup.show_near(self)
 
     def _toggle_background_popup(self):
-        return
+        self.export_background_mode = "default"
+        self._apply_background_preview_styles()
+        self._refresh_export_preview()
+        if self._background_popup is None:
+            self._background_popup = ExportDefaultBackgroundPopup(self)
+            self._background_popup.background_selected.connect(
+                self._handle_default_background_selected
+            )
+        self._background_popup.set_selected_index(
+            self.export_default_background_index
+        )
+        if self._background_popup.isVisible():
+            self._background_popup.close()
+            return
+        self._background_popup.show_near(self)
+
+    def _handle_default_background_selected(self, index):
+        self.export_default_background_index = int(index)
+        self.export_background_mode = "default"
+        self._apply_background_preview_styles()
+        self._refresh_export_preview()
 
     def _toggle_pin(self):
         self.set_pinned(not self.is_pinned)

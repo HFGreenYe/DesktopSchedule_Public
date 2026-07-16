@@ -353,7 +353,8 @@ class DayQueryOptionsPanel(QWidget):
         button.setFixedHeight(26)
         button.setCursor(Qt.CursorShape.PointingHandCursor)
         button.setStyleSheet(
-            "QPushButton { color: #0b78c6; background: rgba(255,255,255,0.92); "
+            f"QPushButton {{ color: {AppConfig.COLOR_GRADIENT_START}; "
+            "background: rgba(255,255,255,0.92); "
             "border: 1px solid white; border-radius: 5px; font-family: 'Microsoft YaHei'; "
             "font-size: 12px; } QPushButton:hover { background: white; }"
         )

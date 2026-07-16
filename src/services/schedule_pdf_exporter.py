@@ -11,10 +11,15 @@ from threading import RLock
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
+from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import BaseDocTemplate, Flowable, Frame, PageTemplate, Spacer
 
+from src.services.export_background_presets import (
+    get_export_background_image_path,
+    get_export_background_preset,
+)
 from src.services.schedule_export_service import (
     ExportItem,
     ExportPayload,
@@ -599,7 +604,61 @@ class SchedulePdfExporter:
     def _draw_page(self, canvas, document):
         page_width, page_height = A4
         canvas.saveState()
-        if self.style.background_mode == "gradient":
+        if self.style.background_mode == "default":
+            preset = get_export_background_preset(
+                self.style.default_background_index
+            )
+            image_path = get_export_background_image_path(preset)
+            if image_path is not None:
+                image = ImageReader(str(image_path))
+                image_width, image_height = image.getSize()
+                scale = max(
+                    page_width / image_width,
+                    page_height / image_height,
+                )
+                draw_width = image_width * scale
+                draw_height = image_height * scale
+                canvas.drawImage(
+                    image,
+                    (page_width - draw_width) / 2,
+                    (page_height - draw_height) / 2,
+                    width=draw_width,
+                    height=draw_height,
+                    preserveAspectRatio=False,
+                    mask="auto",
+                )
+            else:
+                canvas.linearGradient(
+                    0,
+                    page_height,
+                    0,
+                    0,
+                    (
+                        self.engine._color(preset.top_color, "#EAF6FF"),
+                        self.engine._color(preset.bottom_color, "#9CCFFF"),
+                    ),
+                    (0, 1),
+                )
+                if hasattr(canvas, "setFillAlpha"):
+                    canvas.setFillAlpha(0.26)
+                canvas.setFillColor(colors.white)
+                canvas.circle(
+                    -page_width * 0.08,
+                    page_height * 0.80,
+                    page_width * 0.34,
+                    fill=1,
+                    stroke=0,
+                )
+                if hasattr(canvas, "setFillAlpha"):
+                    canvas.setFillAlpha(0.34)
+                canvas.circle(
+                    page_width * 0.88,
+                    page_height * 0.58,
+                    page_width * 0.29,
+                    fill=1,
+                    stroke=0,
+                )
+        elif self.style.background_mode == "gradient":
             canvas.linearGradient(
                 0,
                 page_height,
