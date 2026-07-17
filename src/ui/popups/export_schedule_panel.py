@@ -41,6 +41,16 @@ from PyQt6.QtWidgets import (
 
 from src.config import AppConfig
 from src.services.export_background_presets import get_export_background_preset
+
+
+def _theme_preview_bg_rgba():
+    """白色，用于 PDF/PNG 预览框背景（stylesheet）。"""
+    return "#FFFFFF"
+
+
+def _theme_preview_bg_qcolor():
+    """白色 QColor，用于 QPainter 绘制。"""
+    return QColor("#FFFFFF")
 from src.services.schedule_export_service import (
     ExportOptions,
     PdfExportStyle,
@@ -53,6 +63,7 @@ from src.services.schedule_pdf_preview_service import SchedulePdfPreviewControll
 from src.ui.calendar_pop import CalendarPop
 from src.ui.common.toast import show_center_toast
 from src.ui.common.themed_color_dialog import ThemedColorDialog
+from src.ui.components import get_colored_icon
 from src.ui.popups.export_range_picker import ExportPeriodPickerPopup
 from src.ui.popups.export_default_background_popup import (
     ExportDefaultBackgroundPopup,
@@ -99,7 +110,7 @@ class _PdfThumbnailSurface(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-        painter.fillRect(self.rect(), QColor("#D7DADD"))
+        painter.fillRect(self.rect(), _theme_preview_bg_qcolor())
         if self._image.isNull():
             painter.setPen(QColor("#555555"))
             painter.drawText(
@@ -286,6 +297,12 @@ class _ExportPreviewPopup(QWidget):
             "color: white; font-family: 'Microsoft YaHei UI'; "
             "font-size: 16px; font-weight: bold; background: transparent; border: none;"
         )
+        printer_pixmap = get_colored_icon("printer.svg", "#FFFFFF", 16)
+        self.printer_icon = QLabel(self)
+        self.printer_icon.setFixedSize(30, 30)
+        self.printer_icon.setPixmap(printer_pixmap)
+        self.printer_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.printer_icon.setStyleSheet("background: transparent; border: none;")
         self.close_btn = QPushButton("×", self)
         self.close_btn.setFixedSize(30, 30)
         self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -328,11 +345,12 @@ class _ExportPreviewPopup(QWidget):
             }}
             """
         )
+        pdf_bg = _theme_preview_bg_rgba()
         self.pdf_status = QLabel("正在生成 PDF 预览…")
         self.pdf_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.pdf_status.setWordWrap(True)
         self.pdf_status.setStyleSheet(
-            "color: #555555; background: #D7DADD; border: none; "
+            f"color: #555555; background: {pdf_bg}; border: none; "
             "font-family: 'Microsoft YaHei UI'; font-size: 12px; padding: 16px;"
         )
         self.pdf_view = QPdfView(self.preview_stack)
@@ -346,7 +364,7 @@ class _ExportPreviewPopup(QWidget):
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
         self.pdf_view.setStyleSheet(
-            "QPdfView { background: #D7DADD; border: none; }"
+            f"QPdfView {{ background: {pdf_bg}; border: none; }}"
         )
         self.pdf_view.pageNavigator().currentPageChanged.connect(
             self._update_pdf_title
@@ -429,7 +447,14 @@ class _ExportPreviewPopup(QWidget):
     def _update_close_button_position(self):
         self.close_btn.move(self.width() - self.close_btn.width(), 0)
         self.close_btn.raise_()
-        self.title.setMaximumWidth(max(1, self.width() - self.close_btn.width() - 28))
+        if hasattr(self, "printer_icon"):
+            self.printer_icon.move(
+                self.width() - self.close_btn.width() - self.printer_icon.width(), 0
+            )
+            self.printer_icon.raise_()
+        self.title.setMaximumWidth(
+            max(1, self.width() - self.close_btn.width() - self.printer_icon.width() - 28)
+        )
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -1496,7 +1521,7 @@ class ExportSchedulePanel(QWidget):
             f"""
             QTextEdit {{
                 {embedded_background};
-                border: 1px solid rgba(255, 255, 255, 0.98);
+                border: 10px solid rgba(255, 255, 255, 0.98);
                 border-radius: 7px;
                 color: {AppConfig.COLOR_GRADIENT_START};
                 font-family: "Microsoft YaHei UI";
@@ -1516,8 +1541,9 @@ class ExportSchedulePanel(QWidget):
                 "background-color: rgba(255, 255, 255, 0.70)",
             )
         if export_format == "PDF":
+            bg_rgba = _theme_preview_bg_rgba()
             return (
-                "background-color: #D7DADD",
+                f"background-color: {bg_rgba}",
                 "background-color: rgba(255, 255, 255, 0.70)",
             )
         if self.export_background_mode == "gradient":
