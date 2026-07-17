@@ -8,6 +8,7 @@ from PyQt6.QtGui import (
     QGuiApplication,
     QIcon,
     QImage,
+    QIntValidator,
     QLinearGradient,
     QPainter,
     QPainterPath,
@@ -44,8 +45,10 @@ from src.services.schedule_export_service import (
     ExportOptions,
     PdfExportStyle,
     PdfTextStyle,
+    PngCanvasSpec,
     ScheduleExportService,
 )
+from src.services.schedule_png_exporter import SchedulePngExporter
 from src.services.schedule_pdf_preview_service import SchedulePdfPreviewController
 from src.ui.calendar_pop import CalendarPop
 from src.ui.common.toast import show_center_toast
@@ -58,6 +61,15 @@ from src.ui.popups.export_default_background_popup import (
 from src.utils.window_preferences import set_window_pin_state
 
 
+PNG_SIZE_PRESETS = {
+    "3:2": PngCanvasSpec(1800, 1200),
+    "16:9": PngCanvasSpec(1920, 1080),
+    "4:3": PngCanvasSpec(1600, 1200),
+    "1:1": PngCanvasSpec(1600, 1600),
+    "9:16": PngCanvasSpec(1080, 1920),
+}
+
+
 class _PdfThumbnailSurface(QWidget):
     clicked = pyqtSignal()
 
@@ -65,18 +77,21 @@ class _PdfThumbnailSurface(QWidget):
         super().__init__(parent)
         self._image = QImage()
         self._page_count = 0
+        self._page_unit = "页"
         self._status_text = "正在生成 PDF 预览…"
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
-    def set_loading(self, text="正在生成 PDF 预览…"):
+    def set_loading(self, text="正在生成 PDF 预览…", page_unit="页"):
         self._image = QImage()
         self._page_count = 0
+        self._page_unit = page_unit
         self._status_text = text
         self.update()
 
-    def set_preview(self, image, page_count):
+    def set_preview(self, image, page_count, page_unit="页"):
         self._image = QImage(image)
         self._page_count = max(0, int(page_count))
+        self._page_unit = page_unit
         self._status_text = ""
         self.update()
 
@@ -113,7 +128,7 @@ class _PdfThumbnailSurface(QWidget):
         painter.setPen(QColor("#8A8A8A"))
         painter.drawRect(page_rect)
 
-        page_text = f"共 {self._page_count} 页"
+        page_text = f"共 {self._page_count} {self._page_unit}"
         badge_width = max(52, painter.fontMetrics().horizontalAdvance(page_text) + 16)
         badge_rect = QRectF(
             (self.width() - badge_width) / 2,
@@ -147,17 +162,17 @@ class _ExportPreviewBox(QTextEdit):
     def show_text_preview(self):
         self.pdf_surface.hide()
 
-    def show_pdf_loading(self, text="正在生成 PDF 预览…"):
+    def show_pdf_loading(self, text="正在生成 PDF 预览…", page_unit="页"):
         self.clear()
         self.pdf_surface.setGeometry(self.viewport().rect())
-        self.pdf_surface.set_loading(text)
+        self.pdf_surface.set_loading(text, page_unit)
         self.pdf_surface.show()
         self.pdf_surface.raise_()
 
-    def show_pdf_preview(self, image, page_count):
+    def show_pdf_preview(self, image, page_count, page_unit="页"):
         self.clear()
         self.pdf_surface.setGeometry(self.viewport().rect())
-        self.pdf_surface.set_preview(image, page_count)
+        self.pdf_surface.set_preview(image, page_count, page_unit)
         self.pdf_surface.show()
         self.pdf_surface.raise_()
 
@@ -254,6 +269,8 @@ class _ExportPreviewPopup(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self._source_preview_size = QSize(168, 296)
         self._drag_offset = None
+        self._document_format = "PDF"
+        self._page_unit = "页"
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -354,13 +371,17 @@ class _ExportPreviewPopup(QWidget):
         self.preview_stack.setCurrentWidget(self.preview_editor)
         self.set_preview_size(self._source_preview_size)
 
-    def set_pdf_loading(self, text="正在生成 PDF 预览…"):
+    def set_pdf_loading(self, text="正在生成 PDF 预览…", format_name="PDF"):
+        self._document_format = format_name
+        self._page_unit = "张" if format_name == "PNG" else "页"
         self.pdf_status.setText(text)
-        self.title.setText("导出预览 · PDF")
+        self.title.setText(f"导出预览 · {format_name}")
         self.preview_stack.setCurrentWidget(self.pdf_status)
         self.set_preview_size(self._source_preview_size)
 
-    def set_pdf_document(self, document):
+    def set_pdf_document(self, document, format_name="PDF"):
+        self._document_format = format_name
+        self._page_unit = "张" if format_name == "PNG" else "页"
         self.pdf_view.setDocument(document)
         self._pdf_page_count = document.pageCount()
         self.preview_stack.setCurrentWidget(self.pdf_view)
@@ -373,11 +394,12 @@ class _ExportPreviewPopup(QWidget):
 
     def _update_pdf_title(self, page=0):
         if self._pdf_page_count <= 0:
-            self.title.setText("导出预览 · PDF")
+            self.title.setText(f"导出预览 · {self._document_format}")
             return
         current_page = max(0, int(page)) + 1
         self.title.setText(
-            f"导出预览 · PDF {current_page}/{self._pdf_page_count}"
+            f"导出预览 · {self._document_format} "
+            f"{current_page}/{self._pdf_page_count}"
         )
 
     def set_preview_background(self, background_style):
@@ -674,6 +696,7 @@ class ExportSchedulePanel(QWidget):
         self._export_service = None
         self._pdf_document = None
         self._pdf_document_path = ""
+        self._loaded_preview_format = ""
         self._pending_pdf_document = None
         self._pending_pdf_document_path = ""
         self._pdf_preview_controller = SchedulePdfPreviewController(
@@ -1231,7 +1254,7 @@ class ExportSchedulePanel(QWidget):
         self._size_group = QButtonGroup(self)
         self._size_group.setExclusive(True)
         self._radio_groups.append(self._size_group)
-        size_labels = ("3:2", "16:9", "4:3", "1:1", "9:16")
+        size_labels = tuple(PNG_SIZE_PRESETS)
         for row_index in range(3):
             row = QHBoxLayout()
             row.setContentsMargins(0, 0, 0, 0)
@@ -1243,6 +1266,10 @@ class ExportSchedulePanel(QWidget):
                     button.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
                     button.setFixedSize(72, 18)
                     button.setStyleSheet(self._mini_radio_style())
+                    preset = PNG_SIZE_PRESETS[size_labels[option_index]]
+                    button.setToolTip(
+                        f"{preset.width} × {preset.height} 像素"
+                    )
                     button.clicked.connect(
                         lambda checked=False, value=size_labels[option_index]:
                         self._select_preview_size(value)
@@ -1281,6 +1308,8 @@ class ExportSchedulePanel(QWidget):
         edit.setFixedSize(28, 18)
         edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
         edit.setPlaceholderText("__")
+        edit.setMaxLength(4)
+        edit.setValidator(QIntValidator(320, 8192, edit))
         edit.setStyleSheet(
             f"""
             QLineEdit {{
@@ -1781,22 +1810,37 @@ class ExportSchedulePanel(QWidget):
 
     def _handle_export_requested(self):
         export_format = self._selected_option("export_format") or "Markdown"
-        if export_format not in {"Markdown", "PDF"}:
-            show_center_toast(
-                self,
-                f"{export_format} 导出尚未接入",
-                attr_name="_export_result_toast",
-                duration_ms=1400,
-            )
-            return
-
         options = self._current_export_options()
-        extension = ".md" if export_format == "Markdown" else ".pdf"
-        file_filter = (
-            "Markdown 文件 (*.md)"
-            if export_format == "Markdown"
-            else "PDF 文件 (*.pdf)"
-        )
+        extension = {
+            "Markdown": ".md",
+            "PDF": ".pdf",
+            "PNG": ".png",
+        }[export_format]
+        file_filter = {
+            "Markdown": "Markdown 文件 (*.md)",
+            "PDF": "PDF 文件 (*.pdf)",
+            "PNG": "PNG 图片 (*.png)",
+        }[export_format]
+        canvas_spec = None
+        page_count = 0
+        if export_format == "PNG":
+            try:
+                canvas_spec = self._current_png_canvas_spec()
+            except ValueError as exc:
+                QMessageBox.warning(self, "PNG 尺寸无效", str(exc))
+                return
+            if (
+                self._pdf_document is None
+                or self._loaded_preview_format != "PNG"
+            ):
+                show_center_toast(
+                    self,
+                    "PNG 真实预览正在生成，请稍后再导出",
+                    attr_name="_export_result_toast",
+                    duration_ms=1600,
+                )
+                return
+            page_count = self._pdf_document.pageCount()
         file_path, _selected_filter = QFileDialog.getSaveFileName(
             self,
             f"导出 {export_format}",
@@ -1810,16 +1854,58 @@ class ExportSchedulePanel(QWidget):
         if target.suffix.lower() != extension:
             target = target.with_suffix(extension)
 
+        overwrite_png = False
+        if export_format == "PNG":
+            if page_count > 1 or options.range_kind == "all":
+                response = QMessageBox.question(
+                    self,
+                    "确认 PNG 分页导出",
+                    (
+                        f"当前设置将生成 {page_count} 张 "
+                        f"{canvas_spec.width}×{canvas_spec.height} PNG 图片。\n"
+                        "多页文件将按 _001、_002… 编号，是否继续？"
+                    ),
+                    QMessageBox.StandardButton.Yes
+                    | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.Yes,
+                )
+                if response != QMessageBox.StandardButton.Yes:
+                    return
+            conflicts = SchedulePngExporter.conflict_paths(target, page_count)
+            if conflicts:
+                names = "、".join(path.name for path in conflicts[:5])
+                response = QMessageBox.question(
+                    self,
+                    "覆盖 PNG 文件",
+                    f"以下文件已存在：{names}\n是否覆盖？",
+                    QMessageBox.StandardButton.Yes
+                    | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                if response != QMessageBox.StandardButton.Yes:
+                    return
+                overwrite_png = True
+
         try:
             if self._export_service is None:
                 self._export_service = ScheduleExportService()
             if export_format == "Markdown":
                 exported_path = self._export_service.write_markdown(target, options)
-            else:
+                exported_paths = (exported_path,)
+            elif export_format == "PDF":
                 exported_path = self._export_service.write_pdf(
                     target,
                     options,
                     self._current_pdf_style(),
+                )
+                exported_paths = (exported_path,)
+            else:
+                exported_paths = self._export_service.write_png_pages(
+                    target,
+                    options,
+                    self._current_pdf_style(),
+                    canvas_spec,
+                    overwrite=overwrite_png,
                 )
         except Exception as exc:
             QMessageBox.critical(
@@ -1829,9 +1915,16 @@ class ExportSchedulePanel(QWidget):
             )
             return
 
+        if export_format == "PNG" and len(exported_paths) > 1:
+            success_text = (
+                f"已导出 {len(exported_paths)} 张 PNG："
+                f"{exported_paths[0].parent.name}"
+            )
+        else:
+            success_text = f"已导出：{exported_paths[0].name}"
         show_center_toast(
             self,
-            f"已导出：{exported_path.name}",
+            success_text,
             attr_name="_export_result_toast",
             duration_ms=1800,
         )
@@ -1868,17 +1961,42 @@ class ExportSchedulePanel(QWidget):
         if not hasattr(self, "preview_box"):
             return
         export_format = self._selected_option("export_format") or "Markdown"
-        if export_format == "PDF":
+        if export_format in {"PDF", "PNG"}:
+            page_size = None
+            page_unit = "页" if export_format == "PDF" else "张"
+            if export_format == "PNG":
+                try:
+                    canvas_spec = self._current_png_canvas_spec()
+                except ValueError as exc:
+                    self._pdf_preview_controller.cancel()
+                    self._clear_pdf_document()
+                    preview_text = f"PNG 预览尺寸无效：{exc}"
+                    self._preview_plain_text = preview_text
+                    self.preview_box.show_pdf_loading(preview_text, page_unit)
+                    if self._preview_popup is not None:
+                        self._preview_popup.set_pdf_loading(
+                            preview_text,
+                            export_format,
+                        )
+                    return
+                page_size = SchedulePngExporter.logical_page_size(canvas_spec)
             self._clear_pdf_document()
-            self._preview_plain_text = "正在生成 PDF 真实预览…"
+            self._preview_plain_text = f"正在生成 {export_format} 真实预览…"
             self._preview_html = ""
-            self.preview_box.show_pdf_loading(self._preview_plain_text)
+            self.preview_box.show_pdf_loading(
+                self._preview_plain_text,
+                page_unit,
+            )
             if self._preview_popup is not None:
-                self._preview_popup.set_pdf_loading(self._preview_plain_text)
+                self._preview_popup.set_pdf_loading(
+                    self._preview_plain_text,
+                    export_format,
+                )
             self._apply_preview_surface_styles()
             self._pdf_preview_controller.schedule(
                 self._current_export_options(),
                 self._current_pdf_style(),
+                page_size=page_size,
             )
             return
 
@@ -1890,14 +2008,7 @@ class ExportSchedulePanel(QWidget):
             markdown = self._export_service.render_markdown(
                 self._current_export_options()
             )
-            if export_format == "Markdown":
-                preview_text = markdown
-            else:
-                preview_text = (
-                    f"{export_format} 导出尚未接入，当前先显示同一份导出数据的 "
-                    "Markdown 结构预览。\n\n"
-                    f"{markdown}"
-                )
+            preview_text = markdown
         except Exception as exc:
             preview_text = f"导出预览生成失败：{exc}"
         preview_html = self._build_preview_html(preview_text)
@@ -1909,7 +2020,7 @@ class ExportSchedulePanel(QWidget):
             self._preview_popup.set_preview_html(preview_html)
 
     def _handle_pdf_preview_ready(self, file_path):
-        if self._selected_option("export_format") != "PDF":
+        if self._selected_option("export_format") not in {"PDF", "PNG"}:
             self._pdf_preview_controller.discard(file_path)
             return
         document = QPdfDocument(self)
@@ -1944,7 +2055,8 @@ class ExportSchedulePanel(QWidget):
                 "Qt PDF 文档加载失败",
             )
             return
-        if self._selected_option("export_format") != "PDF":
+        export_format = self._selected_option("export_format")
+        if export_format not in {"PDF", "PNG"}:
             self._fail_pending_pdf_document(document, file_path, "")
             return
 
@@ -1952,16 +2064,39 @@ class ExportSchedulePanel(QWidget):
         self._pending_pdf_document_path = ""
         self._pdf_document = document
         self._pdf_document_path = file_path
+        self._loaded_preview_format = export_format
         page_count = document.pageCount()
-        thumbnail = document.render(0, QSize(420, 594))
+        thumbnail = document.render(
+            0,
+            self._preview_thumbnail_render_size(export_format),
+        )
         if thumbnail.isNull() or page_count <= 0:
             self._clear_pdf_document()
-            self._handle_pdf_preview_failed("PDF 第一页渲染失败")
+            self._handle_pdf_preview_failed(
+                f"{export_format} 第一页渲染失败"
+            )
             return
-        self._preview_plain_text = f"PDF 真实预览 · 共 {page_count} 页"
-        self.preview_box.show_pdf_preview(thumbnail, page_count)
+        page_unit = "页" if export_format == "PDF" else "张"
+        self._preview_plain_text = (
+            f"{export_format} 真实预览 · 共 {page_count} {page_unit}"
+        )
+        self.preview_box.show_pdf_preview(
+            thumbnail,
+            page_count,
+            page_unit,
+        )
         if self._preview_popup is not None:
-            self._preview_popup.set_pdf_document(document)
+            self._preview_popup.set_pdf_document(document, export_format)
+
+    def _preview_thumbnail_render_size(self, export_format):
+        if export_format != "PNG":
+            return QSize(420, 594)
+        canvas_spec = self._current_png_canvas_spec()
+        ratio = canvas_spec.width / canvas_spec.height
+        longest_edge = 594
+        if ratio >= 1:
+            return QSize(longest_edge, max(1, round(longest_edge / ratio)))
+        return QSize(max(1, round(longest_edge * ratio)), longest_edge)
 
     def _fail_pending_pdf_document(self, document, file_path, message):
         if self._pending_pdf_document is document:
@@ -1974,15 +2109,18 @@ class ExportSchedulePanel(QWidget):
             self._handle_pdf_preview_failed(message)
 
     def _handle_pdf_preview_failed(self, message):
-        if self._selected_option("export_format") != "PDF":
+        export_format = self._selected_option("export_format")
+        if export_format not in {"PDF", "PNG"}:
             return
-        preview_text = f"PDF 预览生成失败：{message}"
+        page_unit = "页" if export_format == "PDF" else "张"
+        preview_text = f"{export_format} 预览生成失败：{message}"
         self._preview_plain_text = preview_text
-        self.preview_box.show_pdf_loading(preview_text)
+        self.preview_box.show_pdf_loading(preview_text, page_unit)
         if self._preview_popup is not None:
-            self._preview_popup.set_pdf_loading(preview_text)
+            self._preview_popup.set_pdf_loading(preview_text, export_format)
 
     def _clear_pdf_document(self):
+        self._loaded_preview_format = ""
         if self._preview_popup is not None:
             self._preview_popup.clear_pdf_document()
         if self._pending_pdf_document is not None:
@@ -2101,6 +2239,7 @@ class ExportSchedulePanel(QWidget):
                 edit.blockSignals(False)
         if self._selected_option("export_format") == "PNG":
             self._apply_selected_preview_size()
+            self._refresh_export_preview()
 
     def _apply_selected_preview_size(self):
         ratio_map = {
@@ -2122,14 +2261,27 @@ class ExportSchedulePanel(QWidget):
             height = int(self.custom_height_edit.text())
         except ValueError:
             return
-        if width <= 0 or height <= 0:
+        try:
+            canvas_spec = PngCanvasSpec(width, height)
+        except ValueError:
             return
         self._size_group.setExclusive(False)
         for button in self.size_buttons.values():
             button.setChecked(False)
         self._size_group.setExclusive(True)
         self._selected_preview_size = None
-        self._apply_preview_ratio(width, height)
+        self._apply_preview_ratio(canvas_spec.width, canvas_spec.height)
+        self._refresh_export_preview()
+
+    def _current_png_canvas_spec(self):
+        if self._selected_preview_size in PNG_SIZE_PRESETS:
+            return PNG_SIZE_PRESETS[self._selected_preview_size]
+        try:
+            width = int(self.custom_width_edit.text())
+            height = int(self.custom_height_edit.text())
+        except ValueError as exc:
+            raise ValueError("请输入完整的 PNG 自定义宽度和高度") from exc
+        return PngCanvasSpec(width, height)
 
     def _apply_preview_ratio(self, width, height):
         if not hasattr(self, "preview_box") or height <= 0:
@@ -2143,11 +2295,15 @@ class ExportSchedulePanel(QWidget):
         text = getattr(self, "_preview_plain_text", self.preview_box.toPlainText())
         if self._preview_popup is None:
             self._preview_popup = _ExportPreviewPopup(text, self)
-        if self._selected_option("export_format") == "PDF":
+        export_format = self._selected_option("export_format") or "Markdown"
+        if export_format in {"PDF", "PNG"}:
             if self._pdf_document is not None:
-                self._preview_popup.set_pdf_document(self._pdf_document)
+                self._preview_popup.set_pdf_document(
+                    self._pdf_document,
+                    export_format,
+                )
             else:
-                self._preview_popup.set_pdf_loading(text)
+                self._preview_popup.set_pdf_loading(text, export_format)
         else:
             self._preview_popup.set_preview_html(
                 getattr(self, "_preview_html", self._build_preview_html(text))

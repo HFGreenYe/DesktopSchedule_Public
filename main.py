@@ -12,7 +12,7 @@ def main():
     )
     
     app = QApplication(sys.argv)
-    app.setApplicationName("Wanji Schedule")
+    app.setApplicationName("Lankor Schedule")
     
     app.setStyle("Fusion")
     theme_manager = ThemeManager()

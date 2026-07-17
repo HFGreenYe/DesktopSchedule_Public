@@ -236,7 +236,7 @@ class WeekScheduleCard(QFrame):
         if is_pinned:
             self.icon_pin = QLabel(self)
             self.icon_pin.setFixedSize(16, 16)
-            pixmap = get_colored_icon("week_top_color.svg", "#0cc0df", 16)
+            pixmap = get_colored_icon("week_top_color.svg", AppConfig.COLOR_GRADIENT_START, 16)
             self.icon_pin.setPixmap(pixmap)
             #self.icon_pin.setScaledContents(True)
             self.icon_pin.setStyleSheet("background: transparent;")

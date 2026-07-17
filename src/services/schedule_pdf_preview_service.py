@@ -27,18 +27,28 @@ class _PdfPreviewWorker(QRunnable):
         target: Path,
         payload: ExportPayload,
         style: PdfExportStyle,
+        page_size=None,
     ):
         super().__init__()
         self.request_id = request_id
         self.target = target
         self.payload = payload
         self.style = style
+        self.page_size = page_size
         self.signals = _PdfPreviewWorkerSignals()
 
     def run(self):
         error = ""
         try:
-            SchedulePdfExporter.write(self.target, self.payload, self.style)
+            if self.page_size is None:
+                SchedulePdfExporter.write(self.target, self.payload, self.style)
+            else:
+                SchedulePdfExporter.write(
+                    self.target,
+                    self.payload,
+                    self.style,
+                    page_size=self.page_size,
+                )
         except Exception as exc:
             error = str(exc) or type(exc).__name__
         self.signals.completed.emit(self.request_id, str(self.target), error)
@@ -74,11 +84,21 @@ class SchedulePdfPreviewController(QObject):
     def debounce_ms(self) -> int:
         return self._timer.interval()
 
-    def schedule(self, options: ExportOptions, style: PdfExportStyle) -> int:
+    def schedule(
+        self,
+        options: ExportOptions,
+        style: PdfExportStyle,
+        page_size=None,
+    ) -> int:
         if self._shutting_down:
             return self._request_id
         self._request_id += 1
-        self._pending_request = (self._request_id, options, style)
+        self._pending_request = (
+            self._request_id,
+            options,
+            style,
+            page_size,
+        )
         self._timer.start()
         return self._request_id
 
@@ -116,7 +136,7 @@ class SchedulePdfPreviewController(QObject):
     def _start_latest_request(self):
         if self._pending_request is None or self._shutting_down:
             return
-        request_id, options, style = self._pending_request
+        request_id, options, style, page_size = self._pending_request
         self._pending_request = None
         if request_id != self._request_id:
             return
@@ -130,7 +150,13 @@ class SchedulePdfPreviewController(QObject):
             Path(self._temporary_directory.name)
             / f"preview_{request_id:08d}.pdf"
         )
-        worker = _PdfPreviewWorker(request_id, target, payload, style)
+        worker = _PdfPreviewWorker(
+            request_id,
+            target,
+            payload,
+            style,
+            page_size,
+        )
         worker.signals.completed.connect(self._handle_worker_completed)
         self._workers[request_id] = worker
         self._thread_pool.start(worker)

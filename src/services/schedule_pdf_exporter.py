@@ -486,11 +486,17 @@ class _EmptyState(Flowable):
 
 
 class SchedulePdfExporter:
-    def __init__(self, payload: ExportPayload, style: PdfExportStyle):
+    def __init__(
+        self,
+        payload: ExportPayload,
+        style: PdfExportStyle,
+        page_size=A4,
+    ):
         self.payload = payload
         self.style = style
+        self.page_size = self._normalize_page_size(page_size)
         self.engine = _PdfLayoutEngine(style)
-        self.frame_height = A4[1] - 58 * mm
+        self.frame_height = self.page_size[1] - 58 * mm
 
     @classmethod
     def write(
@@ -498,16 +504,29 @@ class SchedulePdfExporter:
         target: Path,
         payload: ExportPayload,
         style: PdfExportStyle,
+        page_size=A4,
     ) -> Path:
         with _PDF_WRITE_LOCK:
-            exporter = cls(payload, style)
+            exporter = cls(payload, style, page_size)
             exporter._write(target)
         return target
+
+    @staticmethod
+    def _normalize_page_size(page_size):
+        try:
+            width, height = page_size
+            width = float(width)
+            height = float(height)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("页面尺寸必须包含有效宽度和高度") from exc
+        if width <= 0 or height <= 0:
+            raise ValueError("页面宽度和高度必须大于 0")
+        return width, height
 
     def _write(self, target: Path):
         document = BaseDocTemplate(
             str(target),
-            pagesize=A4,
+            pagesize=self.page_size,
             title="桌面日程导出",
             author="DesktopSchedule",
             subject=self._header_summary(),
@@ -515,7 +534,7 @@ class SchedulePdfExporter:
         frame = Frame(
             18 * mm,
             20 * mm,
-            A4[0] - 36 * mm,
+            self.page_size[0] - 36 * mm,
             self.frame_height,
             leftPadding=0,
             rightPadding=0,
@@ -602,7 +621,7 @@ class SchedulePdfExporter:
         )
 
     def _draw_page(self, canvas, document):
-        page_width, page_height = A4
+        page_width, page_height = self.page_size
         canvas.saveState()
         if self.style.background_mode == "default":
             preset = get_export_background_preset(

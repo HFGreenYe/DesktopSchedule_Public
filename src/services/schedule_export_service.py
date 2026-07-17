@@ -41,6 +41,22 @@ class PdfExportStyle:
 
 
 @dataclass(frozen=True)
+class PngCanvasSpec:
+    width: int = 1080
+    height: int = 1920
+
+    def __post_init__(self):
+        width = int(self.width)
+        height = int(self.height)
+        if not 320 <= width <= 8192 or not 320 <= height <= 8192:
+            raise ValueError("PNG 宽度和高度必须在 320 到 8192 像素之间")
+        if width * height > 40_000_000:
+            raise ValueError("PNG 单张图片不能超过 4000 万像素")
+        object.__setattr__(self, "width", width)
+        object.__setattr__(self, "height", height)
+
+
+@dataclass(frozen=True)
 class ExportItem:
     item_id: int | None
     item_type: str
@@ -291,6 +307,25 @@ class ScheduleExportService:
         target = Path(file_path)
         SchedulePdfExporter.write(target, self.build_payload(options), style)
         return target
+
+    def write_png_pages(
+        self,
+        file_path,
+        options: ExportOptions,
+        style: PdfExportStyle,
+        canvas_spec: PngCanvasSpec,
+        overwrite=False,
+    ) -> tuple[Path, ...]:
+        from src.services.schedule_png_exporter import SchedulePngExporter
+
+        target = Path(file_path)
+        return SchedulePngExporter.write(
+            target,
+            self.build_payload(options),
+            style,
+            canvas_spec,
+            overwrite=overwrite,
+        )
 
     @staticmethod
     def _matches_content_type(item, content_type):
