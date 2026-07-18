@@ -565,6 +565,12 @@ class SharedMoreMenu(QMenu):
         add_centered_btn("坐标看板", "axis", self._on_show_axis)
         add_centered_btn("待办看板", "todo", self._on_show_todo)
         add_centered_btn("安全加密", "security_lock", self._on_open_encryption, icon_color="#333333")
+        add_centered_btn(
+            "纪念日期",
+            "commemorationday",
+            self._on_open_commemoration_day,
+            icon_color="#333333",
+        )
         add_centered_btn("修改字体", "theme", self._on_modify_font, icon_color="#333333")
         add_centered_btn("导出日程", "export", self._on_export_schedule)
         add_centered_btn("全部日程", "history", self._on_show_history)
@@ -944,6 +950,11 @@ class SharedMoreMenu(QMenu):
             win.show()
             win.raise_()
             win.activateWindow()
+
+    def _on_open_commemoration_day(self):
+        print(
+            f"[{self.parent_window.__class__.__name__}] 点击了纪念日期"
+        )
 
     def _on_show_help_manual(self):
         print(f"[{self.parent_window.__class__.__name__}] 点击了使用手册")

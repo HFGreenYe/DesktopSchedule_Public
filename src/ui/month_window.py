@@ -2082,7 +2082,13 @@ class MonthWindow(FramelessMainWindow):
             return existing_panel
 
         schedules = self.hover_schedule_cache.get(qdate.toPyDate(), [])
-        panel = MonthDayPanel(qdate, schedules)
+        panel = MonthDayPanel(
+            qdate,
+            schedules,
+            initial_pinned=bool(
+                self.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
+            ),
+        )
         panel.set_schedule_display_mode(self.schedule_display_mode)
         panel.closed.connect(self._remove_day_panel)
         panel.schedule_double_clicked.connect(self.schedule_detail_requested.emit)

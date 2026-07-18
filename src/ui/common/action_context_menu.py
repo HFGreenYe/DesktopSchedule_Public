@@ -286,26 +286,39 @@ class ActionContextMenu(QMenu):
             on_click=self.close,
         ).triggered.connect(lambda: self.action_requested.emit("add"))
 
-        self._create_main_action(
-            action_id="sort",
-            text="排序",
-            icon_names=("sort.svg",),
-            enabled=False,
-            on_enter=self._hide_view_menu,
-        )
-
-        self._create_main_action(
-            action_id="filter",
-            text="筛选",
-            icon_names=("filter.svg",),
-            enabled=False,
-            on_enter=self._hide_view_menu,
-        )
-
     def _hide_secondary_menus(self):
         self._hide_mode_menu()
         self._hide_drag_menu()
         self._hide_view_menu()
+
+    @staticmethod
+    def _global_widget_rect(widget):
+        return QRect(widget.mapToGlobal(QPoint(0, 0)), widget.size())
+
+    @classmethod
+    def _cursor_inside_submenu_path(cls, cursor_pos, row, submenu):
+        if row is None or not submenu.isVisible():
+            return False
+
+        row_rect = cls._global_widget_rect(row)
+        submenu_rect = cls._global_widget_rect(submenu)
+        if row_rect.contains(cursor_pos) or submenu_rect.contains(cursor_pos):
+            return True
+
+        if row_rect.right() < submenu_rect.left():
+            bridge_left = row_rect.right() + 1
+            bridge_right = submenu_rect.left() - 1
+        elif submenu_rect.right() < row_rect.left():
+            bridge_left = submenu_rect.right() + 1
+            bridge_right = row_rect.left() - 1
+        else:
+            return False
+
+        bridge_rect = QRect(
+            QPoint(bridge_left, min(row_rect.top(), submenu_rect.top())),
+            QPoint(bridge_right, max(row_rect.bottom(), submenu_rect.bottom())),
+        )
+        return bridge_rect.contains(cursor_pos)
 
     def _create_main_action(
         self,
@@ -503,17 +516,10 @@ class ActionContextMenu(QMenu):
             return
         cursor_pos = QCursor.pos()
         drag_row = self.rows_by_id.get("drag")
-        drag_row_rect = QRect()
-        if drag_row:
-            drag_row_rect = QRect(
-                drag_row.mapToGlobal(QPoint(0, 0)), drag_row.size()
-            )
-        drag_rect = QRect(
-            self.drag_menu.mapToGlobal(QPoint(0, 0)), self.drag_menu.size()
-        )
-        if (
-            not drag_row_rect.contains(cursor_pos)
-            and not drag_rect.contains(cursor_pos)
+        if not self._cursor_inside_submenu_path(
+            cursor_pos,
+            drag_row,
+            self.drag_menu,
         ):
             self._hide_drag_menu()
 
@@ -553,17 +559,10 @@ class ActionContextMenu(QMenu):
             return
         cursor_pos = QCursor.pos()
         mode_row = self.rows_by_id.get("mode")
-        mode_row_rect = QRect()
-        if mode_row:
-            mode_row_rect = QRect(
-                mode_row.mapToGlobal(QPoint(0, 0)), mode_row.size()
-            )
-        mode_rect = QRect(
-            self.mode_menu.mapToGlobal(QPoint(0, 0)), self.mode_menu.size()
-        )
-        if (
-            not mode_row_rect.contains(cursor_pos)
-            and not mode_rect.contains(cursor_pos)
+        if not self._cursor_inside_submenu_path(
+            cursor_pos,
+            mode_row,
+            self.mode_menu,
         ):
             self._hide_mode_menu()
 
@@ -603,11 +602,11 @@ class ActionContextMenu(QMenu):
             return
         cursor_pos = QCursor.pos()
         view_row = self.rows_by_id.get("view")
-        view_row_rect = QRect()
-        if view_row:
-            view_row_rect = QRect(view_row.mapToGlobal(QPoint(0, 0)), view_row.size())
-        view_rect = QRect(self.view_menu.mapToGlobal(QPoint(0, 0)), self.view_menu.size())
-        if not view_row_rect.contains(cursor_pos) and not view_rect.contains(cursor_pos):
+        if not self._cursor_inside_submenu_path(
+            cursor_pos,
+            view_row,
+            self.view_menu,
+        ):
             self._hide_view_menu()
 
     @staticmethod

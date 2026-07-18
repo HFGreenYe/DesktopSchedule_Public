@@ -1937,9 +1937,15 @@ class DashboardView(QWidget):
         layout.setSpacing(8)
 
         # 实例化视图选择器，并放置在主布局的最上方，默认隐藏
-        self.view_selector = ViewSelectorCard(self)
-        self.view_selector.hide()
-        layout.addWidget(self.view_selector)
+        self.view_selector_container = QWidget(self)
+        self.view_selector_container.setStyleSheet("background: transparent;")
+        self.view_selector_layout = QHBoxLayout(self.view_selector_container)
+        self.view_selector_layout.setContentsMargins(0, 0, 0, 0)
+        self.view_selector_layout.setSpacing(0)
+        self.view_selector = ViewSelectorCard(self.view_selector_container)
+        self.view_selector_layout.addWidget(self.view_selector)
+        self.view_selector_container.hide()
+        layout.addWidget(self.view_selector_container)
 
         self.lbl_empty = QLabel("您还没有日程记录，请点击添加")
         self.lbl_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -2002,10 +2008,13 @@ class DashboardView(QWidget):
 
     # 增加一个供外部调用的切换方法
     def toggle_view_selector(self):
-        if self.view_selector.isVisible():
-            self.view_selector.hide()
+        if self.view_selector_container.isVisible():
+            self.view_selector_container.hide()
         else:
-            self.view_selector.show()
+            self.view_selector_container.show()
+
+    def hide_view_selector(self):
+        self.view_selector_container.hide()
 
     def set_schedule_display_mode(self, mode_id):
         if mode_id not in {"card", "timetable"}:
@@ -2017,8 +2026,10 @@ class DashboardView(QWidget):
         self.schedule_display_mode = mode_id
         if mode_id == "timetable":
             self._main_layout.setContentsMargins(0, 10, 0, 20)
+            self.view_selector_layout.setContentsMargins(15, 0, 15, 0)
         else:
             self._main_layout.setContentsMargins(15, 10, 15, 20)
+            self.view_selector_layout.setContentsMargins(0, 0, 0, 0)
         if entering_timetable:
             self.timetable_placeholder.reset_to_current_time()
         self._sync_schedule_area_visibility()
@@ -2399,8 +2410,15 @@ class DashboardView(QWidget):
         on_timetable_color_changed=None,
         dark_mode=False,
     ):
+        pin_icon_size = (
+            14
+            if source_view == "week" and timetable_color is None
+            else 16
+        )
         for p in self.open_popups:
             if p.data.id == schedule_data.id:
+                if hasattr(p, "set_pin_icon_size"):
+                    p.set_pin_icon_size(pin_icon_size)
                 if timetable_color is not None and hasattr(p, "set_timetable_color"):
                     p.set_timetable_color(timetable_color)
                 p.show()
@@ -2409,7 +2427,12 @@ class DashboardView(QWidget):
                 return
 
         # 把参数传给弹窗实例
-        pop = ScheduleDetailPop(schedule_data, source_view=source_view, dark_mode=dark_mode)
+        pop = ScheduleDetailPop(
+            schedule_data,
+            source_view=source_view,
+            dark_mode=dark_mode,
+            pin_icon_size=pin_icon_size,
+        )
         if timetable_color is not None and hasattr(pop, "set_timetable_color"):
             pop.set_timetable_color(timetable_color)
         if initial_pinned is None:

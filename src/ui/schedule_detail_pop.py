@@ -2,7 +2,7 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                              QPushButton, QFrame, QGridLayout, QSizePolicy,
                              QLineEdit, QTextEdit, QDialog, QMenu) # 🟢 新增了输入框组件
-from PyQt6.QtCore import Qt, QRectF, QPoint, pyqtSignal, QEvent, QTimer
+from PyQt6.QtCore import Qt, QRectF, QPoint, QSize, pyqtSignal, QEvent, QTimer
 from PyQt6.QtGui import QPainter, QPainterPath, QColor, QBrush, QLinearGradient, QIcon, QPen, QPixmap, QImage
 from PyQt6.QtSvg import QSvgRenderer
 from ..data.database import db_manager, Schedule
@@ -103,7 +103,14 @@ class ScheduleDetailPop(QWidget):
     popup_closed = pyqtSignal(object)
     timetable_color_changed = pyqtSignal(object, object)
 
-    def __init__(self, schedule_data, source_view="dashboard", dark_mode=False, parent=None):
+    def __init__(
+        self,
+        schedule_data,
+        source_view="dashboard",
+        dark_mode=False,
+        parent=None,
+        pin_icon_size=16,
+    ):
         super().__init__(parent)
         self.data = schedule_data
         self.source_view = source_view
@@ -111,6 +118,7 @@ class ScheduleDetailPop(QWidget):
         self.is_pinned = False
         self.drag_pos = None
         self.timetable_color = None
+        self._pin_icon_size = max(8, int(pin_icon_size))
 
         # 弹窗其他地方的字和图标，必须永远保持白色！
         self.c_text_main = "white"
@@ -403,8 +411,15 @@ class ScheduleDetailPop(QWidget):
         # 固钉按钮
         self.btn_pin = QPushButton(self) 
         self.btn_pin.setFixedSize(30, 30) 
+        self.btn_pin.setIconSize(
+            QSize(self._pin_icon_size, self._pin_icon_size)
+        )
         self.btn_pin.setCursor(Qt.CursorShape.PointingHandCursor)
-        pin_icon = self._get_icon("pin.svg", QColor(255, 255, 255, 150), 16)
+        pin_icon = self._get_icon(
+            "pin.svg",
+            QColor(255, 255, 255, 150),
+            self._pin_icon_size,
+        )
         if not pin_icon.isNull(): self.btn_pin.setIcon(QIcon(pin_icon))
         else: self.btn_pin.setText("📌")
         
@@ -918,17 +933,32 @@ class ScheduleDetailPop(QWidget):
     def set_pinned(self, enabled):
         self.is_pinned = bool(enabled)
         set_window_pin_state(self, self.is_pinned)
-        if self.is_pinned:
-            pin_icon = self._get_icon("pin.svg", QColor(255, 255, 255, 255), 16)
-        else:
-            pin_icon = self._get_icon("pin.svg", QColor(255, 255, 255, 150), 16)
-
-        if not pin_icon.isNull():
-            self.btn_pin.setIcon(QIcon(pin_icon))
+        self._refresh_pin_icon()
 
         if self.isVisible():
             self.raise_()
         apply_24h2_border_fix(int(self.winId()))
+
+    def set_pin_icon_size(self, size):
+        self._pin_icon_size = max(8, int(size))
+        self.btn_pin.setIconSize(
+            QSize(self._pin_icon_size, self._pin_icon_size)
+        )
+        self._refresh_pin_icon()
+
+    def _refresh_pin_icon(self):
+        pin_color = (
+            QColor(255, 255, 255, 255)
+            if self.is_pinned
+            else QColor(255, 255, 255, 150)
+        )
+        pin_icon = self._get_icon(
+            "pin.svg",
+            pin_color,
+            self._pin_icon_size,
+        )
+        if not pin_icon.isNull():
+            self.btn_pin.setIcon(QIcon(pin_icon))
 
     def closeEvent(self, event):
         self.popup_closed.emit(self)

@@ -1,6 +1,5 @@
 import colorsys
 import datetime
-import math
 import random
 
 from PyQt6.QtWidgets import (
@@ -14,7 +13,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from PyQt6.QtCore import Qt, QPointF, QRectF, QSize, QSettings, pyqtSignal
+from PyQt6.QtCore import Qt, QPoint, QPointF, QRectF, QSize, pyqtSignal
 from PyQt6.QtGui import (
     QAction,
     QBrush,
@@ -29,9 +28,14 @@ from PyQt6.QtGui import (
 )
 
 from ...config import AppConfig
+from ...utils.styles import StyleManager
 from ...utils.timetable_preferences import (
     get_timetable_preferences,
     set_timetable_schedule_color,
+)
+from ...utils.window_preferences import (
+    get_primary_pin_preference,
+    set_window_pin_state,
 )
 from ..utils.icon_loader import load_colored_svg_pixmap
 
@@ -139,15 +143,12 @@ class _ElidedTitleLabel(QLabel):
 class MonthDayTimetableFrame(QFrame):
     schedule_double_clicked = pyqtSignal(object)
     status_change_requested = pyqtSignal(object, int)
-    dark_mode_toggle_requested = pyqtSignal()
 
     DAY_MINUTES = 24 * 60
-    MIN_VISIBLE_HOURS = 3
-    MAX_VISIBLE_HOURS = 6
+    VISIBLE_HOURS = 6
     HOUR_ROW_HEIGHT = 42.0
-    BORDER_WIDTH = 2.0
-    CORNER_RADIUS = 8.0
-    TIME_AXIS_WIDTH = 40.0
+    TIME_AXIS_WIDTH = 34.0
+    DIVIDER_WIDTH = 1.0
     DDL_LINE_HEIGHT = 3.0
     EVENT_GAP = 2.0
     EVENT_BLOCK_COLUMN_GAP = 2.0
@@ -177,7 +178,7 @@ class MonthDayTimetableFrame(QFrame):
         self.panel_date = None
         self.schedules = []
         self.visible_start_minutes = 0
-        self.visible_minutes = self.MIN_VISIBLE_HOURS * 60
+        self.visible_minutes = self.VISIBLE_HOURS * 60
         preferences = get_timetable_preferences()
         self._schedule_colors = {}
         self._schedule_color_overrides = dict(
@@ -190,13 +191,8 @@ class MonthDayTimetableFrame(QFrame):
         self._visible_event_labels = []
         self._visible_ddl_labels = []
         self._occupied_label_rects = []
-        self._dark_mode = False
         self.setMouseTracking(True)
         self.setStyleSheet("background: transparent; border: none;")
-
-    def set_dark_mode(self, dark):
-        self._dark_mode = bool(dark)
-        self.update()
 
     def set_schedule_data(self, qdate, schedules):
         self.panel_date = qdate
@@ -204,10 +200,7 @@ class MonthDayTimetableFrame(QFrame):
         self._ensure_schedule_colors(self.schedules)
         self.visible_start_minutes, self.visible_minutes = self._initial_window()
         self.setFixedHeight(
-            int(
-                self.visible_minutes / 60.0 * self.HOUR_ROW_HEIGHT
-                + self.BORDER_WIDTH * 2
-            )
+            int(self.visible_minutes / 60.0 * self.HOUR_ROW_HEIGHT)
         )
         self.update()
 
@@ -287,31 +280,10 @@ class MonthDayTimetableFrame(QFrame):
         return min(values), max(values)
 
     def _initial_window(self):
-        top, bottom = self._content_bounds()
+        top, _ = self._content_bounds()
         earliest_hour = int(top // 60)
-        span_minutes = max(0.0, bottom - top)
-
-        if span_minutes <= self.MIN_VISIBLE_HOURS * 60:
-            visible_hours = self.MIN_VISIBLE_HOURS
-            start_hour = earliest_hour
-            if start_hour + visible_hours > 24:
-                start_hour = 24 - visible_hours
-            return start_hour * 60, visible_hours * 60
-
-        if span_minutes > self.MAX_VISIBLE_HOURS * 60:
-            visible_hours = self.MAX_VISIBLE_HOURS
-            start_hour = min(earliest_hour, 24 - visible_hours)
-            return start_hour * 60, visible_hours * 60
-
-        end_hour = min(24, max(earliest_hour + 1, int(math.ceil(bottom / 60.0))))
-        visible_hours = max(
-            self.MIN_VISIBLE_HOURS,
-            min(self.MAX_VISIBLE_HOURS, end_hour - earliest_hour),
-        )
-        start_hour = earliest_hour
-        if start_hour + visible_hours > 24:
-            start_hour = 24 - visible_hours
-        return start_hour * 60, visible_hours * 60
+        start_hour = min(earliest_hour, 24 - self.VISIBLE_HOURS)
+        return start_hour * 60, self.VISIBLE_HOURS * 60
 
     def _ensure_schedule_colors(self, schedules):
         for schedule in schedules:
@@ -370,19 +342,11 @@ class MonthDayTimetableFrame(QFrame):
 
     def _display_style_for_schedule(self, schedule):
         if self._is_completed(schedule):
-            if self._dark_mode:
-                return {
-                    "fill": QColor(58, 58, 58, 230),
-                    "line": QColor(80, 80, 80, 230),
-                    "border": QColor(110, 110, 110, 190),
-                    "text": QColor(235, 235, 235, 230),
-                    "shadow": QColor(0, 0, 0, 0),
-                }
             return {
                 "fill": QColor(255, 255, 255, 238),
                 "line": QColor(255, 255, 255, 245),
-                "border": QColor(170, 184, 192, 210),
-                "text": QColor(AppConfig.COLOR_GRADIENT_START),
+                "border": None,
+                "text": self._color_for_schedule(schedule),
                 "shadow": QColor(255, 255, 255, 0),
             }
         if self._is_expired(schedule):
@@ -391,8 +355,8 @@ class MonthDayTimetableFrame(QFrame):
                 "fill": color,
                 "line": color,
                 "border": None,
-                "text": QColor(255, 255, 255, 235),
-                "shadow": QColor(0, 0, 0, 65),
+                "text": QColor(255, 255, 255, 238),
+                "shadow": QColor(0, 0, 0, 95),
             }
 
         color = self._color_for_schedule(schedule)
@@ -400,8 +364,8 @@ class MonthDayTimetableFrame(QFrame):
             "fill": color,
             "line": color,
             "border": QColor(255, 255, 255, 245),
-            "text": QColor(255, 255, 255, 235),
-            "shadow": QColor(0, 0, 0, 65),
+            "text": QColor(255, 255, 255, 238),
+            "shadow": QColor(0, 0, 0, 95),
         }
 
     @staticmethod
@@ -425,22 +389,18 @@ class MonthDayTimetableFrame(QFrame):
         return grid_top + (minute - visible_start) / 60.0 * self.HOUR_ROW_HEIGHT
 
     def _grid_rects(self):
-        outer = QRectF(self.rect()).adjusted(
-            self.BORDER_WIDTH,
-            self.BORDER_WIDTH,
-            -self.BORDER_WIDTH,
-            -self.BORDER_WIDTH,
-        )
+        outer = QRectF(self.rect())
         axis_rect = QRectF(
             outer.left(),
             outer.top(),
             self.TIME_AXIS_WIDTH,
             outer.height(),
         )
+        content_left = axis_rect.right() + self.DIVIDER_WIDTH
         content_rect = QRectF(
-            axis_rect.right(),
+            content_left,
             outer.top(),
-            max(1.0, outer.width() - self.TIME_AXIS_WIDTH),
+            max(1.0, outer.right() - content_left),
             outer.height(),
         )
         return outer, axis_rect, content_rect
@@ -516,65 +476,68 @@ class MonthDayTimetableFrame(QFrame):
         ]
         return visible_intervals, visible_points
 
-    def _draw_background(self, painter, outer, axis_rect, content_rect):
+    def _draw_background(self, painter, outer, axis_rect):
         painter.save()
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        background = QColor(43, 43, 43, 246) if self._dark_mode else QColor(255, 255, 255, 245)
-        border = QColor(255, 255, 255, 76) if self._dark_mode else QColor(255, 255, 255, 235)
-        divider = QColor(255, 255, 255, 58) if self._dark_mode else QColor(205, 216, 224, 210)
-        background_path = QPainterPath()
-        background_path.addRoundedRect(
-            QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5),
-            self.CORNER_RADIUS,
-            self.CORNER_RADIUS,
-        )
-        painter.fillPath(background_path, background)
-        painter.setPen(QPen(border, 2))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawPath(background_path)
-        painter.fillRect(axis_rect, background)
-        painter.fillRect(content_rect, background)
-        painter.setPen(QPen(divider, 1))
-        painter.drawLine(
-            QPointF(axis_rect.right(), outer.top()),
-            QPointF(axis_rect.right(), outer.bottom()),
+        line_color = QColor(222, 230, 234, 230)
+        painter.fillRect(axis_rect, QColor(255, 255, 255, 64))
+        painter.fillRect(
+            QRectF(
+                axis_rect.right(),
+                outer.top(),
+                self.DIVIDER_WIDTH,
+                outer.height(),
+            ),
+            line_color,
         )
         painter.restore()
 
-    def _draw_hour_grid(self, painter, axis_rect, content_rect):
+    def _draw_hour_grid(self, painter, outer, axis_rect, content_rect):
         visible_start = int(self.visible_start_minutes)
         visible_hours = int(self.visible_minutes // 60)
         painter.save()
-        if self._dark_mode:
-            line_color = QColor(255, 255, 255, 55)
-            text_color = QColor(235, 235, 235, 220)
-        else:
-            line_color = QColor(205, 216, 224, 220)
-            text_color = QColor(78, 94, 108, 235)
-        painter.setPen(QPen(line_color, 1))
+        line_color = QColor(222, 230, 234, 230)
+        text_color = QColor(
+            StyleManager.mix_colors(
+                AppConfig.COLOR_GRADIENT_START,
+                AppConfig.COLOR_GRADIENT_END,
+                0.5,
+            )
+        )
         font = QFont("Microsoft YaHei")
         font.setPixelSize(10)
         painter.setFont(font)
         metrics = QFontMetrics(font)
         for row in range(visible_hours + 1):
             y_value = content_rect.top() + row * self.HOUR_ROW_HEIGHT
-            painter.setPen(QPen(line_color, 1))
-            painter.drawLine(
-                QPointF(content_rect.left(), y_value),
-                QPointF(content_rect.right(), y_value),
-            )
+            if row == 0:
+                line_rect = QRectF(outer.left(), outer.top(), outer.width(), 1.0)
+            elif row == visible_hours:
+                line_rect = QRectF(
+                    outer.left(),
+                    max(outer.top(), outer.bottom() - 1.0),
+                    outer.width(),
+                    1.0,
+                )
+            else:
+                line_rect = QRectF(
+                    content_rect.left(),
+                    y_value,
+                    content_rect.width(),
+                    1.0,
+                )
+            painter.fillRect(line_rect, line_color)
             hour_value = (visible_start // 60) + row
             if row < visible_hours and 0 <= hour_value < 24:
                 label_rect = QRectF(
-                    axis_rect.left() + 4.0,
-                    y_value + 2.0,
-                    axis_rect.width() - 8.0,
+                    axis_rect.left(),
+                    y_value + 3.0,
+                    axis_rect.width(),
                     metrics.height(),
                 )
                 painter.setPen(text_color)
                 painter.drawText(
                     label_rect,
-                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+                    Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
                     f"{hour_value:02d}:00",
                 )
         painter.restore()
@@ -791,15 +754,19 @@ class MonthDayTimetableFrame(QFrame):
 
     def _draw_ddl_labels(self, painter):
         for item in self._visible_ddl_labels:
+            display_style = item["style"]
             painter.setFont(item["font"])
-            painter.setPen(
-                QColor(235, 235, 235, 215)
-                if self._dark_mode
-                else QColor(80, 92, 104, 225)
-            )
+            if display_style["shadow"].alpha() > 0:
+                painter.setPen(display_style["shadow"])
+                painter.drawText(
+                    item["rect"].translated(0.8, 0.8),
+                    Qt.AlignmentFlag.AlignCenter,
+                    item["text"],
+                )
+            painter.setPen(display_style["text"])
             painter.drawText(
                 item["rect"],
-                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom,
+                Qt.AlignmentFlag.AlignCenter,
                 item["text"],
             )
 
@@ -815,12 +782,7 @@ class MonthDayTimetableFrame(QFrame):
 
         line_y = self._minute_to_y(current_minutes, visible_start, content_rect.top())
         painter.save()
-        pen = QPen(
-            QColor(235, 235, 235, 200)
-            if self._dark_mode
-            else QColor(120, 120, 120, 200),
-            1,
-        )
+        pen = QPen(QColor(AppConfig.COLOR_GRADIENT_END), 1)
         pen.setStyle(Qt.PenStyle.DashLine)
         pen.setDashPattern([4, 4])
         painter.setPen(pen)
@@ -834,7 +796,7 @@ class MonthDayTimetableFrame(QFrame):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         outer, axis_rect, content_rect = self._grid_rects()
-        self._draw_background(painter, outer, axis_rect, content_rect)
+        self._draw_background(painter, outer, axis_rect)
 
         self._hit_regions = []
         self._visible_event_labels = []
@@ -843,7 +805,7 @@ class MonthDayTimetableFrame(QFrame):
         intervals, ddl_points = self._visible_items()
         self._draw_interval_items(painter, intervals, content_rect)
         self._draw_ddl_items(painter, ddl_points, content_rect)
-        self._draw_hour_grid(painter, axis_rect, content_rect)
+        self._draw_hour_grid(painter, outer, axis_rect, content_rect)
         self._draw_interval_labels(painter)
         self._draw_ddl_labels(painter)
         self._draw_current_time_line(painter, content_rect)
@@ -856,9 +818,6 @@ class MonthDayTimetableFrame(QFrame):
                 self.schedule_double_clicked.emit(region["schedule"])
                 event.accept()
                 return
-            self.dark_mode_toggle_requested.emit()
-            event.accept()
-            return
         super().mouseDoubleClickEvent(event)
 
     def contextMenuEvent(self, event):
@@ -879,15 +838,25 @@ class MonthDayPanel(QWidget):
     schedule_double_clicked = pyqtSignal(object, object)
     schedule_status_requested = pyqtSignal(object, int)
 
-    def __init__(self, qdate, schedules, parent=None):
-        super().__init__(parent, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint)
+    CORNER_RADIUS = 12
+    PIN_ICON_SIZE = 14
+    TIMETABLE_BOTTOM_CLEARANCE = 10
+    TIMETABLE_FOOTER_HEIGHT = CORNER_RADIUS + TIMETABLE_BOTTOM_CLEARANCE
+
+    def __init__(self, qdate, schedules, parent=None, initial_pinned=None):
+        if initial_pinned is None:
+            initial_pinned = get_primary_pin_preference()
+        window_flags = Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint
+        if initial_pinned:
+            window_flags |= Qt.WindowType.WindowStaysOnTopHint
+        super().__init__(parent, window_flags)
         self.panel_date = qdate
         self._schedules = []
+        self.is_pinned = bool(initial_pinned)
         self.schedule_display_mode = get_timetable_preferences().get(
             "display_mode",
             "card",
         )
-        self._dark_mode = self._default_dark_mode()
         self._closed_emitted = False
         self._drag_offset = None
         self.child_detail_popups = []
@@ -900,16 +869,45 @@ class MonthDayPanel(QWidget):
         self._layout.setContentsMargins(14, 12, 14, 12)
         self._layout.setSpacing(8)
 
-        header_layout = QHBoxLayout()
-        header_layout.setContentsMargins(0, 0, 0, 0)
-        header_layout.setSpacing(10)
+        self.header_layout = QHBoxLayout()
+        self.header_layout.setContentsMargins(0, 0, 0, 0)
+        self.header_layout.setSpacing(10)
 
         self.date_label = QLabel()
-        self.date_label.setWordWrap(True)
+        self.date_label.setWordWrap(False)
         self.date_label.setStyleSheet(
             "color: white; font-family: 'Microsoft YaHei'; font-size: 14px; font-weight: bold;"
         )
-        header_layout.addWidget(self.date_label, 1)
+        self.header_layout.addWidget(self.date_label, 1)
+
+        self.header_actions_layout = QHBoxLayout()
+        self.header_actions_layout.setContentsMargins(0, 0, 0, 0)
+        self.header_actions_layout.setSpacing(2)
+
+        self.btn_pin = QPushButton()
+        self.btn_pin.setFixedSize(22, 22)
+        self.btn_pin.setIconSize(
+            QSize(self.PIN_ICON_SIZE, self.PIN_ICON_SIZE)
+        )
+        self.btn_pin.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_pin.setStyleSheet(
+            """
+            QPushButton {
+                background: transparent;
+                border: none;
+            }
+            QPushButton:hover {
+                background: rgba(255, 255, 255, 0.18);
+                border-radius: 11px;
+            }
+            """
+        )
+        self.btn_pin.clicked.connect(self._toggle_pin)
+        self.header_actions_layout.addWidget(
+            self.btn_pin,
+            0,
+            Qt.AlignmentFlag.AlignTop,
+        )
 
         self.btn_close = QPushButton("×")
         self.btn_close.setFixedSize(22, 22)
@@ -930,8 +928,13 @@ class MonthDayPanel(QWidget):
             """
         )
         self.btn_close.clicked.connect(self.close)
-        header_layout.addWidget(self.btn_close, 0, Qt.AlignmentFlag.AlignTop)
-        self._layout.addLayout(header_layout)
+        self.header_actions_layout.addWidget(
+            self.btn_close,
+            0,
+            Qt.AlignmentFlag.AlignTop,
+        )
+        self.header_layout.addLayout(self.header_actions_layout)
+        self._layout.addLayout(self.header_layout)
 
         self.empty_label = QLabel("当日暂无日程")
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -987,9 +990,28 @@ class MonthDayPanel(QWidget):
         self.timetable_frame.status_change_requested.connect(
             self.schedule_status_requested.emit
         )
-        self.timetable_frame.dark_mode_toggle_requested.connect(self._toggle_dark_mode)
-        self._layout.addWidget(self.timetable_frame)
-        self.timetable_frame.hide()
+
+        self.timetable_summary_label = QLabel()
+        self.timetable_summary_label.setFixedHeight(
+            self.TIMETABLE_FOOTER_HEIGHT
+        )
+        self.timetable_summary_label.setContentsMargins(14, 0, 0, 0)
+        self.timetable_summary_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        self.timetable_summary_label.setStyleSheet(
+            "color: rgba(255, 255, 255, 0.74); font-family: 'Microsoft YaHei'; font-size: 8px;"
+        )
+
+        self.timetable_container = QWidget()
+        self.timetable_container.setStyleSheet("background: transparent;")
+        self.timetable_layout = QVBoxLayout(self.timetable_container)
+        self.timetable_layout.setContentsMargins(0, 0, 0, 0)
+        self.timetable_layout.setSpacing(0)
+        self.timetable_layout.addWidget(self.timetable_frame)
+        self.timetable_layout.addWidget(self.timetable_summary_label)
+        self._layout.addWidget(self.timetable_container)
+        self.timetable_container.hide()
 
         self.summary_label = QLabel()
         self.summary_label.setStyleSheet(
@@ -997,27 +1019,34 @@ class MonthDayPanel(QWidget):
         )
         self._layout.addWidget(self.summary_label)
 
+        self._update_pin_button()
         self.set_panel_data(qdate, schedules)
 
-    def _default_dark_mode(self):
-        return QSettings("Lankor", "DesktopSchedule").value(
-            "week/dark_mode",
-            False,
-            type=bool,
+    def _toggle_pin(self):
+        self.set_pinned(not self.is_pinned)
+
+    def set_pinned(self, enabled):
+        self.is_pinned = bool(enabled)
+        set_window_pin_state(self, self.is_pinned)
+        self._update_pin_button()
+
+    def _update_pin_button(self):
+        pin_color = (
+            QColor(255, 255, 255, 255)
+            if self.is_pinned
+            else QColor(255, 255, 255, 150)
         )
-
-    def _timetable_dark_mode_enabled(self):
-        return self.schedule_display_mode == "timetable" and self._dark_mode
-
-    def set_dark_mode(self, dark):
-        self._dark_mode = bool(dark)
-        self.timetable_frame.set_dark_mode(self._dark_mode)
-        self.update()
-
-    def _toggle_dark_mode(self):
-        if self.schedule_display_mode != "timetable":
-            return
-        self.set_dark_mode(not self._dark_mode)
+        pin_pixmap = load_colored_svg_pixmap(
+            "assets/icons/pin.svg",
+            pin_color,
+            self.PIN_ICON_SIZE,
+            self.PIN_ICON_SIZE,
+            self.devicePixelRatioF(),
+        )
+        self.btn_pin.setIcon(QIcon(pin_pixmap))
+        self.btn_pin.setToolTip(
+            "取消窗口置顶" if self.is_pinned else "窗口置顶"
+        )
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -1030,42 +1059,69 @@ class MonthDayPanel(QWidget):
 
         painter.setPen(QPen(QColor(255, 255, 255, 110), 1))
         painter.setBrush(QBrush(gradient))
-        painter.drawRoundedRect(rect, 12, 12)
+        painter.drawRoundedRect(
+            rect,
+            self.CORNER_RADIUS,
+            self.CORNER_RADIUS,
+        )
+
+        if (
+            self.schedule_display_mode == "timetable"
+            and self.timetable_container.isVisible()
+        ):
+            surface_top = self.timetable_frame.mapTo(self, QPoint(0, 0)).y()
+            painter.fillRect(
+                0,
+                surface_top,
+                self.width(),
+                self.timetable_frame.height(),
+                QColor(255, 255, 255, 153),
+            )
 
         super().paintEvent(event)
 
     def set_panel_data(self, qdate, schedules):
         self.panel_date = qdate
         self._schedules = list(schedules or [])
+        self.btn_pin.setVisible(self.schedule_display_mode == "timetable")
         week_names = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
         self.date_label.setText(
             f"{qdate.toString('yyyy-MM-dd')} {week_names[qdate.dayOfWeek() - 1]}"
         )
 
         self._clear_schedule_items()
-        self.timetable_frame.hide()
+        self.timetable_container.hide()
+        self.summary_label.hide()
 
         if not schedules:
+            self._layout.setContentsMargins(14, 12, 14, 12)
+            self.header_layout.setContentsMargins(0, 0, 0, 0)
             self.setFixedWidth(280)
             self.empty_label.show()
             self.body_scroll.hide()
-            self.summary_label.hide()
             self.adjustSize()
             return
 
         self.empty_label.hide()
 
         if self.schedule_display_mode == "timetable":
+            self._layout.setContentsMargins(0, 0, 0, 0)
+            self.header_layout.setContentsMargins(14, 12, 14, 0)
             self.setFixedWidth(234)
             self.body_scroll.hide()
-            self.timetable_frame.show()
-            self.timetable_frame.set_dark_mode(self._dark_mode)
             self.timetable_frame.set_schedule_data(qdate, self._schedules)
-            self.summary_label.setText(f"共 {len(self._schedules)} 条")
-            self.summary_label.show()
+            self.timetable_container.setFixedHeight(
+                self.timetable_frame.height()
+                + self.timetable_layout.spacing()
+                + self.timetable_summary_label.height()
+            )
+            self.timetable_summary_label.setText(f"共 {len(self._schedules)} 条")
+            self.timetable_container.show()
             self.adjustSize()
             return
 
+        self._layout.setContentsMargins(14, 12, 14, 12)
+        self.header_layout.setContentsMargins(0, 0, 0, 0)
         self.setFixedWidth(280)
         self.body_scroll.show()
 
@@ -1094,19 +1150,7 @@ class MonthDayPanel(QWidget):
         if self.schedule_display_mode == mode_id:
             return
         self.schedule_display_mode = mode_id
-        if mode_id == "timetable":
-            self.timetable_frame.set_dark_mode(self._dark_mode)
         self.set_panel_data(self.panel_date, self._schedules)
-
-    def mouseDoubleClickEvent(self, event):
-        if (
-            event.button() == Qt.MouseButton.LeftButton
-            and self.schedule_display_mode == "timetable"
-        ):
-            self._toggle_dark_mode()
-            event.accept()
-            return
-        super().mouseDoubleClickEvent(event)
 
     def _clear_schedule_items(self):
         while self.body_layout.count() > 1:

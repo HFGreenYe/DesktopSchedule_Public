@@ -1276,7 +1276,7 @@ class MainWindow(FramelessMainWindow):
             self._hide_day_query_panels()
 
         # 鍒囨崲鍓嶏紝鍏堟妸鍙兘澶勪簬鎵撳紑鐘舵€佺殑瑙嗗浘閫夋嫨鑿滃崟闅愯棌鎺?        if hasattr(self, 'page_dashboard'):
-            self.page_dashboard.view_selector.hide()
+            self.page_dashboard.hide_view_selector()
         if hasattr(self, 'page_todo'):
             self.page_todo.view_selector.hide()
 
