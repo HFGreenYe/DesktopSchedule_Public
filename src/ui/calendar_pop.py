@@ -46,14 +46,23 @@ def _calendar_accent_color():
 
 class HighlightCalendarWidget(QCalendarWidget):
     """自定义日历控件：负责在有日程的日期下方画三色小圆点"""
-    def __init__(self, parent=None, export_theme=False):
+    def __init__(
+        self,
+        parent=None,
+        export_theme=False,
+        schedule_markers=True,
+    ):
         super().__init__(parent)
         self._export_theme = bool(export_theme)
+        self._schedule_markers = bool(schedule_markers)
         self.date_status = {} # 字典，记录具体状态颜色
         self.update_schedule_dates()
 
     def update_schedule_dates(self):
         """扫描数据库，计算每天的综合状态：全完成(白) / 逾期(灰) / 待办(青)"""
+        if not self._schedule_markers:
+            self.updateCells()
+            return
         schedules = db_manager.get_all_schedules()
         
         # 1. 先把日程按日期分组
@@ -83,6 +92,10 @@ class HighlightCalendarWidget(QCalendarWidget):
 
         self.updateCells()
 
+    def set_date_markers(self, date_status):
+        self.date_status = dict(date_status or {})
+        self.updateCells()
+
     def paintCell(self, painter, rect, date):
         """重写底层绘制：根据不同颜色画点"""
         if self._export_theme:
@@ -99,6 +112,8 @@ class HighlightCalendarWidget(QCalendarWidget):
                 color = QColor("#05e92a") 
             elif status == "grey":
                 color = QColor("#999999")          
+            elif status == "commemoration":
+                color = QColor(AppConfig.COLOR_GRADIENT_START)
             else:
                 color = QColor(_calendar_accent_color())
                 
@@ -168,13 +183,19 @@ class CalendarPop(QWidget):
     """悬浮日历弹窗容器"""
     date_selected = pyqtSignal(object) 
 
-    def __init__(self, parent=None, export_theme=False):
+    def __init__(
+        self,
+        parent=None,
+        export_theme=False,
+        schedule_markers=True,
+    ):
         super().__init__(parent)
         self.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedSize(300, 260)
 
         self._export_theme = bool(export_theme)
+        self._schedule_markers = bool(schedule_markers)
         self.drag_pos = None 
         self.current_theme = "dark" 
         self.last_today = QDate.currentDate()
@@ -184,7 +205,11 @@ class CalendarPop(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        self.calendar = HighlightCalendarWidget(self, self._export_theme)
+        self.calendar = HighlightCalendarWidget(
+            self,
+            self._export_theme,
+            self._schedule_markers,
+        )
         self.calendar.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.calendar.setFirstDayOfWeek(Qt.DayOfWeek.Monday)
         self.calendar.setGridVisible(False) 

@@ -25,7 +25,10 @@ from ..utils.schedule_sort_preferences import (
 )
 from ..utils.win_api import apply_24h2_border_fix
 from ..utils.styles import StyleManager
-from ..utils.timetable_preferences import get_timetable_preferences
+from ..utils.timetable_preferences import (
+    get_timetable_preferences,
+    set_timetable_drag_snap_minutes,
+)
 from ..utils.window_preferences import get_primary_pin_preference
 from .header import ToolTipFilter
 from .components import IOSSwitch, get_colored_icon, get_padded_colored_icon, SharedMoreMenu
@@ -863,7 +866,7 @@ class CalendarCellDelegate(QStyledItemDelegate):
                     else:
                         painter.setPen(QColor(255, 255, 255))
                 else:
-                    painter.setPen(QColor(128, 128, 128, 100))
+                    painter.setPen(QColor(105, 105, 105, 200))
             else:
                 painter.setPen(QColor(255, 255, 255))
 
@@ -2093,6 +2096,15 @@ class MonthWindow(FramelessMainWindow):
         panel.closed.connect(self._remove_day_panel)
         panel.schedule_double_clicked.connect(self.schedule_detail_requested.emit)
         panel.schedule_status_requested.connect(self._change_schedule_status_from_day_panel)
+        panel.blank_context_requested.connect(
+            self._show_day_panel_blank_context_menu
+        )
+        panel.schedule_time_changed.connect(
+            self._handle_day_panel_timetable_time_changed
+        )
+        panel.timetable_empty_context_requested.connect(
+            self._show_day_panel_timetable_context_menu
+        )
         panel.move(*self._get_day_panel_position(len(self.open_day_panels), panel))
         panel.show()
         self.open_day_panels.append(panel)
@@ -2194,6 +2206,39 @@ class MonthWindow(FramelessMainWindow):
         menu.view_requested.connect(self._handle_context_view)
         menu.mode_requested.connect(self._handle_context_mode)
         menu.exec(global_pos)
+
+    def _show_day_panel_blank_context_menu(self, _qdate, global_pos):
+        menu = ActionContextMenu(
+            self,
+            show_multiple_choice=True,
+            multiple_choice_only=True,
+        )
+        menu.exec(global_pos)
+
+    def _show_day_panel_timetable_context_menu(self, panel, global_pos):
+        timetable_frame = getattr(panel, "timetable_frame", None)
+        if timetable_frame is None:
+            return
+        self.context_menu_date = getattr(panel, "panel_date", None)
+        menu = ActionContextMenu(
+            self,
+            show_drag_options=True,
+            drag_snap_minutes=timetable_frame.edit_snap_minutes,
+        )
+        menu.action_requested.connect(self._handle_context_action)
+        menu.view_requested.connect(self._handle_context_view)
+        menu.mode_requested.connect(self._handle_context_mode)
+        menu.drag_snap_requested.connect(
+            self._handle_day_panel_drag_snap_change
+        )
+        menu.exec(global_pos)
+
+    def _handle_day_panel_drag_snap_change(self, minutes):
+        set_timetable_drag_snap_minutes(minutes)
+        for panel in list(self.open_day_panels):
+            timetable_frame = getattr(panel, "timetable_frame", None)
+            if timetable_frame is not None:
+                timetable_frame.set_drag_snap_minutes(minutes)
 
     def _on_left_empty_area_context_menu(self, pos):
         """左侧空白区右键：复用日历格右键菜单，操作对象为当前选中日期"""
@@ -2726,6 +2771,44 @@ class MonthWindow(FramelessMainWindow):
         schedule.status = new_status
         self.refresh_after_schedule_change(schedule)
         self.show_toast("日程已完成" if new_status == 1 else "日程已恢复为未完成")
+
+    def _handle_day_panel_timetable_time_changed(
+        self,
+        schedule,
+        start_time,
+        end_time,
+    ):
+        schedule_id = getattr(schedule, "id", None)
+        if schedule_id is None:
+            self.refresh_after_schedule_change()
+            return
+
+        if getattr(schedule, "group_id", None):
+            success = db_manager.update_schedule_with_repeat(
+                schedule_id,
+                {
+                    "start_time": start_time,
+                    "end_time": end_time,
+                },
+                update_future=False,
+            )
+            if success:
+                schedule.group_id = None
+        else:
+            success = db_manager.update_schedule_fields(
+                schedule_id,
+                start_time=start_time,
+                end_time=end_time,
+            )
+
+        if not success:
+            self.show_toast("日程时间更新失败")
+            self.refresh_after_schedule_change()
+            return
+
+        schedule.start_time = start_time
+        schedule.end_time = end_time
+        self.refresh_after_schedule_change(schedule)
 
     def _complete_schedule_edit(self, schedule):
         self.refresh_after_schedule_change(schedule)

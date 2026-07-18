@@ -6,6 +6,7 @@ from datetime import datetime
 from ..config import AppConfig
 from src.ui.todo_board import TodoBoardWindow
 from src.ui.encryption_window import EncryptionWindow
+from src.ui.popups.commemoration_day_panel import show_commemoration_day_panel
 from src.utils.signals import global_signals
 from src.utils.window_preferences import (
     get_primary_pin_preference,
@@ -952,9 +953,7 @@ class SharedMoreMenu(QMenu):
             win.activateWindow()
 
     def _on_open_commemoration_day(self):
-        print(
-            f"[{self.parent_window.__class__.__name__}] 点击了纪念日期"
-        )
+        show_commemoration_day_panel(self.parent_window, toggle=True)
 
     def _on_show_help_manual(self):
         print(f"[{self.parent_window.__class__.__name__}] 点击了使用手册")

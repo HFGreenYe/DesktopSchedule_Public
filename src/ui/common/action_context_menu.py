@@ -147,12 +147,18 @@ class ActionContextMenu(QMenu):
         drag_snap_minutes=1,
         show_day_collapse=False,
         day_collapsed=False,
+        show_multiple_choice=False,
+        multiple_choice_only=False,
     ):
         super().__init__(parent)
         self.show_drag_options = show_drag_options
         self.drag_snap_minutes = self._normalize_drag_snap_minutes(drag_snap_minutes)
         self.show_day_collapse = bool(show_day_collapse)
         self.day_collapsed = bool(day_collapsed)
+        self.show_multiple_choice = bool(
+            show_multiple_choice or multiple_choice_only
+        )
+        self.multiple_choice_only = bool(multiple_choice_only)
         self.actions_by_id = {}
         self.widget_actions_by_id = {}
         self.rows_by_id = {}
@@ -206,6 +212,10 @@ class ActionContextMenu(QMenu):
         return minutes if minutes in {1, 5} else 1
 
     def _build_menu(self):
+        if self.multiple_choice_only:
+            self._create_multiple_choice_action()
+            return
+
         # --- 模式（仿"视图"子菜单结构） ---
         self._create_mode_action("card", "卡片模式", ("schedule_card.svg",))
         self._create_mode_action(
@@ -277,6 +287,9 @@ class ActionContextMenu(QMenu):
             on_click=self._show_view_menu,
         )
 
+        if self.show_multiple_choice:
+            self._create_multiple_choice_action()
+
         self._create_main_action(
             action_id="add",
             text="添加",
@@ -285,6 +298,16 @@ class ActionContextMenu(QMenu):
             on_enter=self._hide_view_menu,
             on_click=self.close,
         ).triggered.connect(lambda: self.action_requested.emit("add"))
+
+    def _create_multiple_choice_action(self):
+        return self._create_main_action(
+            action_id="multiple_choice",
+            text="多选",
+            icon_names=("Multiplechoice.svg",),
+            enabled=True,
+            on_enter=self._hide_secondary_menus,
+            on_click=self.close,
+        )
 
     def _hide_secondary_menus(self):
         self._hide_mode_menu()

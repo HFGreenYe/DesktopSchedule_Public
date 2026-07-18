@@ -2360,6 +2360,7 @@ class DashboardView(QWidget):
             drag_snap_minutes=self.timetable_placeholder.edit_snap_minutes,
             show_day_collapse=True,
             day_collapsed=day_collapsed,
+            show_multiple_choice=self.schedule_display_mode == "card",
         )
         menu.action_requested.connect(self.context_action_requested.emit)
         menu.view_requested.connect(self.context_view_requested.emit)

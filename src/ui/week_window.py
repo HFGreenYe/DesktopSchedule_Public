@@ -2189,6 +2189,12 @@ class WeekWindow(FramelessMainWindow):
         # ==========================================
         self.top_container = QWidget()
         self.top_container.setObjectName("week_top_surface")
+        self.top_container.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu
+        )
+        self.top_container.customContextMenuRequested.connect(
+            self._show_week_header_context_menu
+        )
         self.top_container.setStyleSheet("""
             QWidget#week_top_surface {
                 background: transparent;
@@ -3756,6 +3762,22 @@ class WeekWindow(FramelessMainWindow):
         """右键菜单 → 模式切换（卡片/课表）"""
         self.set_schedule_display_mode(mode_id)
 
+    def _show_week_header_context_menu(self, position):
+        is_timetable = (
+            getattr(self, "schedule_display_mode", "card") == "timetable"
+        )
+        menu = ActionContextMenu(
+            self,
+            show_drag_options=is_timetable,
+            drag_snap_minutes=self.page_week_timetable_placeholder.edit_snap_minutes,
+            show_multiple_choice=not is_timetable,
+        )
+        menu.action_requested.connect(self._handle_week_context_action)
+        menu.view_requested.connect(self._handle_week_context_view)
+        menu.mode_requested.connect(self._handle_week_context_mode)
+        menu.drag_snap_requested.connect(self._handle_timetable_drag_snap_change)
+        menu.exec(self.top_container.mapToGlobal(position))
+
     def mousePressEvent(self, event):
         # 如果视图选择器正开着，点窗口上半部分任何空白处都会关掉它
         if hasattr(self, 'view_selector_container') and self.view_selector_container.isVisible():
@@ -3789,7 +3811,10 @@ class WeekWindow(FramelessMainWindow):
                 target_date = self.current_monday.addDays(index)
                 self._on_day_clicked(target_date)
 
-                menu = ActionContextMenu(self)
+                menu = ActionContextMenu(
+                    self,
+                    show_multiple_choice=True,
+                )
                 menu.action_requested.connect(self._handle_week_context_action)
                 menu.view_requested.connect(self._handle_week_context_view)
                 menu.mode_requested.connect(self._handle_week_context_mode)
