@@ -2,7 +2,7 @@ from datetime import date, timedelta
 from html import escape
 from pathlib import Path
 
-from PyQt6.QtCore import QEvent, QPoint, QPointF, QRectF, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import (
     QColor,
     QGuiApplication,
@@ -10,12 +10,14 @@ from PyQt6.QtGui import (
     QImage,
     QIntValidator,
     QLinearGradient,
+    QPageLayout,
     QPainter,
     QPainterPath,
     QPixmap,
 )
 from PyQt6.QtPdf import QPdfDocument
 from PyQt6.QtPdfWidgets import QPdfView
+from PyQt6.QtPrintSupport import QPrintDialog, QPrinter
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtWidgets import (
     QComboBox,
@@ -73,8 +75,8 @@ from src.utils.window_preferences import set_window_pin_state
 
 
 PNG_SIZE_PRESETS = {
-    "3:2": PngCanvasSpec(1800, 1200),
-    "16:9": PngCanvasSpec(1920, 1080),
+    "3:2": PngCanvasSpec(1200, 1800),
+    "16:9": PngCanvasSpec(1080, 1920),
     "4:3": PngCanvasSpec(1600, 1200),
     "1:1": PngCanvasSpec(1600, 1600),
     "9:16": PngCanvasSpec(1080, 1920),
@@ -272,6 +274,8 @@ class _ExportClickableColorPreview(QLabel):
 
 
 class _ExportPreviewPopup(QWidget):
+    print_requested = pyqtSignal()
+
     def __init__(self, text, parent=None):
         super().__init__(
             parent,
@@ -302,7 +306,10 @@ class _ExportPreviewPopup(QWidget):
         self.printer_icon.setFixedSize(30, 30)
         self.printer_icon.setPixmap(printer_pixmap)
         self.printer_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.printer_icon.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.printer_icon.setToolTip("打印当前预览")
         self.printer_icon.setStyleSheet("background: transparent; border: none;")
+        self.printer_icon.installEventFilter(self)
         self.close_btn = QPushButton("×", self)
         self.close_btn.setFixedSize(30, 30)
         self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -481,6 +488,14 @@ class _ExportPreviewPopup(QWidget):
         self.activateWindow()
 
     def eventFilter(self, watched, event):
+        if (
+            watched is self.printer_icon
+            and event.type() == QEvent.Type.MouseButtonRelease
+            and event.button() == Qt.MouseButton.LeftButton
+        ):
+            self.print_requested.emit()
+            event.accept()
+            return True
         header_drag = watched in (self.header_holder, self.title)
         content_drag = watched is self.content_frame
         preview_drag = watched is self.preview_editor.viewport()
@@ -1547,17 +1562,12 @@ class ExportSchedulePanel(QWidget):
                 "background-color: rgba(255, 255, 255, 0.70)",
             )
         if self.export_background_mode == "gradient":
-            embedded = (
-                "background: qlineargradient(x1:0, y1:0, x2:0, y2:1, "
-                f"stop:0 {self.export_gradient_start}, "
-                f"stop:1 {self.export_gradient_end})"
-            )
             popup = (
                 "background: qlineargradient(x1:0, y1:0, x2:0, y2:1, "
                 f"stop:0 {self.export_gradient_start}, "
                 f"stop:1 {self.export_gradient_end})"
             )
-            return embedded, popup
+            return "background-color: #FFFFFF", popup
         if self.export_background_mode == "default":
             preset = get_export_background_preset(
                 self.export_default_background_index
@@ -1566,9 +1576,9 @@ class ExportSchedulePanel(QWidget):
                 "background: qlineargradient(x1:0, y1:0, x2:0, y2:1, "
                 f"stop:0 {preset.top_color}, stop:1 {preset.bottom_color})"
             )
-            return background, background
+            return "background-color: #FFFFFF", background
         return (
-            f"background-color: {self.export_solid_color}",
+            "background-color: #FFFFFF",
             f"background-color: {self.export_solid_color}",
         )
 
@@ -2268,16 +2278,9 @@ class ExportSchedulePanel(QWidget):
             self._refresh_export_preview()
 
     def _apply_selected_preview_size(self):
-        ratio_map = {
-            "3:2": (3, 2),
-            "16:9": (16, 9),
-            "4:3": (4, 3),
-            "1:1": (1, 1),
-            "9:16": (9, 16),
-        }
-        ratio = ratio_map.get(self._selected_preview_size)
-        if ratio is not None:
-            self._apply_preview_ratio(*ratio)
+        canvas_spec = PNG_SIZE_PRESETS.get(self._selected_preview_size)
+        if canvas_spec is not None:
+            self._apply_preview_ratio(canvas_spec.width, canvas_spec.height)
 
     def _apply_custom_preview_size(self):
         if self._selected_option("export_format") != "PNG":
@@ -2321,6 +2324,9 @@ class ExportSchedulePanel(QWidget):
         text = getattr(self, "_preview_plain_text", self.preview_box.toPlainText())
         if self._preview_popup is None:
             self._preview_popup = _ExportPreviewPopup(text, self)
+            self._preview_popup.print_requested.connect(
+                self._handle_preview_print_requested
+            )
         export_format = self._selected_option("export_format") or "Markdown"
         if export_format in {"PDF", "PNG"}:
             if self._pdf_document is not None:
@@ -2337,6 +2343,98 @@ class ExportSchedulePanel(QWidget):
         self._apply_preview_surface_styles()
         self._preview_popup.set_preview_size(self.preview_box.size())
         self._preview_popup.show_near(self)
+
+    def _handle_preview_print_requested(self):
+        popup = self._preview_popup
+        if popup is None:
+            return
+        export_format = self._selected_option("export_format") or "Markdown"
+        if export_format in {"PDF", "PNG"} and self._pdf_document is None:
+            show_center_toast(
+                popup,
+                "真实预览尚未生成，暂时无法打印",
+                attr_name="_print_result_toast",
+                duration_ms=1600,
+            )
+            return
+
+        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        printer.setDocName(
+            self._default_export_filename(self._current_export_options(), "")
+        )
+        if export_format in {"PDF", "PNG"}:
+            first_page_size = self._pdf_document.pagePointSize(0)
+            orientation = (
+                QPageLayout.Orientation.Landscape
+                if first_page_size.width() > first_page_size.height()
+                else QPageLayout.Orientation.Portrait
+            )
+            printer.setPageOrientation(orientation)
+
+        dialog = QPrintDialog(printer, popup)
+        dialog.setWindowTitle("打印导出预览")
+        if export_format in {"PDF", "PNG"}:
+            page_count = self._pdf_document.pageCount()
+            dialog.setMinMax(1, page_count)
+            dialog.setFromTo(1, page_count)
+        if not dialog.exec():
+            return
+
+        try:
+            if export_format in {"PDF", "PNG"}:
+                self._print_pdf_document(printer, self._pdf_document)
+            else:
+                popup.preview_editor.document().print(printer)
+        except Exception as exc:
+            QMessageBox.critical(popup, "打印失败", f"导出预览打印失败：\n{exc}")
+
+    @staticmethod
+    def _print_pdf_document(printer, document):
+        page_count = document.pageCount()
+        if page_count <= 0:
+            raise RuntimeError("当前预览没有可打印页面")
+        from_page = printer.fromPage()
+        to_page = printer.toPage()
+        first_index = max(0, from_page - 1) if from_page > 0 else 0
+        last_index = min(page_count - 1, to_page - 1) if to_page > 0 else page_count - 1
+        if first_index > last_index:
+            raise RuntimeError("打印页码范围无效")
+
+        painter = QPainter()
+        if not painter.begin(printer):
+            raise RuntimeError("无法启动打印设备")
+        try:
+            for sequence, page_index in enumerate(range(first_index, last_index + 1)):
+                if sequence and not printer.newPage():
+                    raise RuntimeError("无法创建新的打印页")
+                page_rect = printer.pageLayout().paintRectPixels(printer.resolution())
+                page_size = document.pagePointSize(page_index)
+                target_size = QSize(
+                    max(1, round(page_size.width())),
+                    max(1, round(page_size.height())),
+                )
+                target_size.scale(
+                    page_rect.size(),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                )
+                render_bounds = QSize(target_size)
+                if max(render_bounds.width(), render_bounds.height()) > 4096:
+                    render_bounds.scale(
+                        QSize(4096, 4096),
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                    )
+                image = document.render(page_index, render_bounds)
+                if image.isNull():
+                    raise RuntimeError(f"第 {page_index + 1} 页渲染失败")
+                target_rect = QRect(
+                    page_rect.x() + (page_rect.width() - target_size.width()) // 2,
+                    page_rect.y() + (page_rect.height() - target_size.height()) // 2,
+                    target_size.width(),
+                    target_size.height(),
+                )
+                painter.drawImage(target_rect, image)
+        finally:
+            painter.end()
 
     def _toggle_background_popup(self):
         self.export_background_mode = "default"

@@ -103,6 +103,7 @@ class SchedulePngExporter:
                     temporary_images.append((temporary_image, output_path))
             finally:
                 document.close()
+                del document
 
             if overwrite:
                 for conflict in conflicts:
@@ -113,7 +114,7 @@ class SchedulePngExporter:
 
     @classmethod
     def _load_document(cls, pdf_path: Path) -> QPdfDocument:
-        document = QPdfDocument()
+        document = QPdfDocument(None)
         load_error = document.load(str(pdf_path))
         if load_error != QPdfDocument.Error.None_:
             document.close()

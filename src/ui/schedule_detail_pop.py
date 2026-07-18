@@ -748,8 +748,10 @@ class ScheduleDetailPop(QWidget):
 
     @staticmethod
     def _style_choice_menu(menu):
-        menu.setStyleSheet("""
-            QMenu {
+        accent_color = StyleManager.theme_accent_color()
+        selected_background = StyleManager.theme_overlay_rgba(0.12)
+        menu.setStyleSheet(f"""
+            QMenu {{
                 background-color: #ffffff;
                 color: #333333;
                 border: 1px solid #dcdcdc;
@@ -757,16 +759,16 @@ class ScheduleDetailPop(QWidget):
                 padding: 4px;
                 font-family: 'Microsoft YaHei';
                 font-size: 12px;
-            }
-            QMenu::item {
+            }}
+            QMenu::item {{
                 min-width: 64px;
                 padding: 5px 12px;
                 border-radius: 3px;
-            }
-            QMenu::item:selected {
-                background-color: #d9f5fa;
-                color: #0aaac7;
-            }
+            }}
+            QMenu::item:selected {{
+                background-color: {selected_background};
+                color: {accent_color};
+            }}
         """)
 
     def _show_priority_menu(self):
