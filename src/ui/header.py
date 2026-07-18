@@ -550,7 +550,20 @@ class HeaderBar(QWidget):
     def _show_header_context_menu(self, pos):
         from .common.action_context_menu import ActionContextMenu
 
-        menu = ActionContextMenu(self)
+        owner = self.window()
+        show_day_collapse = bool(
+            hasattr(owner, "is_day_view_active")
+            and owner.is_day_view_active()
+        )
+        day_collapsed = bool(
+            hasattr(owner, "is_day_collapsed")
+            and owner.is_day_collapsed()
+        )
+        menu = ActionContextMenu(
+            self,
+            show_day_collapse=show_day_collapse,
+            day_collapsed=day_collapsed,
+        )
         menu.action_requested.connect(self.action_requested.emit)
         menu.view_requested.connect(self.view_requested.emit)
         menu.mode_requested.connect(self.mode_requested.emit)

@@ -21,6 +21,7 @@ from ..utils.timetable_preferences import (
     set_timetable_drag_snap_minutes,
     set_timetable_schedule_color,
 )
+from ..utils.styles import StyleManager
 from ..utils.schedule_sort_preferences import (
     get_schedule_sort_options,
     set_schedule_sort_options,
@@ -495,18 +496,16 @@ class TimetablePlaceholderFrame(QFrame):
     empty_area_context_requested = pyqtSignal(object)
     schedule_time_changed = pyqtSignal(object, object, object)
 
-    BORDER_WIDTH = 2
-    CORNER_RADIUS = 8
     DIVIDER_WIDTH = 1
     TIME_AXIS_WIDTH = 40
     HOUR_COUNT = 24
     DAY_MINUTES = 24 * 60
-    HOUR_ROW_HEIGHT = 57.0
+    VISIBLE_HOUR_ROWS = 7
     EVENT_GAP = 2.0
     EVENT_BLOCK_COLUMN_GAP = 2.0
     EVENT_COLUMN_GAP = 1.0
     GRID_LEFT_INSET = 0.0
-    GRID_RIGHT_INSET = 2.0
+    GRID_RIGHT_INSET = 0.0
     EVENT_RADIUS = 3.0
     DDL_LINE_HEIGHT = 3.0
     EDIT_EDGE_HANDLE_PX = 10.0
@@ -943,7 +942,7 @@ class TimetablePlaceholderFrame(QFrame):
 
     def _snapped_delta_minutes(self, delta_pixels, scroll_delta_minutes=0.0):
         raw_minutes = (
-            delta_pixels / max(1.0, self.HOUR_ROW_HEIGHT) * 60.0
+            delta_pixels / self._hour_row_height() * 60.0
             + scroll_delta_minutes
         )
         return self._snap_minutes(raw_minutes)
@@ -1165,7 +1164,10 @@ class TimetablePlaceholderFrame(QFrame):
     def _minute_to_y(self, minute_value, visible_start, top):
         return top + (
             (minute_value - visible_start) / 60.0
-        ) * self.HOUR_ROW_HEIGHT
+        ) * self._hour_row_height()
+
+    def _hour_row_height(self):
+        return max(1.0, self.height() / float(self.VISIBLE_HOUR_ROWS))
 
     def _build_visible_items(self, visible_start, visible_end):
         all_intervals = []
@@ -1550,7 +1552,7 @@ class TimetablePlaceholderFrame(QFrame):
 
         line_y = self._minute_to_y(current_minutes, visible_start, top)
         painter.save()
-        pen = QPen(QColor(235, 238, 240, 215), 1)
+        pen = QPen(QColor(AppConfig.COLOR_GRADIENT_END), 1)
         pen.setStyle(Qt.PenStyle.DashLine)
         pen.setDashPattern([4, 4])
         painter.setPen(pen)
@@ -1736,14 +1738,13 @@ class TimetablePlaceholderFrame(QFrame):
 
         width = self.width()
         height = self.height()
-        if width <= self.TIME_AXIS_WIDTH + self.DIVIDER_WIDTH + self.BORDER_WIDTH * 2 or height <= 0:
+        if width <= self.TIME_AXIS_WIDTH + self.DIVIDER_WIDTH or height <= 0:
             return
 
         line_color = QColor(222, 230, 234, 230)
-        boundary_color = QColor(255, 255, 255, 245)
-        content_left = float(self.BORDER_WIDTH)
-        top = float(self.BORDER_WIDTH)
-        right = float(width - self.BORDER_WIDTH)
+        content_left = 0.0
+        top = 0.0
+        right = float(width)
         left_axis_right = content_left + float(self.TIME_AXIS_WIDTH)
         grid_left_x = (
             left_axis_right
@@ -1751,16 +1752,11 @@ class TimetablePlaceholderFrame(QFrame):
             + float(self.GRID_LEFT_INSET)
         )
         grid_right = right - self.GRID_RIGHT_INSET
-        bottom = float(height - self.BORDER_WIDTH)
+        bottom = float(height)
 
-        frame_line_width = 2
         frame_rect = QRectF(content_left, top, right - content_left, bottom - top)
         frame_path = QPainterPath()
-        frame_path.addRoundedRect(
-            frame_rect,
-            float(self.CORNER_RADIUS),
-            float(self.CORNER_RADIUS),
-        )
+        frame_path.addRect(frame_rect)
 
         painter.save()
         painter.setClipPath(frame_path)
@@ -1769,13 +1765,13 @@ class TimetablePlaceholderFrame(QFrame):
             int(round(top)),
             max(0, int(round(left_axis_right - content_left))),
             max(0, int(round(bottom - top))),
-            QColor(255, 255, 255, 26),
+            QColor(255, 255, 255, 64),
         )
         painter.restore()
 
-        grid_height = max(1.0, bottom - top)
+        hour_row_height = self._hour_row_height()
         visible_start_minutes = float(self.visible_start_minutes)
-        visible_duration_minutes = grid_height / self.HOUR_ROW_HEIGHT * 60.0
+        visible_duration_minutes = float(self.VISIBLE_HOUR_ROWS * 60)
         last_visible_minutes = visible_start_minutes + visible_duration_minutes
 
         painter.save()
@@ -1817,7 +1813,7 @@ class TimetablePlaceholderFrame(QFrame):
         while hour_minutes <= last_visible_minutes + 0.01:
             hour_y = top + (
                 (hour_minutes - visible_start_minutes) / 60.0
-            ) * self.HOUR_ROW_HEIGHT
+            ) * hour_row_height
             painter.fillRect(
                 grid_left,
                 int(round(hour_y)),
@@ -1841,7 +1837,15 @@ class TimetablePlaceholderFrame(QFrame):
 
         painter.save()
         painter.setClipPath(frame_path)
-        painter.setPen(line_color)
+        painter.setPen(
+            QColor(
+                StyleManager.mix_colors(
+                    AppConfig.COLOR_GRADIENT_START,
+                    AppConfig.COLOR_GRADIENT_END,
+                    0.5,
+                )
+            )
+        )
         font = painter.font()
         font.setFamily("Microsoft YaHei")
         font.setPixelSize(11)
@@ -1853,7 +1857,7 @@ class TimetablePlaceholderFrame(QFrame):
         while hour_minutes <= last_visible_minutes + 0.01:
             hour_y = top + (
                 (hour_minutes - visible_start_minutes) / 60.0
-            ) * self.HOUR_ROW_HEIGHT
+            ) * hour_row_height
             text_y = hour_y + 3.0
             if text_y + text_height > bottom:
                 hour_minutes += 60
@@ -1875,20 +1879,21 @@ class TimetablePlaceholderFrame(QFrame):
             max(0, int(round(bottom - top))),
             line_color,
         )
-        painter.restore()
-
-        painter.setPen(QPen(boundary_color, frame_line_width))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawRoundedRect(
-            frame_rect.adjusted(
-                frame_line_width / 2,
-                frame_line_width / 2,
-                -frame_line_width / 2,
-                -frame_line_width / 2,
-            ),
-            float(self.CORNER_RADIUS),
-            float(self.CORNER_RADIUS),
+        painter.fillRect(
+            0,
+            0,
+            width,
+            1,
+            line_color,
         )
+        painter.fillRect(
+            0,
+            max(0, height - 1),
+            width,
+            1,
+            line_color,
+        )
+        painter.restore()
 
 from .todo import TodoListContainer
 class DashboardView(QWidget):
@@ -1927,6 +1932,7 @@ class DashboardView(QWidget):
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
+        self._main_layout = layout
         layout.setContentsMargins(15, 10, 15, 20)
         layout.setSpacing(8)
 
@@ -2009,9 +2015,39 @@ class DashboardView(QWidget):
             and self.schedule_display_mode != "timetable"
         )
         self.schedule_display_mode = mode_id
+        if mode_id == "timetable":
+            self._main_layout.setContentsMargins(0, 10, 0, 20)
+        else:
+            self._main_layout.setContentsMargins(15, 10, 15, 20)
         if entering_timetable:
             self.timetable_placeholder.reset_to_current_time()
         self._sync_schedule_area_visibility()
+        self.update()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if (
+            self.schedule_display_mode != "timetable"
+            or not self.timetable_placeholder.isVisible()
+        ):
+            return
+
+        surface_top = max(0, self.timetable_placeholder.geometry().top())
+        surface_bottom = min(
+            self.height(),
+            self.timetable_placeholder.geometry().bottom() + 1,
+        )
+        if surface_bottom <= surface_top:
+            return
+
+        painter = QPainter(self)
+        painter.fillRect(
+            0,
+            surface_top,
+            self.width(),
+            surface_bottom - surface_top,
+            QColor(255, 255, 255, 153),
+        )
 
     def filter_options(self):
         return self._filter_options
@@ -2302,10 +2338,17 @@ class DashboardView(QWidget):
         return False
 
     def _show_dashboard_context_menu(self, global_pos):
+        owner = self.window()
+        day_collapsed = bool(
+            hasattr(owner, "is_day_collapsed")
+            and owner.is_day_collapsed()
+        )
         menu = ActionContextMenu(
             self,
             show_drag_options=self.schedule_display_mode == "timetable",
             drag_snap_minutes=self.timetable_placeholder.edit_snap_minutes,
+            show_day_collapse=True,
+            day_collapsed=day_collapsed,
         )
         menu.action_requested.connect(self.context_action_requested.emit)
         menu.view_requested.connect(self.context_view_requested.emit)

@@ -140,10 +140,19 @@ class ActionContextMenu(QMenu):
     MAIN_MENU_WIDTH = 160
     VIEW_MENU_WIDTH = 150
 
-    def __init__(self, parent=None, show_drag_options=False, drag_snap_minutes=1):
+    def __init__(
+        self,
+        parent=None,
+        show_drag_options=False,
+        drag_snap_minutes=1,
+        show_day_collapse=False,
+        day_collapsed=False,
+    ):
         super().__init__(parent)
         self.show_drag_options = show_drag_options
         self.drag_snap_minutes = self._normalize_drag_snap_minutes(drag_snap_minutes)
+        self.show_day_collapse = bool(show_day_collapse)
+        self.day_collapsed = bool(day_collapsed)
         self.actions_by_id = {}
         self.widget_actions_by_id = {}
         self.rows_by_id = {}
@@ -238,6 +247,20 @@ class ActionContextMenu(QMenu):
             enabled=False,
         )
 
+        if self.show_day_collapse:
+            collapse_text = "放下" if self.day_collapsed else "收起"
+            collapse_icon = "setdown.svg" if self.day_collapsed else "setup.svg"
+            self._create_main_action(
+                action_id="day_collapse",
+                text=collapse_text,
+                icon_names=(collapse_icon,),
+                enabled=True,
+                on_enter=self._hide_secondary_menus,
+                on_click=self.close,
+            ).triggered.connect(
+                lambda: self.action_requested.emit("toggle_day_collapse")
+            )
+
         self._create_view_action("day", "日视图", ("interface-day.svg", "calendar.svg"))
         self._create_view_action("week", "周视图", ("interface-week.svg", "week_top_color.svg", "view.svg"))
         self._create_view_action("month", "月视图", ("interface-month.svg", "calendar.svg"))
@@ -278,6 +301,11 @@ class ActionContextMenu(QMenu):
             enabled=False,
             on_enter=self._hide_view_menu,
         )
+
+    def _hide_secondary_menus(self):
+        self._hide_mode_menu()
+        self._hide_drag_menu()
+        self._hide_view_menu()
 
     def _create_main_action(
         self,

@@ -42,6 +42,8 @@ from ..utils.timetable_preferences import (
 from ..services.schedule_sort_service import ScheduleSortOptions
 
 class MainWindow(FramelessMainWindow):
+    DAY_COLLAPSE_BOTTOM_GAP = 20
+
     def __init__(self):
         super().__init__()
         self.main_controller = MainController()
@@ -57,6 +59,13 @@ class MainWindow(FramelessMainWindow):
         self._vertical_resize_edge = None
         self._vertical_resize_start_pos = QPoint()
         self._vertical_resize_start_geometry = None
+        self._day_collapsed = False
+        self._day_expanded_height = 600
+        self._day_expanded_minimum_height = 600
+        self._day_expanded_maximum_height = 16777215
+        self._day_expanded_layout_spacing = 10
+        self._day_collapsed_detail_popups = []
+        self._day_collapsed_height = 0
         
         self.setFixedWidth(AppConfig.DEFAULT_WIDTH)
         self.setMinimumHeight(600) 
@@ -79,6 +88,7 @@ class MainWindow(FramelessMainWindow):
         if app is not None:
             app.installEventFilter(self)
         self.main_layout.addWidget(self.header)
+        self.main_layout.setAlignment(self.header, Qt.AlignmentFlag.AlignTop)
         
         # --- 椤甸潰鍫嗘爤 ---
         self.body_stack = QStackedWidget()
@@ -1151,13 +1161,17 @@ class MainWindow(FramelessMainWindow):
         self.body_stack.setCurrentWidget(return_target)
 
     def handle_header_action(self, action_name):
-        if action_name == "add":
+        if action_name == "toggle_day_collapse":
+            self.toggle_day_collapsed()
+        elif action_name == "add":
+            self._expand_day_for_body_action()
             self.switch_to_add_page()
         elif action_name == "toggle_pin":
             self.toggle_pin_mode()
         elif action_name == "skin":
             print("杩欓噷浠ュ悗鍐欐崲鑲ら€昏緫")
         elif action_name == "view":
+            self._expand_day_for_body_action()
             # 鍔ㄦ€佸垽鏂綋鍓嶅湪鍝釜椤甸潰锛屽氨寮瑰摢涓〉闈㈢殑瑙嗗浘閫夋嫨鍣?
             current_widget = self.body_stack.currentWidget()
             
@@ -1171,6 +1185,7 @@ class MainWindow(FramelessMainWindow):
                 self.page_dashboard.toggle_view_selector()
                 
         elif action_name == "sort":
+            self._expand_day_for_body_action()
             current_widget = self.body_stack.currentWidget()
             if current_widget == self.page_todo:
                 self.toggle_day_sort_panel()
@@ -1182,10 +1197,13 @@ class MainWindow(FramelessMainWindow):
             else:
                 self.show_toast("排序仅支持日界面和待办界面")
         elif action_name == "filter":
+            self._expand_day_for_body_action()
             self.toggle_day_filter_panel()
 
     def _handle_dashboard_context_action(self, action_name):
-        if action_name == "add":
+        if action_name == "toggle_day_collapse":
+            self.toggle_day_collapsed()
+        elif action_name == "add":
             self.switch_to_add_page()
 
     def _handle_dashboard_context_view(self, view_name):
@@ -1213,6 +1231,7 @@ class MainWindow(FramelessMainWindow):
                 apply_24h2_border_fix(int(window.winId()))
             
     def switch_to_add_page(self):
+        self._expand_day_for_body_action()
         self._hide_day_query_panels()
         current_widget = self.body_stack.currentWidget()
         
@@ -1249,6 +1268,8 @@ class MainWindow(FramelessMainWindow):
     # 澶勭悊瑙嗗浘鍒囨崲
     def switch_view(self, view_name):
         route_action = ViewRouter.classify_main_view(view_name)
+        if self._day_collapsed and route_action != "day":
+            self.set_day_collapsed(False)
         self._exit_sort_state_for_view_switch(route_action)
         self._sync_view_selector_state(route_action)
         if route_action in {"day", "week", "month", "todo"}:
@@ -1405,9 +1426,95 @@ class MainWindow(FramelessMainWindow):
     def show_toast(self, message):
         self.toast_label = show_center_toast(self, message, attr_name="toast_label", duration_ms=500)
 
+    def is_day_collapsed(self):
+        return self._day_collapsed
+
+    def is_day_view_active(self):
+        return (
+            hasattr(self, "page_dashboard")
+            and hasattr(self, "body_stack")
+            and self.body_stack.currentWidget() == self.page_dashboard
+            and not self.week_window.isVisible()
+            and not self.month_window.isVisible()
+        )
+
+    def toggle_day_collapsed(self):
+        self.set_day_collapsed(not self._day_collapsed)
+
+    def _day_collapse_boundary_height(self):
+        lower_controls = [self.header.search]
+        lower_controls.extend(self.header.toolbar_buttons.values())
+        controls_bottom = max(
+            widget.mapTo(self, QPoint(0, widget.height())).y()
+            for widget in lower_controls
+        )
+        return max(
+            self.header.height(),
+            controls_bottom + self.DAY_COLLAPSE_BOTTOM_GAP,
+        )
+
+    def set_day_collapsed(self, collapsed):
+        collapsed = bool(collapsed)
+        if collapsed == self._day_collapsed:
+            return
+        if collapsed and not self.is_day_view_active():
+            return
+
+        if collapsed:
+            self._hide_day_query_panels()
+            self._day_expanded_height = self.height()
+            self._day_expanded_minimum_height = self.minimumHeight()
+            self._day_expanded_maximum_height = self.maximumHeight()
+            self._day_expanded_layout_spacing = self.main_layout.spacing()
+            self._day_collapsed_detail_popups = [
+                popup
+                for popup in tuple(self.page_dashboard.open_popups)
+                if popup.isVisible()
+            ]
+            for popup in self._day_collapsed_detail_popups:
+                popup.hide()
+
+            collapsed_height = self._day_collapse_boundary_height()
+            self._day_collapsed_height = collapsed_height
+            self.body_stack.hide()
+            self.main_layout.setSpacing(0)
+            self.setMinimumHeight(0)
+            self.setMaximumHeight(collapsed_height)
+            self.setMinimumHeight(collapsed_height)
+            self.resize(self.width(), collapsed_height)
+            self._day_collapsed = True
+        else:
+            self.setMaximumHeight(self._day_expanded_maximum_height)
+            self.setMinimumHeight(self._day_expanded_minimum_height)
+            self.main_layout.setSpacing(self._day_expanded_layout_spacing)
+            self.body_stack.show()
+            restored_height = max(
+                self._day_expanded_minimum_height,
+                min(self._day_expanded_height, self._day_expanded_maximum_height),
+            )
+            self.resize(self.width(), restored_height)
+            for popup in self._day_collapsed_detail_popups:
+                if popup in self.page_dashboard.open_popups:
+                    popup.show()
+                    popup.raise_()
+            self._day_collapsed_detail_popups = []
+            self._day_collapsed = False
+
+        self.updateGeometry()
+        self.update()
+
+    def _expand_day_for_body_action(self):
+        if self._day_collapsed:
+            self.set_day_collapsed(False)
+
     def switch_to_suspend(self):
         pos = self.pos()
-        self.suspend_window.set_source_gradient_height(self.height())
+        source_gradient_height = (
+            self._day_expanded_height
+            if self._day_collapsed
+            else self.height()
+        )
+        self.suspend_window.set_source_gradient_height(source_gradient_height)
         self.suspend_window.move(pos)
         self.hide()
         self.suspend_window.show()
@@ -1417,7 +1524,10 @@ class MainWindow(FramelessMainWindow):
         self.move(pos)
         self.suspend_window.hide()
         self.show()
-        self.resize(AppConfig.DEFAULT_WIDTH, 600) 
+        if self._day_collapsed:
+            self.resize(AppConfig.DEFAULT_WIDTH, self._day_collapsed_height)
+        else:
+            self.resize(AppConfig.DEFAULT_WIDTH, 600)
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -1426,7 +1536,12 @@ class MainWindow(FramelessMainWindow):
         rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
         path.addRoundedRect(rect, 5.0, 5.0)
         
-        gradient = QLinearGradient(0, 0, 0, self.height())
+        source_gradient_height = (
+            self._day_expanded_height
+            if self._day_collapsed
+            else self.height()
+        )
+        gradient = QLinearGradient(0, 0, 0, source_gradient_height)
         gradient.setColorAt(0.0, QColor(AppConfig.COLOR_GRADIENT_START))
         gradient.setColorAt(1.0, QColor(AppConfig.COLOR_GRADIENT_END))
         painter.fillPath(path, QBrush(gradient))
@@ -1474,6 +1589,8 @@ class MainWindow(FramelessMainWindow):
         return event.globalPos()
 
     def _vertical_resize_edge_at(self, global_pos):
+        if self._day_collapsed:
+            return None
         local_pos = self.mapFromGlobal(global_pos)
         if local_pos.x() < 0 or local_pos.x() > self.width():
             return None
