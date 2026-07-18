@@ -1944,6 +1944,7 @@ class DashboardView(QWidget):
         self.view_selector_layout.setSpacing(0)
         self.view_selector = ViewSelectorCard(self.view_selector_container)
         self.view_selector_layout.addWidget(self.view_selector)
+        self.view_selector_container.setFixedHeight(self.view_selector.height())
         self.view_selector_container.hide()
         layout.addWidget(self.view_selector_container)
 

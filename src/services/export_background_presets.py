@@ -20,6 +20,7 @@ DEFAULT_EXPORT_BACKGROUND_DISPLAY_NAMES = {
     "BlueVibe": "蓝调氛围",
     "CityDrive": "城市驾驶",
     "DeviceWorld": "设备世界",
+    "GreenField": "绿茵场中",
     "GreenLeaf": "幽绿之叶",
     "LonelyHouse": "孤独小屋",
     "OrderOfNature": "自然秩序",
