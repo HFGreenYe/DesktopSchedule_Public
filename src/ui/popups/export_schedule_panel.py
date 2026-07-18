@@ -2,7 +2,17 @@ from datetime import date, timedelta
 from html import escape
 from pathlib import Path
 
-from PyQt6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import (
+    QEvent,
+    QPoint,
+    QPointF,
+    QRect,
+    QRectF,
+    QSize,
+    Qt,
+    QTimer,
+    pyqtSignal,
+)
 from PyQt6.QtGui import (
     QColor,
     QGuiApplication,
@@ -10,14 +20,12 @@ from PyQt6.QtGui import (
     QImage,
     QIntValidator,
     QLinearGradient,
-    QPageLayout,
     QPainter,
     QPainterPath,
     QPixmap,
 )
 from PyQt6.QtPdf import QPdfDocument
 from PyQt6.QtPdfWidgets import QPdfView
-from PyQt6.QtPrintSupport import QPrintDialog, QPrinter
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtWidgets import (
     QComboBox,
@@ -42,7 +50,11 @@ from PyQt6.QtWidgets import (
 )
 
 from src.config import AppConfig
-from src.services.export_background_presets import get_export_background_preset
+from src.services.export_background_presets import (
+    DEFAULT_EXPORT_BACKGROUND_PRESETS,
+    get_export_background_image_path,
+    get_export_background_preset,
+)
 
 
 def _theme_preview_bg_rgba():
@@ -67,17 +79,24 @@ from src.ui.common.toast import show_center_toast
 from src.ui.common.themed_color_dialog import ThemedColorDialog
 from src.ui.components import get_colored_icon
 from src.ui.popups.export_range_picker import ExportPeriodPickerPopup
+from src.utils.export_style_preferences import (
+    get_export_style_preferences,
+    set_export_style_preferences,
+)
 from src.ui.popups.export_default_background_popup import (
     ExportDefaultBackgroundPopup,
     paint_default_background_pattern,
+)
+from src.ui.popups.export_background_crop_popup import (
+    ExportBackgroundCropPopup,
 )
 from src.utils.window_preferences import set_window_pin_state
 
 
 PNG_SIZE_PRESETS = {
-    "3:2": PngCanvasSpec(1200, 1800),
-    "16:9": PngCanvasSpec(1080, 1920),
-    "4:3": PngCanvasSpec(1600, 1200),
+    "2:3": PngCanvasSpec(1200, 1800),
+    "16:9": PngCanvasSpec(1920, 1080),
+    "3:4": PngCanvasSpec(1200, 1600),
     "1:1": PngCanvasSpec(1600, 1600),
     "9:16": PngCanvasSpec(1080, 1920),
 }
@@ -227,6 +246,9 @@ class _ExportClickableColorPreview(QLabel):
         self.mode = mode
         self._background_selected = False
         self._default_background_index = 0
+        self._custom_background_path = ""
+        self._custom_background_crop = None
+        self._custom_background_image = QImage()
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def set_background_selected(self, selected):
@@ -237,8 +259,21 @@ class _ExportClickableColorPreview(QLabel):
         self._default_background_index = int(index)
         self.update()
 
+    def set_custom_background(self, image_path, crop=None):
+        normalized_path = str(image_path or "")
+        if normalized_path != self._custom_background_path:
+            self._custom_background_path = normalized_path
+            self._custom_background_image = QImage(normalized_path)
+        self._custom_background_crop = crop
+        self.setToolTip(
+            f"自定义背景：{Path(normalized_path).name}"
+            if normalized_path
+            else "选择自定义导出背景"
+        )
+        self.update()
+
     def paintEvent(self, event):
-        if self.mode != "default":
+        if self.mode not in {"default", "custom"}:
             super().paintEvent(event)
             return
         painter = QPainter(self)
@@ -248,11 +283,32 @@ class _ExportClickableColorPreview(QLabel):
         path.addRoundedRect(rect, 4, 4)
         painter.save()
         painter.setClipPath(path)
-        paint_default_background_pattern(
-            painter,
-            rect,
-            self._default_background_index,
-        )
+        if self.mode == "default":
+            paint_default_background_pattern(
+                painter,
+                rect,
+                self._default_background_index,
+            )
+        elif not self._custom_background_image.isNull():
+            image_rect = QRectF(self._custom_background_image.rect())
+            crop = self._custom_background_crop
+            if crop and len(crop) == 4:
+                crop_x, crop_y, crop_width, crop_height = crop
+                image_rect = QRectF(
+                    crop_x * self._custom_background_image.width(),
+                    crop_y * self._custom_background_image.height(),
+                    crop_width * self._custom_background_image.width(),
+                    crop_height * self._custom_background_image.height(),
+                )
+            painter.drawImage(rect, self._custom_background_image, image_rect)
+        else:
+            painter.fillPath(path, QColor(255, 255, 255, 194))
+            painter.setPen(QColor(105, 105, 105))
+            font = painter.font()
+            font.setPixelSize(16)
+            font.setBold(True)
+            painter.setFont(font)
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "+")
         painter.restore()
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(
@@ -307,7 +363,7 @@ class _ExportPreviewPopup(QWidget):
         self.printer_icon.setPixmap(printer_pixmap)
         self.printer_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.printer_icon.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.printer_icon.setToolTip("打印当前预览")
+        self.printer_icon.setToolTip("导出日程")
         self.printer_icon.setStyleSheet("background: transparent; border: none;")
         self.printer_icon.installEventFilter(self)
         self.close_btn = QPushButton("×", self)
@@ -731,6 +787,13 @@ class ExportSchedulePanel(QWidget):
         self._drag_offset = None
         self._preview_popup = None
         self._background_popup = None
+        self._background_crop_popup = None
+        self._background_crop_cache = {}
+        self._background_crop_request = None
+        self._export_style_preferences = get_export_style_preferences()
+        self._active_style_format = "Markdown"
+        self._restoring_export_style = False
+        self._export_ui_ready = False
         self._day_range_popup = None
         self._period_range_popup = None
         self._export_service = None
@@ -753,6 +816,7 @@ class ExportSchedulePanel(QWidget):
         application = QGuiApplication.instance()
         if application is not None:
             application.aboutToQuit.connect(self._shutdown_pdf_preview)
+            application.aboutToQuit.connect(self._persist_active_export_style)
         today = date.today()
         self._selected_range_dates = {
             "day": today,
@@ -770,6 +834,9 @@ class ExportSchedulePanel(QWidget):
         self.export_gradient_start = AppConfig.COLOR_GRADIENT_START
         self.export_gradient_end = AppConfig.COLOR_GRADIENT_END
         self.export_default_background_index = 0
+        self.export_default_background_crop = None
+        self.export_custom_background_path = ""
+        self.export_custom_background_crop = None
         self.export_font_colors = {
             label: AppConfig.COLOR_GRADIENT_START
             for label in ("标题", "详情", "备注")
@@ -785,6 +852,12 @@ class ExportSchedulePanel(QWidget):
         self.setMouseTracking(True)
         self.export_requested.connect(self._handle_export_requested)
         self._setup_ui()
+        self._export_ui_ready = True
+        self._restore_format_style(self._active_style_format)
+        self._sync_size_button_state()
+        self._apply_background_preview_styles()
+        self._apply_font_color_chip_styles()
+        self._refresh_export_preview()
         self.reset_geometry_for_parent()
 
     def reset_geometry_for_parent(self):
@@ -1122,7 +1195,13 @@ class ExportSchedulePanel(QWidget):
             "图",
         )
         row.addWidget(self.default_background_preview)
-        row.addWidget(self._create_background_preview_item("自定义", "disabled", "+", 16))
+        self.custom_background_preview = self._create_background_preview_item(
+            "自定义",
+            "custom",
+            "+",
+            16,
+        )
+        row.addWidget(self.custom_background_preview)
         layout.addLayout(row)
         self._apply_background_preview_styles()
         return section
@@ -1155,10 +1234,10 @@ class ExportSchedulePanel(QWidget):
         preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         if mode == "default":
             preview.clicked.connect(lambda _area: self._toggle_background_popup())
-        elif mode != "disabled":
-            preview.clicked.connect(self._handle_background_preview_clicked)
+        elif mode == "custom":
+            preview.clicked.connect(lambda _area: self._choose_custom_background())
         else:
-            preview.setCursor(Qt.CursorShape.ArrowCursor)
+            preview.clicked.connect(self._handle_background_preview_clicked)
         preview.setProperty("previewFontSize", preview_font_size)
         if mode == "solid":
             self.solid_background_chip = preview
@@ -1171,13 +1250,12 @@ class ExportSchedulePanel(QWidget):
             preview.setStyleSheet(
                 "QLabel { background: transparent; border: none; }"
             )
-        elif mode == "disabled":
+        elif mode == "custom":
             self.custom_background_chip = preview
+            preview.setText("")
+            preview.setToolTip("选择自定义导出背景")
             preview.setStyleSheet(
-                self._preview_chip_style(
-                    "background-color: rgba(255, 255, 255, 0.76);",
-                    preview_font_size,
-                )
+                "QLabel { background: transparent; border: none; }"
             )
         layout.addWidget(preview, 0, Qt.AlignmentFlag.AlignHCenter)
         return container
@@ -1268,7 +1346,10 @@ class ExportSchedulePanel(QWidget):
                 button.setToolTip(f"{label}{emphasis}")
                 button.setStyleSheet(self._mini_radio_style())
                 button.setChecked(label == "标题" and emphasis == "加粗")
-                button.clicked.connect(self._refresh_export_preview)
+                button.clicked.connect(
+                    lambda checked=False, selected_field=label:
+                    self._handle_font_emphasis_changed(selected_field)
+                )
                 grid.addWidget(
                     button,
                     row_index,
@@ -1341,6 +1422,12 @@ class ExportSchedulePanel(QWidget):
         self.size_buttons[self._selected_preview_size].setChecked(True)
         self.custom_width_edit.textChanged.connect(self._apply_custom_preview_size)
         self.custom_height_edit.textChanged.connect(self._apply_custom_preview_size)
+        self.custom_width_edit.editingFinished.connect(
+            self._handle_custom_size_editing_finished
+        )
+        self.custom_height_edit.editingFinished.connect(
+            self._handle_custom_size_editing_finished
+        )
         return section
 
     def _create_size_line_edit(self):
@@ -1419,6 +1506,7 @@ class ExportSchedulePanel(QWidget):
             else "点击切换为英文字体"
         )
         self._populate_font_combo(field)
+        self._persist_active_export_style()
         if hasattr(self, "preview_box"):
             self._refresh_export_preview()
 
@@ -1440,8 +1528,13 @@ class ExportSchedulePanel(QWidget):
     def _remember_font_choice(self, field, value):
         if value:
             self.font_choices[field][self.font_languages[field]] = value
+            self._persist_active_export_style()
             if hasattr(self, "preview_box"):
                 self._refresh_export_preview()
+
+    def _handle_font_emphasis_changed(self, field):
+        self._persist_active_export_style()
+        self._refresh_export_preview()
 
     def _mini_radio_style(self):
         return f"""
@@ -1520,12 +1613,12 @@ class ExportSchedulePanel(QWidget):
                 selected_mode == "default"
             )
         if hasattr(self, "custom_background_chip"):
-            self.custom_background_chip.setStyleSheet(
-                self._preview_chip_style(
-                    "background-color: rgba(255, 255, 255, 0.76);",
-                    16,
-                    border_color="rgba(120, 120, 120, 0.65)",
-                )
+            self.custom_background_chip.set_custom_background(
+                self.export_custom_background_path,
+                self.export_custom_background_crop,
+            )
+            self.custom_background_chip.set_background_selected(
+                selected_mode == "custom"
             )
         if hasattr(self, "preview_box"):
             self._apply_preview_surface_styles()
@@ -1577,6 +1670,11 @@ class ExportSchedulePanel(QWidget):
                 f"stop:0 {preset.top_color}, stop:1 {preset.bottom_color})"
             )
             return "background-color: #FFFFFF", background
+        if self.export_background_mode == "custom":
+            return (
+                "background-color: #FFFFFF",
+                "background-color: rgba(255, 255, 255, 0.70)",
+            )
         return (
             "background-color: #FFFFFF",
             f"background-color: {self.export_solid_color}",
@@ -1643,7 +1741,247 @@ class ExportSchedulePanel(QWidget):
                     self.export_gradient_end = selected
         if changed:
             self._apply_background_preview_styles()
+            self._persist_active_export_style()
             self._refresh_export_preview()
+
+    def _background_crop_target(self):
+        export_format = self._selected_option("export_format") or "Markdown"
+        if export_format == "PDF":
+            return 210, 297, "PDF · A4（210 × 297）"
+        if export_format == "PNG":
+            try:
+                canvas_spec = self._current_png_canvas_spec()
+            except ValueError:
+                return None
+            return (
+                canvas_spec.width,
+                canvas_spec.height,
+                f"PNG · {canvas_spec.width} × {canvas_spec.height}",
+            )
+        return None
+
+    def _background_crop_key(self, source_id, target=None):
+        if not source_id or source_id[0] not in {"default", "custom"}:
+            return None
+        target = target or self._background_crop_target()
+        if target is None:
+            return None
+        width, height, _target_text = target
+        source_key = source_id[2] if source_id[0] == "default" else source_id[1]
+        export_format = (
+            self._selected_option("export_format")
+            or self._active_style_format
+        )
+        return (
+            export_format,
+            source_id[0],
+            str(source_key).casefold(),
+            round(float(width) / float(height), 8),
+        )
+
+    def _default_background_source(self, preset_index):
+        preset = get_export_background_preset(preset_index)
+        image_path = get_export_background_image_path(preset)
+        if image_path is None:
+            return None
+        source_id = ("default", int(preset_index), preset.image_file)
+        return source_id, Path(image_path), preset.name
+
+    def _custom_background_source(self, image_path=None):
+        path_text = str(image_path or self.export_custom_background_path).strip()
+        if not path_text:
+            return None
+        path = Path(path_text).expanduser().resolve()
+        if not path.is_file():
+            return None
+        source_id = ("custom", str(path))
+        return source_id, path, path.name
+
+    def _current_background_source(self):
+        if self.export_background_mode == "default":
+            return self._default_background_source(
+                self.export_default_background_index
+            )
+        if self.export_background_mode == "custom":
+            return self._custom_background_source()
+        return None
+
+    def _background_source_from_id(self, source_id):
+        if not source_id:
+            return None
+        if source_id[0] == "default":
+            return self._default_background_source(source_id[1])
+        if source_id[0] == "custom":
+            return self._custom_background_source(source_id[1])
+        return None
+
+    def _restore_current_background_crop(self):
+        if self.export_background_mode not in {"default", "custom"}:
+            return True
+        if self.export_background_mode == "default":
+            preset = get_export_background_preset(
+                self.export_default_background_index
+            )
+            if get_export_background_image_path(preset) is None:
+                self.export_default_background_crop = None
+                return True
+        source = self._current_background_source()
+        if source is None:
+            return False
+        source_id, _image_path, _display_name = source
+        key = self._background_crop_key(source_id)
+        if key is None:
+            return False
+        crop = self._background_crop_cache.get(key)
+        if self.export_background_mode == "default":
+            self.export_default_background_crop = crop
+        else:
+            self.export_custom_background_crop = crop
+        return crop is not None
+
+    def _show_background_crop_required(self, message=None):
+        self._pdf_preview_controller.cancel()
+        self._clear_pdf_document()
+        export_format = self._selected_option("export_format") or "PDF"
+        page_unit = "页" if export_format == "PDF" else "张"
+        message = message or "请确认背景裁剪后生成真实预览"
+        self._preview_plain_text = message
+        self._preview_html = ""
+        self.preview_box.show_pdf_loading(message, page_unit)
+        if self._preview_popup is not None:
+            self._preview_popup.set_pdf_loading(message, export_format)
+        self._apply_preview_surface_styles()
+
+    def _ensure_current_background_crop(self, open_popup):
+        if self.export_background_mode not in {"default", "custom"}:
+            return True
+        if self.export_background_mode == "default":
+            preset = get_export_background_preset(
+                self.export_default_background_index
+            )
+            if get_export_background_image_path(preset) is None:
+                self.export_default_background_crop = None
+                return True
+        source = self._current_background_source()
+        if source is None:
+            self._show_background_crop_required("请重新选择自定义背景图片")
+            return False
+        if self._restore_current_background_crop():
+            return True
+        self._show_background_crop_required()
+        if open_popup:
+            self._show_background_crop_popup_for_source(*source)
+        return False
+
+    def _show_background_crop_popup_for_source(
+        self,
+        source_id,
+        image_path,
+        display_name,
+    ):
+        target = self._background_crop_target()
+        if target is None:
+            return False
+        crop_key = self._background_crop_key(source_id, target)
+        if crop_key is None:
+            return False
+        if self._background_crop_popup is None:
+            self._background_crop_popup = ExportBackgroundCropPopup(self)
+            self._background_crop_popup.crop_confirmed.connect(
+                self._handle_background_crop_confirmed
+            )
+        self._background_crop_request = (source_id, crop_key)
+        width, height, target_text = target
+        self._background_crop_popup.configure(
+            source_id,
+            image_path,
+            display_name,
+            width,
+            height,
+            target_text,
+            self._background_crop_cache.get(crop_key),
+        )
+        if self._background_popup is not None:
+            self._background_popup.close()
+        self._background_crop_popup.show_near(self)
+        return True
+
+    def _show_default_background_crop_popup(self, preset_index):
+        source = self._default_background_source(preset_index)
+        return (
+            self._show_background_crop_popup_for_source(*source)
+            if source is not None
+            else False
+        )
+
+    def _show_custom_background_crop_popup(self, image_path=None):
+        source = self._custom_background_source(image_path)
+        return (
+            self._show_background_crop_popup_for_source(*source)
+            if source is not None
+            else False
+        )
+
+    def _show_current_background_crop_popup(self):
+        source = self._current_background_source()
+        return (
+            self._show_background_crop_popup_for_source(*source)
+            if source is not None
+            else False
+        )
+
+    def _handle_background_crop_confirmed(self, source_id, crop):
+        request = self._background_crop_request
+        current_key = self._background_crop_key(source_id)
+        if request is None or request[0] != source_id or request[1] != current_key:
+            source = self._background_source_from_id(source_id)
+            if source is not None:
+                QTimer.singleShot(
+                    0,
+                    lambda selected_source=source: (
+                        self._show_background_crop_popup_for_source(
+                            *selected_source
+                        )
+                    ),
+                )
+            return
+        normalized_crop = tuple(float(value) for value in crop)
+        self._background_crop_cache[current_key] = normalized_crop
+        if source_id[0] == "default":
+            self.export_default_background_index = int(source_id[1])
+            self.export_default_background_crop = normalized_crop
+            self.export_background_mode = "default"
+        else:
+            self.export_custom_background_path = str(source_id[1])
+            self.export_custom_background_crop = normalized_crop
+            self.export_background_mode = "custom"
+        self._background_crop_request = None
+        self._apply_background_preview_styles()
+        self._persist_active_export_style()
+        self._refresh_export_preview()
+
+    def _choose_custom_background(self):
+        initial_path = self.export_custom_background_path
+        initial_location = ""
+        if initial_path:
+            current_path = Path(initial_path)
+            initial_location = str(
+                current_path.parent if current_path.parent.exists() else current_path
+            )
+        file_path, _selected_filter = QFileDialog.getOpenFileName(
+            self,
+            "选择自定义导出背景",
+            initial_location,
+            "图片文件 (*.png *.jpg *.jpeg *.bmp *.webp);;所有文件 (*)",
+        )
+        if not file_path:
+            return
+        image_path = Path(file_path).resolve()
+        if QImage(str(image_path)).isNull():
+            QMessageBox.warning(self, "背景图片无效", "无法读取所选背景图片。")
+            return
+        if not self._show_custom_background_crop_popup(image_path):
+            QMessageBox.warning(self, "背景图片无效", "无法打开所选背景图片进行裁剪。")
 
     def _handle_font_color_clicked(self, field):
         selected = self._choose_export_color(
@@ -1654,6 +1992,7 @@ class ExportSchedulePanel(QWidget):
             return
         self.export_font_colors[field] = selected
         self._apply_font_color_chip_styles()
+        self._persist_active_export_style()
         self._refresh_export_preview()
 
     def _choose_export_color(self, initial_color, title):
@@ -1667,15 +2006,222 @@ class ExportSchedulePanel(QWidget):
             return ""
         return selected.name()
 
+    @staticmethod
+    def _default_background_identifier(index):
+        preset = get_export_background_preset(index)
+        if preset.image_file:
+            return f"file:{preset.image_file}"
+        return f"name:{preset.name}"
+
+    @staticmethod
+    def _default_background_index_from_identifier(identifier):
+        identifier = str(identifier or "").strip()
+        if identifier.startswith("file:"):
+            image_file = identifier[5:].casefold()
+            for index, preset in enumerate(DEFAULT_EXPORT_BACKGROUND_PRESETS):
+                if preset.image_file.casefold() == image_file:
+                    return index
+        elif identifier.startswith("name:"):
+            preset_name = identifier[5:]
+            for index, preset in enumerate(DEFAULT_EXPORT_BACKGROUND_PRESETS):
+                if preset.name == preset_name:
+                    return index
+        return 0
+
+    def _capture_current_format_style(self):
+        size_preset = self._selected_preview_size
+        if size_preset in PNG_SIZE_PRESETS:
+            size_spec = PNG_SIZE_PRESETS[size_preset]
+        else:
+            try:
+                size_spec = self._current_png_canvas_spec()
+            except ValueError:
+                size_preset = "9:16"
+                size_spec = PNG_SIZE_PRESETS[size_preset]
+
+        font_states = {}
+        for field in ("标题", "详情", "备注"):
+            language = self.font_languages[field]
+            choices = dict(self.font_choices[field])
+            current_family = self.font_combos[field].currentText().strip()
+            if current_family:
+                choices[language] = current_family
+            emphasis = self.emphasis_buttons[field]
+            font_states[field] = {
+                "language": language,
+                "choices": choices,
+                "color": self.export_font_colors[field],
+                "bold": emphasis["加粗"].isChecked(),
+                "italic": emphasis["斜体"].isChecked(),
+            }
+
+        return {
+            "background": {
+                "mode": self.export_background_mode,
+                "solid_color": self.export_solid_color,
+                "gradient_start": self.export_gradient_start,
+                "gradient_end": self.export_gradient_end,
+                "default_identifier": self._default_background_identifier(
+                    self.export_default_background_index
+                ),
+                "crop": (
+                    list(self.export_default_background_crop)
+                    if self.export_default_background_crop is not None
+                    else None
+                ),
+                "custom_path": self.export_custom_background_path,
+                "custom_crop": (
+                    list(self.export_custom_background_crop)
+                    if self.export_custom_background_crop is not None
+                    else None
+                ),
+            },
+            "fonts": font_states,
+            "size": {
+                "preset": size_preset or "custom",
+                "width": size_spec.width,
+                "height": size_spec.height,
+            },
+        }
+
+    def _persist_format_style(self, export_format):
+        if (
+            not self._export_ui_ready
+            or self._restoring_export_style
+            or export_format not in {"Markdown", "PDF", "PNG"}
+        ):
+            return
+        self._export_style_preferences["formats"][export_format] = (
+            self._capture_current_format_style()
+        )
+        set_export_style_preferences(self._export_style_preferences)
+
+    def _persist_active_export_style(self):
+        self._persist_format_style(self._active_style_format)
+
+    def _restore_format_style(self, export_format):
+        state = self._export_style_preferences["formats"].get(export_format)
+        if not isinstance(state, dict):
+            return
+        self._restoring_export_style = True
+        try:
+            background = state["background"]
+            self.export_background_mode = background["mode"]
+            self.export_solid_color = background["solid_color"]
+            self.export_gradient_start = background["gradient_start"]
+            self.export_gradient_end = background["gradient_end"]
+            self.export_default_background_index = (
+                self._default_background_index_from_identifier(
+                    background["default_identifier"]
+                )
+            )
+            crop = background.get("crop")
+            self.export_default_background_crop = (
+                tuple(float(value) for value in crop)
+                if crop is not None
+                else None
+            )
+            self.export_custom_background_path = background.get(
+                "custom_path",
+                "",
+            )
+            custom_crop = background.get("custom_crop")
+            self.export_custom_background_crop = (
+                tuple(float(value) for value in custom_crop)
+                if custom_crop is not None
+                else None
+            )
+
+            for field in ("标题", "详情", "备注"):
+                font_state = state["fonts"][field]
+                language = font_state["language"]
+                self.font_languages[field] = language
+                self.font_choices[field] = dict(font_state["choices"])
+                self.export_font_colors[field] = font_state["color"]
+                language_button = self.font_language_buttons[field]
+                language_button.setText(language)
+                language_button.setToolTip(
+                    "点击切换为中文字体"
+                    if language == "英"
+                    else "点击切换为英文字体"
+                )
+                self._populate_font_combo(field)
+                emphasis = self.emphasis_buttons[field]
+                emphasis["加粗"].setChecked(bool(font_state["bold"]))
+                emphasis["斜体"].setChecked(bool(font_state["italic"]))
+
+            size_state = state["size"]
+            size_preset = size_state["preset"]
+            self._size_group.setExclusive(False)
+            for label, button in self.size_buttons.items():
+                button.setChecked(label == size_preset)
+            self._size_group.setExclusive(True)
+            for edit in (self.custom_width_edit, self.custom_height_edit):
+                edit.blockSignals(True)
+            if size_preset in PNG_SIZE_PRESETS:
+                self._selected_preview_size = size_preset
+                self.custom_width_edit.clear()
+                self.custom_height_edit.clear()
+            else:
+                self._selected_preview_size = None
+                self.custom_width_edit.setText(str(size_state["width"]))
+                self.custom_height_edit.setText(str(size_state["height"]))
+            for edit in (self.custom_width_edit, self.custom_height_edit):
+                edit.blockSignals(False)
+
+            if self.export_default_background_crop is not None:
+                source = self._default_background_source(
+                    self.export_default_background_index
+                )
+                crop_key = (
+                    self._background_crop_key(source[0])
+                    if source is not None
+                    else None
+                )
+                if crop_key is not None:
+                    self._background_crop_cache[crop_key] = (
+                        self.export_default_background_crop
+                    )
+            if self.export_custom_background_crop is not None:
+                source = self._custom_background_source(
+                    self.export_custom_background_path
+                )
+                crop_key = (
+                    self._background_crop_key(source[0])
+                    if source is not None
+                    else None
+                )
+                if crop_key is not None:
+                    self._background_crop_cache[crop_key] = (
+                        self.export_custom_background_crop
+                    )
+        finally:
+            self._restoring_export_style = False
+
     def _select_option(self, group_key, value):
+        previous_format = self._active_style_format
+        if (
+            group_key == "export_format"
+            and self._export_ui_ready
+            and previous_format != value
+        ):
+            self._persist_format_style(previous_format)
         for button in self.option_groups.get(group_key, []):
             button.setChecked(button.property("option_value") == value)
             button.update()
+        should_refresh = True
         if group_key == "export_format":
+            self._active_style_format = value
+            if self._export_ui_ready and previous_format != value:
+                self._restore_format_style(value)
             self._sync_size_button_state()
             if hasattr(self, "solid_background_chip"):
                 self._apply_background_preview_styles()
-        if hasattr(self, "preview_box"):
+            if value in {"PDF", "PNG"} and hasattr(self, "preview_box"):
+                should_refresh = self._ensure_current_background_crop(
+                    open_popup=True
+                )
+        if hasattr(self, "preview_box") and should_refresh:
             self._refresh_export_preview()
 
     def _selected_option(self, group_key):
@@ -1839,6 +2385,9 @@ class ExportSchedulePanel(QWidget):
             gradient_start=self.export_gradient_start,
             gradient_end=self.export_gradient_end,
             default_background_index=self.export_default_background_index,
+            default_background_crop=self.export_default_background_crop,
+            custom_background_path=self.export_custom_background_path,
+            custom_background_crop=self.export_custom_background_crop,
             title=text_style("标题"),
             detail=text_style("详情"),
             note=text_style("备注"),
@@ -1846,6 +2395,17 @@ class ExportSchedulePanel(QWidget):
 
     def _handle_export_requested(self):
         export_format = self._selected_option("export_format") or "Markdown"
+        if (
+            export_format in {"PDF", "PNG"}
+            and not self._ensure_current_background_crop(open_popup=True)
+        ):
+            show_center_toast(
+                self,
+                "请先确认当前尺寸的背景裁剪",
+                attr_name="_export_result_toast",
+                duration_ms=1600,
+            )
+            return
         options = self._current_export_options()
         extension = {
             "Markdown": ".md",
@@ -1892,14 +2452,19 @@ class ExportSchedulePanel(QWidget):
 
         overwrite_png = False
         if export_format == "PNG":
-            if page_count > 1 or options.range_kind == "all":
+            if page_count > 1:
+                output_folder_name = SchedulePngExporter.output_folder_name(
+                    target,
+                    page_count,
+                )
                 response = QMessageBox.question(
                     self,
                     "确认 PNG 分页导出",
                     (
                         f"当前设置将生成 {page_count} 张 "
                         f"{canvas_spec.width}×{canvas_spec.height} PNG 图片。\n"
-                        "多页文件将按 _001、_002… 编号，是否继续？"
+                        f"图片将保存到文件夹“{output_folder_name}”，"
+                        "并按 _001、_002… 编号，是否继续？"
                     ),
                     QMessageBox.StandardButton.Yes
                     | QMessageBox.StandardButton.No,
@@ -1909,7 +2474,19 @@ class ExportSchedulePanel(QWidget):
                     return
             conflicts = SchedulePngExporter.conflict_paths(target, page_count)
             if conflicts:
-                names = "、".join(path.name for path in conflicts[:5])
+                display_paths = SchedulePngExporter.output_display_paths(
+                    target,
+                    page_count,
+                )
+                existing_paths = {
+                    str(path.relative_to(target.parent))
+                    for path in conflicts[:5]
+                }
+                names = "、".join(
+                    path for path in display_paths if path in existing_paths
+                )
+                if len(conflicts) > 5:
+                    names += " 等"
                 response = QMessageBox.question(
                     self,
                     "覆盖 PNG 文件",
@@ -1953,7 +2530,7 @@ class ExportSchedulePanel(QWidget):
 
         if export_format == "PNG" and len(exported_paths) > 1:
             success_text = (
-                f"已导出 {len(exported_paths)} 张 PNG："
+                f"已导出 {len(exported_paths)} 张 PNG 至文件夹："
                 f"{exported_paths[0].parent.name}"
             )
         else:
@@ -2275,12 +2852,20 @@ class ExportSchedulePanel(QWidget):
                 edit.blockSignals(False)
         if self._selected_option("export_format") == "PNG":
             self._apply_selected_preview_size()
+            crop_ready = self._ensure_current_background_crop(open_popup=True)
+            self._persist_active_export_style()
+            if not crop_ready:
+                return
             self._refresh_export_preview()
 
     def _apply_selected_preview_size(self):
         canvas_spec = PNG_SIZE_PRESETS.get(self._selected_preview_size)
-        if canvas_spec is not None:
-            self._apply_preview_ratio(canvas_spec.width, canvas_spec.height)
+        if canvas_spec is None:
+            try:
+                canvas_spec = self._current_png_canvas_spec()
+            except ValueError:
+                return
+        self._apply_preview_ratio(canvas_spec.width, canvas_spec.height)
 
     def _apply_custom_preview_size(self):
         if self._selected_option("export_format") != "PNG":
@@ -2300,7 +2885,27 @@ class ExportSchedulePanel(QWidget):
         self._size_group.setExclusive(True)
         self._selected_preview_size = None
         self._apply_preview_ratio(canvas_spec.width, canvas_spec.height)
+        crop_ready = self._ensure_current_background_crop(open_popup=False)
+        self._persist_active_export_style()
+        if not crop_ready:
+            return
         self._refresh_export_preview()
+
+    def _handle_custom_size_editing_finished(self):
+        if self._selected_option("export_format") != "PNG":
+            return
+        try:
+            self._current_png_canvas_spec()
+        except ValueError:
+            return
+        if self._ensure_current_background_crop(open_popup=False):
+            return
+        if (
+            self._background_crop_popup is not None
+            and self._background_crop_popup.isVisible()
+        ):
+            return
+        self._show_current_background_crop_popup()
 
     def _current_png_canvas_spec(self):
         if self._selected_preview_size in PNG_SIZE_PRESETS:
@@ -2345,101 +2950,9 @@ class ExportSchedulePanel(QWidget):
         self._preview_popup.show_near(self)
 
     def _handle_preview_print_requested(self):
-        popup = self._preview_popup
-        if popup is None:
-            return
-        export_format = self._selected_option("export_format") or "Markdown"
-        if export_format in {"PDF", "PNG"} and self._pdf_document is None:
-            show_center_toast(
-                popup,
-                "真实预览尚未生成，暂时无法打印",
-                attr_name="_print_result_toast",
-                duration_ms=1600,
-            )
-            return
-
-        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
-        printer.setDocName(
-            self._default_export_filename(self._current_export_options(), "")
-        )
-        if export_format in {"PDF", "PNG"}:
-            first_page_size = self._pdf_document.pagePointSize(0)
-            orientation = (
-                QPageLayout.Orientation.Landscape
-                if first_page_size.width() > first_page_size.height()
-                else QPageLayout.Orientation.Portrait
-            )
-            printer.setPageOrientation(orientation)
-
-        dialog = QPrintDialog(printer, popup)
-        dialog.setWindowTitle("打印导出预览")
-        if export_format in {"PDF", "PNG"}:
-            page_count = self._pdf_document.pageCount()
-            dialog.setMinMax(1, page_count)
-            dialog.setFromTo(1, page_count)
-        if not dialog.exec():
-            return
-
-        try:
-            if export_format in {"PDF", "PNG"}:
-                self._print_pdf_document(printer, self._pdf_document)
-            else:
-                popup.preview_editor.document().print(printer)
-        except Exception as exc:
-            QMessageBox.critical(popup, "打印失败", f"导出预览打印失败：\n{exc}")
-
-    @staticmethod
-    def _print_pdf_document(printer, document):
-        page_count = document.pageCount()
-        if page_count <= 0:
-            raise RuntimeError("当前预览没有可打印页面")
-        from_page = printer.fromPage()
-        to_page = printer.toPage()
-        first_index = max(0, from_page - 1) if from_page > 0 else 0
-        last_index = min(page_count - 1, to_page - 1) if to_page > 0 else page_count - 1
-        if first_index > last_index:
-            raise RuntimeError("打印页码范围无效")
-
-        painter = QPainter()
-        if not painter.begin(printer):
-            raise RuntimeError("无法启动打印设备")
-        try:
-            for sequence, page_index in enumerate(range(first_index, last_index + 1)):
-                if sequence and not printer.newPage():
-                    raise RuntimeError("无法创建新的打印页")
-                page_rect = printer.pageLayout().paintRectPixels(printer.resolution())
-                page_size = document.pagePointSize(page_index)
-                target_size = QSize(
-                    max(1, round(page_size.width())),
-                    max(1, round(page_size.height())),
-                )
-                target_size.scale(
-                    page_rect.size(),
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                )
-                render_bounds = QSize(target_size)
-                if max(render_bounds.width(), render_bounds.height()) > 4096:
-                    render_bounds.scale(
-                        QSize(4096, 4096),
-                        Qt.AspectRatioMode.KeepAspectRatio,
-                    )
-                image = document.render(page_index, render_bounds)
-                if image.isNull():
-                    raise RuntimeError(f"第 {page_index + 1} 页渲染失败")
-                target_rect = QRect(
-                    page_rect.x() + (page_rect.width() - target_size.width()) // 2,
-                    page_rect.y() + (page_rect.height() - target_size.height()) // 2,
-                    target_size.width(),
-                    target_size.height(),
-                )
-                painter.drawImage(target_rect, image)
-        finally:
-            painter.end()
+        self.export_requested.emit()
 
     def _toggle_background_popup(self):
-        self.export_background_mode = "default"
-        self._apply_background_preview_styles()
-        self._refresh_export_preview()
         if self._background_popup is None:
             self._background_popup = ExportDefaultBackgroundPopup(self)
             self._background_popup.background_selected.connect(
@@ -2454,9 +2967,15 @@ class ExportSchedulePanel(QWidget):
         self._background_popup.show_near(self)
 
     def _handle_default_background_selected(self, index):
+        preset = get_export_background_preset(index)
+        if get_export_background_image_path(preset) is not None:
+            self._show_default_background_crop_popup(index)
+            return
         self.export_default_background_index = int(index)
+        self.export_default_background_crop = None
         self.export_background_mode = "default"
         self._apply_background_preview_styles()
+        self._persist_active_export_style()
         self._refresh_export_preview()
 
     def _toggle_pin(self):
@@ -2518,12 +3037,15 @@ class ExportSchedulePanel(QWidget):
         self._update_header_button_positions()
 
     def closeEvent(self, event):
+        self._persist_active_export_style()
         self._pdf_preview_controller.cancel()
         self._clear_pdf_document()
         if self._preview_popup is not None:
             self._preview_popup.close()
         if self._background_popup is not None:
             self._background_popup.close()
+        if self._background_crop_popup is not None:
+            self._background_crop_popup.close()
         if self._day_range_popup is not None:
             self._day_range_popup.close()
         if self._period_range_popup is not None:

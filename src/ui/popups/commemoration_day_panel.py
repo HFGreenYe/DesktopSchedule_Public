@@ -149,8 +149,8 @@ class CommemorationDayPanel(QWidget):
         self.header.setFixedHeight(self.HEADER_HEIGHT)
         self.header.setStyleSheet("background: transparent;")
         header_layout = QHBoxLayout(self.header)
-        header_layout.setContentsMargins(16, 7, 7, 5)
-        header_layout.setSpacing(2)
+        header_layout.setContentsMargins(16, 0, 0, 0)
+        header_layout.setSpacing(0)
 
         title_label = QLabel("纪念日期")
         title_label.setStyleSheet(
@@ -190,7 +190,11 @@ class CommemorationDayPanel(QWidget):
         )
         self.btn_add_toggle.setIcon(QIcon(add_pixmap))
         self.btn_add_toggle.toggled.connect(self._toggle_add_panel)
-        header_layout.addWidget(self.btn_add_toggle)
+        header_layout.addWidget(
+            self.btn_add_toggle,
+            0,
+            Qt.AlignmentFlag.AlignTop,
+        )
 
         self.btn_pin = QPushButton()
         self.btn_pin.setFixedSize(30, 30)
@@ -198,7 +202,11 @@ class CommemorationDayPanel(QWidget):
         self.btn_pin.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_pin.setStyleSheet(button_style)
         self.btn_pin.clicked.connect(self._toggle_pin)
-        header_layout.addWidget(self.btn_pin)
+        header_layout.addWidget(
+            self.btn_pin,
+            0,
+            Qt.AlignmentFlag.AlignTop,
+        )
 
         self.btn_close = QPushButton()
         self.btn_close.setFixedSize(30, 30)
@@ -220,7 +228,11 @@ class CommemorationDayPanel(QWidget):
             """
         )
         self.btn_close.clicked.connect(self.close)
-        header_layout.addWidget(self.btn_close)
+        header_layout.addWidget(
+            self.btn_close,
+            0,
+            Qt.AlignmentFlag.AlignTop,
+        )
         root_layout.addWidget(self.header)
 
         self.add_panel_holder = QWidget()

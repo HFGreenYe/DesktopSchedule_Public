@@ -5,9 +5,11 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
 from threading import RLock
 
+from PIL import Image
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
@@ -497,6 +499,9 @@ class SchedulePdfExporter:
         self.page_size = self._normalize_page_size(page_size)
         self.engine = _PdfLayoutEngine(style)
         self.frame_height = self.page_size[1] - 58 * mm
+        self._cropped_background_image = None
+        self._cropped_background_buffer = None
+        self._cropped_background_reader = None
 
     @classmethod
     def write(
@@ -620,33 +625,106 @@ class SchedulePdfExporter:
             height - _ScheduleCard.padding,
         )
 
+    def _get_cropped_background_reader(self, image_path, crop):
+        if not crop or len(crop) != 4:
+            return None
+        if self._cropped_background_reader is not None:
+            return self._cropped_background_reader
+        try:
+            x, y, width, height = (float(value) for value in crop)
+        except (TypeError, ValueError):
+            return None
+        if width <= 0 or height <= 0:
+            return None
+        with Image.open(image_path) as source:
+            source_format = (source.format or "").upper()
+            image_width, image_height = source.size
+            left = max(0, min(image_width - 1, round(x * image_width)))
+            top = max(0, min(image_height - 1, round(y * image_height)))
+            right = max(
+                left + 1,
+                min(image_width, round((x + width) * image_width)),
+            )
+            bottom = max(
+                top + 1,
+                min(image_height, round((y + height) * image_height)),
+            )
+            self._cropped_background_image = source.crop(
+                (left, top, right, bottom)
+            )
+        self._cropped_background_buffer = BytesIO()
+        if source_format in {"JPEG", "JPG"}:
+            if self._cropped_background_image.mode not in {"RGB", "L"}:
+                self._cropped_background_image = (
+                    self._cropped_background_image.convert("RGB")
+                )
+            self._cropped_background_image.save(
+                self._cropped_background_buffer,
+                format="JPEG",
+                quality=90,
+            )
+        else:
+            self._cropped_background_image.save(
+                self._cropped_background_buffer,
+                format="PNG",
+            )
+        self._cropped_background_buffer.seek(0)
+        self._cropped_background_reader = ImageReader(
+            self._cropped_background_buffer
+        )
+        self._cropped_background_image.close()
+        self._cropped_background_image = None
+        return self._cropped_background_reader
+
     def _draw_page(self, canvas, document):
         page_width, page_height = self.page_size
         canvas.saveState()
-        if self.style.background_mode == "default":
-            preset = get_export_background_preset(
-                self.style.default_background_index
-            )
-            image_path = get_export_background_image_path(preset)
-            if image_path is not None:
-                image = ImageReader(str(image_path))
-                image_width, image_height = image.getSize()
-                scale = max(
-                    page_width / image_width,
-                    page_height / image_height,
+        if self.style.background_mode in {"default", "custom"}:
+            preset = None
+            if self.style.background_mode == "default":
+                preset = get_export_background_preset(
+                    self.style.default_background_index
                 )
-                draw_width = image_width * scale
-                draw_height = image_height * scale
-                canvas.drawImage(
-                    image,
-                    (page_width - draw_width) / 2,
-                    (page_height - draw_height) / 2,
-                    width=draw_width,
-                    height=draw_height,
-                    preserveAspectRatio=False,
-                    mask="auto",
-                )
+                image_path = get_export_background_image_path(preset)
+                crop = self.style.default_background_crop
             else:
+                custom_path = Path(self.style.custom_background_path)
+                image_path = custom_path if custom_path.is_file() else None
+                crop = self.style.custom_background_crop
+            if image_path is not None:
+                cropped_reader = self._get_cropped_background_reader(
+                    image_path,
+                    crop,
+                )
+                if cropped_reader is not None:
+                    canvas.drawImage(
+                        cropped_reader,
+                        0,
+                        0,
+                        width=page_width,
+                        height=page_height,
+                        preserveAspectRatio=False,
+                        mask="auto",
+                    )
+                else:
+                    image = ImageReader(str(image_path))
+                    image_width, image_height = image.getSize()
+                    scale = max(
+                        page_width / image_width,
+                        page_height / image_height,
+                    )
+                    draw_width = image_width * scale
+                    draw_height = image_height * scale
+                    canvas.drawImage(
+                        image,
+                        (page_width - draw_width) / 2,
+                        (page_height - draw_height) / 2,
+                        width=draw_width,
+                        height=draw_height,
+                        preserveAspectRatio=False,
+                        mask="auto",
+                    )
+            elif preset is not None:
                 canvas.linearGradient(
                     0,
                     page_height,
@@ -677,6 +755,9 @@ class SchedulePdfExporter:
                     fill=1,
                     stroke=0,
                 )
+            else:
+                canvas.setFillColor(colors.white)
+                canvas.rect(0, 0, page_width, page_height, fill=1, stroke=0)
         elif self.style.background_mode == "gradient":
             canvas.linearGradient(
                 0,

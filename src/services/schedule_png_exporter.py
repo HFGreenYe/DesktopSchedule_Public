@@ -34,21 +34,45 @@ class SchedulePngExporter:
         page_count = max(1, int(page_count))
         if page_count == 1:
             return (target,)
+        output_directory = target.parent / target.stem
         digits = max(3, len(str(page_count)))
         return tuple(
-            target.with_name(
-                f"{target.stem}_{page_number:0{digits}d}.png"
-            )
+            output_directory
+            / f"{target.stem}_{page_number:0{digits}d}.png"
             for page_number in range(1, page_count + 1)
+        )
+
+    @staticmethod
+    def output_directory(target: Path, page_count: int) -> Path:
+        target = Path(target).with_suffix(".png")
+        if max(1, int(page_count)) == 1:
+            return target.parent
+        return target.parent / target.stem
+
+    @classmethod
+    def output_folder_name(cls, target: Path, page_count: int) -> str:
+        return cls.output_directory(target, page_count).name
+
+    @classmethod
+    def output_display_paths(
+        cls,
+        target: Path,
+        page_count: int,
+    ) -> tuple[str, ...]:
+        target = Path(target).with_suffix(".png")
+        return tuple(
+            str(path.relative_to(target.parent))
+            for path in cls.output_paths(target, page_count)
         )
 
     @classmethod
     def conflict_paths(cls, target: Path, page_count: int) -> tuple[Path, ...]:
         target = Path(target).with_suffix(".png")
-        candidates = list(cls.output_paths(target, page_count))
-        if page_count > 1:
-            candidates.append(target)
-        return tuple(path for path in candidates if path.exists())
+        return tuple(
+            path
+            for path in cls.output_paths(target, page_count)
+            if path.exists()
+        )
 
     @classmethod
     def write(
@@ -80,6 +104,11 @@ class SchedulePngExporter:
                 if page_count <= 0:
                     raise RuntimeError("PNG 排版未生成有效页面")
                 output_paths = cls.output_paths(target, page_count)
+                output_directory = cls.output_directory(target, page_count)
+                if output_directory.exists() and not output_directory.is_dir():
+                    raise FileExistsError(
+                        f"目标文件夹路径被同名文件占用：{output_directory.name}"
+                    )
                 conflicts = cls.conflict_paths(target, page_count)
                 if conflicts and not overwrite:
                     names = "、".join(path.name for path in conflicts[:5])
@@ -108,6 +137,7 @@ class SchedulePngExporter:
             if overwrite:
                 for conflict in conflicts:
                     conflict.unlink(missing_ok=True)
+            output_directory.mkdir(parents=True, exist_ok=True)
             for temporary_image, output_path in temporary_images:
                 temporary_image.replace(output_path)
             return output_paths

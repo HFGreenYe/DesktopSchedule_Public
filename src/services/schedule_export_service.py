@@ -33,6 +33,9 @@ class PdfExportStyle:
     gradient_start: str = "#0066CC"
     gradient_end: str = "#0099CC"
     default_background_index: int = 0
+    default_background_crop: tuple[float, float, float, float] | None = None
+    custom_background_path: str = ""
+    custom_background_crop: tuple[float, float, float, float] | None = None
     title: PdfTextStyle = field(
         default_factory=lambda: PdfTextStyle(bold=True)
     )

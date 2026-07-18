@@ -33,6 +33,16 @@ def _load_background_image(path):
     return QImage(path)
 
 
+def _theme_midpoint_color():
+    top = QColor(AppConfig.COLOR_GRADIENT_START)
+    bottom = QColor(AppConfig.COLOR_GRADIENT_END)
+    return QColor(
+        round((top.red() + bottom.red()) / 2),
+        round((top.green() + bottom.green()) / 2),
+        round((top.blue() + bottom.blue()) / 2),
+    ).name()
+
+
 def _cover_source_rect(image, target_rect):
     image_width = image.width()
     image_height = image.height()
@@ -100,7 +110,7 @@ def paint_default_background_pattern(painter, rect, index):
 class _CircularBackgroundCarousel(QWidget):
     selection_changed = pyqtSignal(int)
 
-    visible_count = 5
+    visible_count = 8
     card_width = 66
     card_height = 112
     card_spacing = 10
@@ -116,6 +126,7 @@ class _CircularBackgroundCarousel(QWidget):
         self.setFixedSize(width, self.card_height + 8)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setMouseTracking(True)
 
     @property
     def visible_indices(self):
@@ -176,10 +187,22 @@ class _CircularBackgroundCarousel(QWidget):
                     return
         super().mousePressEvent(event)
 
+    def mouseMoveEvent(self, event):
+        for background_index, rect in self.card_rects():
+            if rect.contains(event.position()):
+                self.setToolTip(
+                    get_export_background_preset(background_index).name
+                )
+                break
+        else:
+            self.setToolTip("")
+        super().mouseMoveEvent(event)
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         for background_index, rect in self.card_rects():
+            preset = get_export_background_preset(background_index)
             path = QPainterPath()
             path.addRoundedRect(rect, 6, 6)
             painter.save()
@@ -191,7 +214,12 @@ class _CircularBackgroundCarousel(QWidget):
                 rect.width(),
                 27,
             )
-            painter.fillRect(label_rect, QColor(255, 255, 255, 190))
+            label_color = (
+                QColor(preset.label_color)
+                if preset.label_color
+                else QColor(255, 255, 255, 190)
+            )
+            painter.fillRect(label_rect, label_color)
             painter.restore()
 
             selected = background_index == self._selected_index
@@ -219,11 +247,21 @@ class _CircularBackgroundCarousel(QWidget):
                 Qt.AlignmentFlag.AlignCenter,
                 f"{background_index + 1:02d}",
             )
-            painter.drawText(
-                QRectF(rect.left(), rect.bottom() - 27, rect.width(), 27),
-                Qt.AlignmentFlag.AlignCenter,
-                get_export_background_preset(background_index).name,
+            original_font = painter.font()
+            label_font = painter.font()
+            label_font.setPixelSize(10)
+            painter.setFont(label_font)
+            label_text = painter.fontMetrics().elidedText(
+                preset.name,
+                Qt.TextElideMode.ElideRight,
+                max(1, round(label_rect.width() - 6)),
             )
+            painter.drawText(
+                label_rect.adjusted(3, 0, -3, 0),
+                Qt.AlignmentFlag.AlignCenter,
+                label_text,
+            )
+            painter.setFont(original_font)
 
 
 class ExportDefaultBackgroundPopup(QWidget):
@@ -274,7 +312,7 @@ class ExportDefaultBackgroundPopup(QWidget):
         self.hint_label = QLabel("滚动鼠标滚轮横向浏览 · 点击方框选择")
         self.hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.hint_label.setStyleSheet(
-            "color: #40566B; font-family: 'Microsoft YaHei UI'; "
+            f"color: {_theme_midpoint_color()}; font-family: 'Microsoft YaHei UI'; "
             "font-size: 10px; background: transparent; border: none;"
         )
         body.addWidget(self.hint_label)
