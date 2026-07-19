@@ -1691,7 +1691,7 @@ class MonthDayPanel(QWidget):
     def set_panel_data(self, qdate, schedules):
         self.panel_date = qdate
         self._schedules = list(schedules or [])
-        self.btn_pin.setVisible(self.schedule_display_mode == "timetable")
+        self.btn_pin.setVisible(True)
         week_names = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
         self.date_label.setText(
             f"{qdate.toString('yyyy-MM-dd')} {week_names[qdate.dayOfWeek() - 1]}"
