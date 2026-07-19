@@ -39,15 +39,20 @@ from ...utils.window_preferences import (
     set_window_pin_state,
 )
 from ..utils.icon_loader import load_colored_svg_pixmap
+from ..components import get_colored_icon
+from ...data.database import db_manager
 
 
 class _MonthScheduleItemFrame(QFrame):
     double_clicked = pyqtSignal(object)
     status_change_requested = pyqtSignal(object, int)
+    selection_toggled = pyqtSignal(int)
 
     def __init__(self, schedule, parent=None):
         super().__init__(parent)
         self.schedule = schedule
+        self._multi_select_mode = False
+        self._selected_for_batch = False
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -56,7 +61,59 @@ class _MonthScheduleItemFrame(QFrame):
             return
         super().mouseDoubleClickEvent(event)
 
+    def mousePressEvent(self, event):
+        if (
+            self._multi_select_mode
+            and event.button() == Qt.MouseButton.LeftButton
+        ):
+            self.selection_toggled.emit(self.schedule.id)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def set_multi_select_state(self, active, selected=False):
+        self._multi_select_mode = bool(active)
+        self._selected_for_batch = bool(selected) if active else False
+        self._apply_multi_select_style()
+
+    def _apply_multi_select_style(self):
+        if not self._multi_select_mode:
+            self.setStyleSheet(
+                """
+                QFrame#monthDayPanelItem {
+                    background: rgba(255, 255, 255, 0.15);
+                    border: 1px solid rgba(255, 255, 255, 0.22);
+                    border-radius: 7px;
+                }
+                """
+            )
+            return
+        if self._selected_for_batch:
+            border_color = StyleManager.color_to_rgba(
+                AppConfig.COLOR_GRADIENT_START,
+                0.85,
+            )
+            self.setStyleSheet(
+                "QFrame#monthDayPanelItem {"
+                f"background: {StyleManager.color_to_rgba(AppConfig.COLOR_GRADIENT_START, 0.30)};"
+                f"border: 2px solid {border_color};"
+                "border-radius: 7px;"
+                "}"
+            )
+        else:
+            self.setStyleSheet(
+                """
+                QFrame#monthDayPanelItem {
+                    background: rgba(255, 255, 255, 0.15);
+                    border: 1px solid rgba(255, 255, 255, 0.22);
+                    border-radius: 7px;
+                }
+                """
+            )
+
     def contextMenuEvent(self, event):
+        if self._multi_select_mode:
+            return
         menu = self._build_context_menu()
         menu.exec(event.globalPos())
         event.accept()
@@ -1402,7 +1459,7 @@ class MonthDayPanel(QWidget):
     schedule_double_clicked = pyqtSignal(object, object)
     schedule_status_requested = pyqtSignal(object, int)
     schedule_time_changed = pyqtSignal(object, object, object)
-    blank_context_requested = pyqtSignal(object, object)
+    blank_context_requested = pyqtSignal(object, object, object)
     timetable_empty_context_requested = pyqtSignal(object, object)
 
     CORNER_RADIUS = 12
@@ -1427,6 +1484,8 @@ class MonthDayPanel(QWidget):
         self._closed_emitted = False
         self._drag_offset = None
         self.child_detail_popups = []
+        self._multi_select_active = False
+        self._selected_schedule_ids = set()
 
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
@@ -1511,6 +1570,10 @@ class MonthDayPanel(QWidget):
         )
         self.header_layout.addLayout(self.header_actions_layout)
         self._layout.addLayout(self.header_layout)
+
+        self._create_multi_select_bar()
+        self._layout.addWidget(self.multi_select_bar)
+        self.multi_select_bar.hide()
 
         self.empty_label = QLabel("当日暂无日程")
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1616,6 +1679,221 @@ class MonthDayPanel(QWidget):
         self._update_pin_button()
         self.set_panel_data(qdate, schedules)
 
+    def _create_multi_select_bar(self):
+        """内嵌多选操作栏：按键排列和设计与 ScheduleMultiSelectPopup 一致。"""
+        self.multi_select_bar = QWidget(self)
+        self.multi_select_bar.setFixedHeight(44)
+        bar_bg = StyleManager.color_to_rgba(
+            AppConfig.COLOR_GRADIENT_START,
+            0.70,
+        )
+        self.multi_select_bar.setStyleSheet(
+            f"QWidget {{ background: {bar_bg}; border-radius: 7px; }}"
+        )
+        bar_layout = QHBoxLayout(self.multi_select_bar)
+        bar_layout.setContentsMargins(10, 0, 10, 0)
+        bar_layout.setSpacing(0)
+
+        ACTIONS = (
+            ("select_all", "Multiplechoice.svg", "全选 / 全不选"),
+            ("complete", "finished.svg", "完成"),
+            ("undo", "withdraw.svg", "撤销"),
+            ("delete", "delete.svg", "删除"),
+            ("exit", "exit.svg", "退出"),
+        )
+        self._ms_action_buttons = {}
+        for action_index, (action_id, icon_name, tooltip) in enumerate(ACTIONS):
+            button = QPushButton()
+            button.setFixedSize(36, 36)
+            button.setIconSize(QSize(18, 18))
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setToolTip(tooltip)
+            button.clicked.connect(
+                lambda _checked=False, value=action_id: (
+                    self._handle_multi_select_action(value)
+                )
+            )
+            self._ms_action_buttons[action_id] = button
+            bar_layout.addWidget(button)
+            if action_index < len(ACTIONS) - 1:
+                bar_layout.addStretch(1)
+            self._update_ms_action_button(button, icon_name, enabled=False)
+
+    @staticmethod
+    def _ms_button_bg_color():
+        return StyleManager.mix_colors(
+            AppConfig.COLOR_GRADIENT_START,
+            AppConfig.COLOR_GRADIENT_END,
+            0.5,
+        )
+
+    def _update_ms_action_button(self, button, icon_name, *, enabled):
+        icon_color = "#FFFFFF" if enabled else "#8A8A8A"
+        pixmap = get_colored_icon(icon_name, icon_color, 18)
+        button.setIcon(
+            QIcon(pixmap)
+            if not pixmap.isNull()
+            else QIcon(f"assets/icons/{icon_name}")
+        )
+        button.setEnabled(enabled)
+        button.setStyleSheet(
+            "QPushButton {"
+            f"background: {self._ms_button_bg_color()};"
+            "border: none; border-radius: 5px; padding: 0;"
+            "}"
+            "QPushButton:hover { background: rgba(255, 255, 255, 0.24); }"
+            "QPushButton:pressed { background: rgba(0, 0, 0, 0.12); }"
+            "QPushButton:disabled {"
+            f"background: {self._ms_button_bg_color()};"
+            "}"
+        )
+
+    def _ms_schedule_items(self):
+        items = []
+        for index in range(self.body_layout.count()):
+            item = self.body_layout.itemAt(index)
+            widget = item.widget() if item is not None else None
+            if isinstance(widget, _MonthScheduleItemFrame):
+                items.append(widget)
+        return items
+
+    def enter_multi_select_mode(self):
+        if self.schedule_display_mode != "card" or not self._schedules:
+            return
+        self._multi_select_active = True
+        self._selected_schedule_ids.clear()
+        self.multi_select_bar.show()
+        self._sync_multi_select_state()
+
+    def exit_multi_select_mode(self):
+        if not self._multi_select_active:
+            return
+        self._multi_select_active = False
+        self._selected_schedule_ids.clear()
+        self.multi_select_bar.hide()
+        for item in self._ms_schedule_items():
+            item.set_multi_select_state(False)
+
+    def _toggle_item_selection(self, schedule_id):
+        if not self._multi_select_active:
+            return
+        if schedule_id in self._selected_schedule_ids:
+            self._selected_schedule_ids.remove(schedule_id)
+        else:
+            self._selected_schedule_ids.add(schedule_id)
+        self._sync_multi_select_state()
+
+    def _sync_multi_select_state(self):
+        items = self._ms_schedule_items()
+        visible_ids = {item.schedule.id for item in items}
+        self._selected_schedule_ids.intersection_update(visible_ids)
+
+        for item in items:
+            item.set_multi_select_state(
+                self._multi_select_active,
+                item.schedule.id in self._selected_schedule_ids,
+            )
+
+        if not self._multi_select_active:
+            return
+
+        selected_items = [
+            item for item in items
+            if item.schedule.id in self._selected_schedule_ids
+        ]
+        has_selection = bool(selected_items)
+        all_selected = bool(items) and len(selected_items) == len(items)
+        can_complete = has_selection and any(
+            getattr(item.schedule, "status", 0) != 1
+            for item in selected_items
+        )
+        can_undo = has_selection and any(
+            getattr(item.schedule, "status", 0) == 1
+            for item in selected_items
+        )
+
+        self._update_ms_action_button(
+            self._ms_action_buttons["select_all"],
+            "all_no.svg" if all_selected else "Multiplechoice.svg",
+            enabled=bool(items),
+        )
+        self._update_ms_action_button(
+            self._ms_action_buttons["complete"],
+            "finished.svg",
+            enabled=can_complete,
+        )
+        self._update_ms_action_button(
+            self._ms_action_buttons["undo"],
+            "withdraw.svg",
+            enabled=can_undo,
+        )
+        self._update_ms_action_button(
+            self._ms_action_buttons["delete"],
+            "delete.svg",
+            enabled=has_selection,
+        )
+        self._update_ms_action_button(
+            self._ms_action_buttons["exit"],
+            "exit.svg",
+            enabled=True,
+        )
+
+    def _handle_multi_select_action(self, action_id):
+        if action_id == "exit":
+            self.exit_multi_select_mode()
+            return
+
+        items = self._ms_schedule_items()
+        visible_ids = {item.schedule.id for item in items}
+        selected_ids = sorted(self._selected_schedule_ids & visible_ids)
+
+        if action_id == "select_all":
+            if items and len(selected_ids) == len(items):
+                self._selected_schedule_ids.clear()
+            else:
+                self._selected_schedule_ids = set(visible_ids)
+            self._sync_multi_select_state()
+            return
+
+        if not selected_ids:
+            return
+
+        if action_id == "complete":
+            if not any(
+                getattr(item.schedule, "status", 0) != 1
+                for item in items
+                if item.schedule.id in self._selected_schedule_ids
+            ):
+                return
+            success = db_manager.update_schedule_statuses(selected_ids, 1)
+        elif action_id == "undo":
+            if not any(
+                getattr(item.schedule, "status", 0) == 1
+                for item in items
+                if item.schedule.id in self._selected_schedule_ids
+            ):
+                return
+            success = db_manager.update_schedule_statuses(selected_ids, 0)
+        elif action_id == "delete":
+            success = db_manager.delete_schedules(selected_ids)
+            if success:
+                self._selected_schedule_ids.clear()
+                for popup in list(self.child_detail_popups):
+                    try:
+                        if (
+                            popup is not None
+                            and getattr(getattr(popup, "data", None), "id", None)
+                            in selected_ids
+                        ):
+                            popup.close()
+                    except RuntimeError:
+                        pass
+        else:
+            return
+
+        if success:
+            self.set_panel_data(self.panel_date, self._schedules)
+
     def _on_blank_context_menu(self, source, position):
         if self.schedule_display_mode != "card" or not self._schedules:
             return
@@ -1628,7 +1906,7 @@ class MonthDayPanel(QWidget):
             if isinstance(current, _MonthScheduleItemFrame):
                 return
             current = current.parentWidget()
-        self.blank_context_requested.emit(self.panel_date, global_position)
+        self.blank_context_requested.emit(self, self.panel_date, global_position)
 
     def _toggle_pin(self):
         self.set_pinned(not self.is_pinned)
@@ -1752,11 +2030,18 @@ class MonthDayPanel(QWidget):
 
         self.adjustSize()
 
+        if self._multi_select_active and not self._schedules:
+            self.exit_multi_select_mode()
+        elif self._multi_select_active:
+            self._sync_multi_select_state()
+
     def set_schedule_display_mode(self, mode_id):
         if mode_id not in {"card", "timetable"}:
             return
         if self.schedule_display_mode == mode_id:
             return
+        if mode_id != "card" and self._multi_select_active:
+            self.exit_multi_select_mode()
         self.schedule_display_mode = mode_id
         self.set_panel_data(self.panel_date, self._schedules)
 
@@ -1817,6 +2102,7 @@ class MonthDayPanel(QWidget):
 
         item_frame.double_clicked.connect(self._emit_schedule_double_clicked)
         item_frame.status_change_requested.connect(self.schedule_status_requested.emit)
+        item_frame.selection_toggled.connect(self._toggle_item_selection)
         return item_frame
 
     def _emit_schedule_double_clicked(self, schedule):

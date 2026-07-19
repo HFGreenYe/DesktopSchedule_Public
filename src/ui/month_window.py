@@ -2207,13 +2207,24 @@ class MonthWindow(FramelessMainWindow):
         menu.mode_requested.connect(self._handle_context_mode)
         menu.exec(global_pos)
 
-    def _show_day_panel_blank_context_menu(self, _qdate, global_pos):
+    def _show_day_panel_blank_context_menu(self, panel, _qdate, global_pos):
         menu = ActionContextMenu(
             self,
             show_multiple_choice=True,
             multiple_choice_only=True,
+            multiple_choice_active=panel._multi_select_active,
+        )
+        menu.action_requested.connect(
+            lambda action_name: self._handle_day_panel_context_action(panel, action_name)
         )
         menu.exec(global_pos)
+
+    def _handle_day_panel_context_action(self, panel, action_name):
+        if action_name == "multiple_choice":
+            if panel._multi_select_active:
+                panel.exit_multi_select_mode()
+            else:
+                panel.enter_multi_select_mode()
 
     def _show_day_panel_timetable_context_menu(self, panel, global_pos):
         timetable_frame = getattr(panel, "timetable_frame", None)
