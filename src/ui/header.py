@@ -210,6 +210,7 @@ class HeaderBar(QWidget):
         self.parent_window = parent
         self.drag_pos = None
         self.current_weather_data = {}
+        self._schedule_display_mode = "card"
         self.setFixedHeight(160)
 
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -286,6 +287,8 @@ class HeaderBar(QWidget):
             btn._tooltip_filter.text = tooltip
 
     def set_schedule_display_mode(self, mode_id):
+        if mode_id in {"card", "timetable"}:
+            self._schedule_display_mode = mode_id
         sort_button = getattr(self, "toolbar_buttons", {}).get("sort")
         if sort_button is None:
             return
@@ -563,6 +566,15 @@ class HeaderBar(QWidget):
             self,
             show_day_collapse=show_day_collapse,
             day_collapsed=day_collapsed,
+            show_multiple_choice=(
+                show_day_collapse
+                and self._schedule_display_mode == "card"
+            ),
+            multiple_choice_active=bool(
+                show_day_collapse
+                and hasattr(owner, "page_dashboard")
+                and owner.page_dashboard.is_multi_select_active()
+            ),
         )
         menu.action_requested.connect(self.action_requested.emit)
         menu.view_requested.connect(self.view_requested.emit)

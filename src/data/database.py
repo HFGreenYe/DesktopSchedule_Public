@@ -198,6 +198,15 @@ class DatabaseManager:
     def update_schedule_status(self, schedule_id, new_status):
         return self.schedule_repository.update_schedule_status(schedule_id, new_status)
 
+    def update_schedule_statuses(self, schedule_ids, new_status):
+        return self.schedule_repository.update_schedule_statuses(
+            schedule_ids,
+            new_status,
+        )
+
+    def delete_schedules(self, schedule_ids):
+        return self.schedule_repository.delete_schedules(schedule_ids)
+
     def update_schedule_fields(self, schedule_id, **kwargs):
         return self.schedule_repository.update_schedule_fields(schedule_id, **kwargs)
 

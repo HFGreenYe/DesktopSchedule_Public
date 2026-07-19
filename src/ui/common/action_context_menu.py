@@ -149,6 +149,7 @@ class ActionContextMenu(QMenu):
         day_collapsed=False,
         show_multiple_choice=False,
         multiple_choice_only=False,
+        multiple_choice_active=False,
     ):
         super().__init__(parent)
         self.show_drag_options = show_drag_options
@@ -159,6 +160,7 @@ class ActionContextMenu(QMenu):
             show_multiple_choice or multiple_choice_only
         )
         self.multiple_choice_only = bool(multiple_choice_only)
+        self.multiple_choice_active = bool(multiple_choice_active)
         self.actions_by_id = {}
         self.widget_actions_by_id = {}
         self.rows_by_id = {}
@@ -300,14 +302,18 @@ class ActionContextMenu(QMenu):
         ).triggered.connect(lambda: self.action_requested.emit("add"))
 
     def _create_multiple_choice_action(self):
-        return self._create_main_action(
+        action = self._create_main_action(
             action_id="multiple_choice",
-            text="多选",
+            text="退出" if self.multiple_choice_active else "多选",
             icon_names=("Multiplechoice.svg",),
             enabled=True,
             on_enter=self._hide_secondary_menus,
             on_click=self.close,
         )
+        action.triggered.connect(
+            lambda: self.action_requested.emit("multiple_choice")
+        )
+        return action
 
     def _hide_secondary_menus(self):
         self._hide_mode_menu()

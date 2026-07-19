@@ -28,6 +28,11 @@ from ..utils.schedule_sort_preferences import (
 )
 from .schedule_detail_pop import ScheduleDetailPop
 from .common.action_context_menu import ActionContextMenu
+from .common.card_step_scroll_area import CardStepScrollArea
+from .popups.schedule_multi_select_popup import ScheduleMultiSelectPopup
+
+DAY_CARD_HEIGHT = 60
+
 
 class DraggableWidget(QWidget):
     def __init__(self, parent=None):
@@ -60,7 +65,7 @@ class ViewSelectorCard(QFrame):
         super().__init__(parent)
         self.current_view = "day"
         self.buttons_by_id = {}
-        self.setFixedHeight(60) # 改成 60，和日程卡片的高度完全一致
+        self.setFixedHeight(DAY_CARD_HEIGHT)
         
         self.setStyleSheet("""
             ViewSelectorCard {
@@ -145,7 +150,8 @@ class ViewSelectorCard(QFrame):
         self.current_view = view_id
         for btn_view_id, btn in self.buttons_by_id.items():
             btn.setStyleSheet(self._button_style(btn_view_id == view_id))
-        
+
+
 class AdaptiveLabel(QLabel):
     def __init__(self, text="", parent=None, max_size=16, min_size=11):
         super().__init__(text, parent)
@@ -203,15 +209,22 @@ class AdaptiveLabel(QLabel):
 
 class ScheduleCard(QFrame):
     """单个日程卡片"""
+    CARD_HEIGHT = DAY_CARD_HEIGHT
+
     req_delete = pyqtSignal(int)
     req_refresh = pyqtSignal()
     req_status = pyqtSignal(int, int)
     req_show_detail = pyqtSignal(object) # 请求显示详情弹窗的信号
+    selection_toggled = pyqtSignal(int)
+    drag_started = pyqtSignal(object)
+    drag_finished = pyqtSignal(object)
 
     def __init__(self, schedule_data, parent=None):
         super().__init__(parent)
         self.data = schedule_data
-        self.setFixedHeight(60) 
+        self._multi_select_mode = False
+        self._selected_for_batch = False
+        self.setFixedHeight(self.CARD_HEIGHT)
         self.setCursor(Qt.CursorShape.PointingHandCursor) # 增加鼠标手型
         
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -265,32 +278,87 @@ class ScheduleCard(QFrame):
             for i in range(self.layout().count()):
                 if self.layout().itemAt(i).widget():
                     self.layout().itemAt(i).widget().hide()
-            
-            # 开始执行拖拽
-            drag.exec(Qt.DropAction.MoveAction)
-            
-            # 拖拽结束，恢复样式，并把里面的东西全部显示回来
-            self.setStyleSheet(original_style)
-            for i in range(self.layout().count()):
-                if self.layout().itemAt(i).widget():
-                    self.layout().itemAt(i).widget().show()
-                
-            if hasattr(container, 'current_drag_widget'):
-                container.current_drag_widget = None
-            if hasattr(self, '_click_pos'): 
-                del self._click_pos
+
+            self.drag_started.emit(self)
+            try:
+                drag.exec(Qt.DropAction.MoveAction)
+            finally:
+                self.setStyleSheet(original_style)
+                for i in range(self.layout().count()):
+                    if self.layout().itemAt(i).widget():
+                        self.layout().itemAt(i).widget().show()
+
+                if hasattr(container, 'current_drag_widget'):
+                    container.current_drag_widget = None
+                if hasattr(self, '_click_pos'):
+                    del self._click_pos
+                self.drag_finished.emit(self)
             event.accept() 
         else:
             super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton and hasattr(self, '_click_pos'):
-            if (event.pos() - self._click_pos).manhattanLength() < 5:
+            if (
+                not self._multi_select_mode
+                and (event.pos() - self._click_pos).manhattanLength() < 5
+            ):
                 self.req_show_detail.emit(self.data)
             del self._click_pos 
             event.accept() 
         else:
             super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        if (
+            self._multi_select_mode
+            and event.button() == Qt.MouseButton.LeftButton
+        ):
+            if hasattr(self, '_click_pos'):
+                del self._click_pos
+            self.req_show_detail.emit(self.data)
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def eventFilter(self, watched, event):
+        if (
+            watched is self.priority_dot
+            and self._multi_select_mode
+            and event.type() == QEvent.Type.MouseButtonRelease
+            and event.button() == Qt.MouseButton.LeftButton
+        ):
+            self.selection_toggled.emit(self.data.id)
+            return True
+        return super().eventFilter(watched, event)
+
+    def set_multi_select_state(self, active, selected=False):
+        self._multi_select_mode = bool(active)
+        self._selected_for_batch = bool(selected) if active else False
+        self.priority_dot.setCursor(
+            Qt.CursorShape.PointingHandCursor
+            if self._multi_select_mode
+            else Qt.CursorShape.ArrowCursor
+        )
+        self._apply_priority_dot_style()
+
+    def _apply_priority_dot_style(self):
+        if self._multi_select_mode:
+            dot_color = (
+                StyleManager.color_to_rgba(
+                    AppConfig.COLOR_GRADIENT_START,
+                    0.65,
+                )
+                if self._selected_for_batch
+                else "#FFFFFF"
+            )
+        else:
+            dot_color = self._priority_color
+        self.priority_dot.setStyleSheet(f"""
+            background-color: {dot_color};
+            border-radius: 5px;
+            border: 1px solid rgba(255, 255, 255, 0.8);
+        """)
 
     def _apply_state_style(self):
         bg_color = "background-color: rgba(255, 255, 255, 0.10);"
@@ -390,12 +458,13 @@ class ScheduleCard(QFrame):
 
         self.priority_dot = QLabel()
         self.priority_dot.setFixedSize(10, 10)
-        p_color = {2: "#ff4d4f", 1: "#faad14", 0: "#52c41a"}.get(self.data.priority, "#52c41a")
-        self.priority_dot.setStyleSheet(f"""
-            background-color: {p_color};
-            border-radius: 5px;
-            border: 1px solid rgba(255,255,255,0.8);
-        """)
+        self._priority_color = {
+            2: "#ff4d4f",
+            1: "#faad14",
+            0: "#52c41a",
+        }.get(self.data.priority, "#52c41a")
+        self.priority_dot.installEventFilter(self)
+        self._apply_priority_dot_style()
         left_layout.addWidget(self.priority_dot)
 
         self.lbl_title = AdaptiveLabel(self.data.title, max_size=16, min_size=11)
@@ -1921,6 +1990,11 @@ class DashboardView(QWidget):
         self._card_schedule_source = []
         self._timetable_schedule_source = []
         self._schedule_category_map = {}
+        self._multi_select_active = False
+        self._selected_schedule_ids = set()
+        self._multi_select_popup = None
+        self._active_drag_card = None
+        self._refresh_pending_during_drag = False
         
         self._setup_ui()
         
@@ -1957,7 +2031,10 @@ class DashboardView(QWidget):
         """)
         layout.addWidget(self.lbl_empty)
 
-        self.scroll_area = QScrollArea()
+        self.scroll_area = CardStepScrollArea(
+            ScheduleCard.CARD_HEIGHT,
+            8,
+        )
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -2020,6 +2097,8 @@ class DashboardView(QWidget):
     def set_schedule_display_mode(self, mode_id):
         if mode_id not in {"card", "timetable"}:
             return
+        if mode_id != "card" and self._multi_select_active:
+            self.exit_multi_select_mode()
         entering_timetable = (
             mode_id == "timetable"
             and self.schedule_display_mode != "timetable"
@@ -2148,18 +2227,189 @@ class DashboardView(QWidget):
         )
 
     def _clear_schedule_cards(self):
-        while self.list_layout.count() > 1:
-            item = self.list_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        for index in reversed(range(self.list_layout.count())):
+            item = self.list_layout.itemAt(index)
+            widget = item.widget() if item is not None else None
+            if isinstance(widget, ScheduleCard):
+                self.list_layout.removeWidget(widget)
+                widget.deleteLater()
+
+    def _schedule_cards(self):
+        cards = []
+        for index in range(self.list_layout.count()):
+            item = self.list_layout.itemAt(index)
+            widget = item.widget() if item is not None else None
+            if isinstance(widget, ScheduleCard):
+                cards.append(widget)
+        return cards
+
+    def _open_multi_select_popup(self):
+        popup = self._multi_select_popup
+        if popup is not None:
+            try:
+                popup.show_near(self.window())
+                return
+            except RuntimeError:
+                self._multi_select_popup = None
+
+        popup = ScheduleMultiSelectPopup("day", self.window())
+        popup.action_requested.connect(self._handle_multi_select_action)
+        popup.closed.connect(self._handle_multi_select_popup_closed)
+        self._multi_select_popup = popup
+        popup.show_near(self.window())
+
+    def _handle_multi_select_popup_closed(self, popup):
+        if self._multi_select_popup is popup:
+            self._multi_select_popup = None
+        if self._multi_select_active:
+            self.exit_multi_select_mode(close_popup=False)
+
+    def is_multi_select_active(self):
+        return self._multi_select_active
+
+    def toggle_multi_select_mode(self):
+        if self._multi_select_active:
+            self.exit_multi_select_mode()
+        else:
+            self.enter_multi_select_mode()
+
+    def enter_multi_select_mode(self):
+        cards = self._schedule_cards()
+        if self.schedule_display_mode != "card" or not cards:
+            return
+        self._multi_select_active = True
+        self._selected_schedule_ids.clear()
+        self._open_multi_select_popup()
+        self._sync_multi_select_state()
+        self.scroll_area.set_card_count(len(cards))
+
+    def exit_multi_select_mode(self, close_popup=True):
+        if not self._multi_select_active and self._multi_select_popup is None:
+            return
+        self._multi_select_active = False
+        self._selected_schedule_ids.clear()
+        popup = self._multi_select_popup
+        self._multi_select_popup = None
+        if close_popup and popup is not None:
+            try:
+                popup.close()
+            except RuntimeError:
+                pass
+        cards = self._schedule_cards()
+        for card in cards:
+            card.set_multi_select_state(False)
+        self.scroll_area.set_card_count(len(cards))
+
+    def _toggle_card_selection(self, schedule_id):
+        if not self._multi_select_active:
+            return
+        if schedule_id in self._selected_schedule_ids:
+            self._selected_schedule_ids.remove(schedule_id)
+        else:
+            self._selected_schedule_ids.add(schedule_id)
+        self._sync_multi_select_state()
+
+    def _sync_multi_select_state(self):
+        cards = self._schedule_cards()
+        visible_ids = {card.data.id for card in cards}
+        self._selected_schedule_ids.intersection_update(visible_ids)
+
+        for card in cards:
+            card.set_multi_select_state(
+                self._multi_select_active,
+                card.data.id in self._selected_schedule_ids,
+            )
+
+        if not self._multi_select_active or self._multi_select_popup is None:
+            return
+
+        selected_cards = [
+            card
+            for card in cards
+            if card.data.id in self._selected_schedule_ids
+        ]
+        has_selection = bool(selected_cards)
+        all_selected = bool(cards) and len(selected_cards) == len(cards)
+        can_complete = has_selection and any(
+            getattr(card.data, "status", 0) != 1
+            for card in selected_cards
+        )
+        can_undo = has_selection and any(
+            getattr(card.data, "status", 0) == 1
+            for card in selected_cards
+        )
+        self._multi_select_popup.set_action_state(
+            has_scope_cards=bool(cards),
+            all_scope_selected=all_selected,
+            can_complete=can_complete,
+            can_undo=can_undo,
+            can_delete=has_selection,
+        )
+
+    def _handle_multi_select_action(self, action_id):
+        if action_id == "exit":
+            self.exit_multi_select_mode()
+            return
+
+        cards = self._schedule_cards()
+        visible_ids = {card.data.id for card in cards}
+        selected_ids = sorted(self._selected_schedule_ids & visible_ids)
+
+        if action_id == "select_all":
+            if cards and len(selected_ids) == len(cards):
+                self._selected_schedule_ids.clear()
+            else:
+                self._selected_schedule_ids = set(visible_ids)
+            self._sync_multi_select_state()
+            return
+
+        if not selected_ids:
+            return
+
+        if action_id == "complete":
+            if not any(
+                getattr(card.data, "status", 0) != 1
+                for card in cards
+                if card.data.id in self._selected_schedule_ids
+            ):
+                return
+            success = db_manager.update_schedule_statuses(selected_ids, 1)
+        elif action_id == "undo":
+            if not any(
+                getattr(card.data, "status", 0) == 1
+                for card in cards
+                if card.data.id in self._selected_schedule_ids
+            ):
+                return
+            success = db_manager.update_schedule_statuses(selected_ids, 0)
+        elif action_id == "delete":
+            success = db_manager.delete_schedules(selected_ids)
+            if success:
+                self._selected_schedule_ids.clear()
+                for popup in tuple(self.open_popups):
+                    if getattr(getattr(popup, "data", None), "id", None) in selected_ids:
+                        popup.close()
+        else:
+            return
+
+        if success:
+            self.refresh_data()
+            self.req_refresh_all.emit()
 
     def _render_card_query_results(self):
+        if self._active_drag_card is not None:
+            self._refresh_pending_during_drag = True
+            return
+
         self._clear_schedule_cards()
         dashboard_schedules = self._apply_schedule_query(self._card_schedule_source)
         dashboard_schedules = ScheduleSortService.sort_for_day_view(
             dashboard_schedules,
             self._sort_options,
         )
+
+        if self._multi_select_active and not dashboard_schedules:
+            self.exit_multi_select_mode()
 
         for index, item in enumerate(dashboard_schedules):
             card = ScheduleCard(item)
@@ -2168,7 +2418,18 @@ class DashboardView(QWidget):
             card.req_refresh.connect(self.req_refresh_all.emit)
             card.req_status.connect(self._handle_status_change)
             card.req_show_detail.connect(self._show_detail_popup)
+            card.selection_toggled.connect(self._toggle_card_selection)
+            card.drag_started.connect(self._begin_card_drag)
+            card.drag_finished.connect(self._finish_card_drag)
+            card.set_multi_select_state(
+                self._multi_select_active,
+                item.id in self._selected_schedule_ids,
+            )
             self.list_layout.insertWidget(index, card)
+
+        if self._multi_select_active:
+            self._sync_multi_select_state()
+        self.scroll_area.set_card_count(len(dashboard_schedules))
 
         self.lbl_empty.setText(
             "没有符合条件的日程"
@@ -2188,8 +2449,29 @@ class DashboardView(QWidget):
         )
 
     def _render_query_results(self):
+        if self._active_drag_card is not None:
+            self._refresh_pending_during_drag = True
+            return
         self._render_card_query_results()
         self._render_timetable_query_results()
+
+    def _begin_card_drag(self, card):
+        self._active_drag_card = card
+
+    def _finish_card_drag(self, card):
+        if self._active_drag_card is card:
+            self._active_drag_card = None
+        if self._refresh_pending_during_drag:
+            QTimer.singleShot(120, self._flush_deferred_drag_refresh)
+
+    def _flush_deferred_drag_refresh(self):
+        if (
+            self._active_drag_card is not None
+            or not self._refresh_pending_during_drag
+        ):
+            return
+        self._refresh_pending_during_drag = False
+        self.refresh_data()
 
     def reset_timetable_to_current_time(self):
         self.timetable_placeholder.reset_to_current_time()
@@ -2362,6 +2644,7 @@ class DashboardView(QWidget):
             show_day_collapse=True,
             day_collapsed=day_collapsed,
             show_multiple_choice=self.schedule_display_mode == "card",
+            multiple_choice_active=self._multi_select_active,
         )
         menu.action_requested.connect(self.context_action_requested.emit)
         menu.view_requested.connect(self.context_view_requested.emit)
@@ -2374,6 +2657,10 @@ class DashboardView(QWidget):
         set_timetable_drag_snap_minutes(minutes)
 
     def refresh_data(self):
+        if self._active_drag_card is not None:
+            self._refresh_pending_during_drag = True
+            return
+
         schedules = db_manager.get_schedules_for_date(self.current_date)
         timetable_schedules = list(schedules)
         seen_timetable_ids = {
@@ -2487,7 +2774,14 @@ class DashboardView(QWidget):
         if sender_card:
             self.list_layout.removeWidget(sender_card)
             sender_card.deleteLater()
-            self._sync_schedule_area_visibility(self.list_layout.count() > 1)
+            self._selected_schedule_ids.discard(schedule_id)
+            cards = self._schedule_cards()
+            if self._multi_select_active and not cards:
+                self.exit_multi_select_mode()
+            elif self._multi_select_active:
+                self._sync_multi_select_state()
+            self.scroll_area.set_card_count(len(cards))
+            self._sync_schedule_area_visibility(bool(cards))
                 
             # 删除日程后，发射全局刷新信号
             self.req_refresh_all.emit() 
@@ -2542,5 +2836,6 @@ class DashboardView(QWidget):
 
         # 更新数据库并刷新
         db_manager.update_schedule_fields(dragged_item.id, sort_order=new_order)
+        self._refresh_pending_during_drag = False
         self.refresh_data()
         self.req_refresh_all.emit()

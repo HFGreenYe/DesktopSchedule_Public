@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QFrame, QToolButton, QLineEdit, QSizePolicy, QStackedWidget, QScrollArea, QApplication)
-from PyQt6.QtCore import Qt, pyqtSignal, QDate, QTime, QTimer, QPointF, QRectF, QSize, QSettings
+from PyQt6.QtCore import Qt, pyqtSignal, QDate, QTime, QTimer, QPointF, QRectF, QSize, QSettings, QEvent
 from PyQt6.QtGui import QPainter, QPainterPath, QColor, QBrush, QLinearGradient, QIcon, QPixmap, QCursor, QPen, QFont, QFontMetrics, QImage
 from PyQt6.QtSvg import QSvgRenderer
 from qframelesswindow import FramelessMainWindow
@@ -43,7 +43,9 @@ from .dashboard import AdaptiveLabel
 from .components import CountdownToolTipFilter, get_colored_icon, get_padded_colored_icon
 from .common.week_day_block import DayBlock
 from .common.action_context_menu import ActionContextMenu
+from .common.card_step_scroll_area import CardStepScrollArea
 from .common.weather_icon_label import WeatherIconLabel
+from .popups.schedule_multi_select_popup import ScheduleMultiSelectPopup
 from .utils.window_drag_controller import WindowDragController
 
 
@@ -151,6 +153,8 @@ class WeekContentSurface(QWidget):
 
 class WeekScheduleCard(QFrame):
     """周视图中的单条日程小卡片"""
+    CARD_HEIGHT = 46
+
     clicked = pyqtSignal(object)
     # 右键菜单需要的三个信号
     req_status = pyqtSignal(int, int) # id, status
@@ -158,6 +162,7 @@ class WeekScheduleCard(QFrame):
     req_delete = pyqtSignal(int)      # id
     drag_started = pyqtSignal(object)
     drag_finished = pyqtSignal(object, object)
+    selection_toggled = pyqtSignal(int)
 
     def __init__(self, schedule_obj, parent=None):
         super().__init__(parent)
@@ -165,6 +170,8 @@ class WeekScheduleCard(QFrame):
         self.data = schedule_obj
         self.schedule_obj = schedule_obj
         self._dark_mode = False
+        self._multi_select_mode = False
+        self._selected_for_batch = False
 
         self.setStyleSheet("""
             WeekScheduleCard {
@@ -177,7 +184,7 @@ class WeekScheduleCard(QFrame):
             }
         """)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedHeight(46)
+        self.setFixedHeight(self.CARD_HEIGHT)
 
         # 开启右键菜单策略
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -195,6 +202,7 @@ class WeekScheduleCard(QFrame):
         # 优先级圆点
         self.dot = QWidget()
         self.dot.setFixedSize(8, 8)
+        self.dot.installEventFilter(self)
 
         # 根据是否已完成动态调整标题和圆点样式
         self.lbl_title = AdaptiveLabel(schedule_obj.title, max_size=11, min_size=10)
@@ -271,8 +279,8 @@ class WeekScheduleCard(QFrame):
 
     def _apply_card_style(self):
         """根据完成状态和暗色模式设置圆点+标题样式"""
+        self._apply_dot_style()
         if self._is_completed:
-            self.dot.setStyleSheet("background-color: #cccccc; border-radius: 4px;")
             if self._dark_mode:
                 self.lbl_title.setStyleSheet(
                     "color: rgba(255, 255, 255, 0.4); font-weight: bold; border: none; background: transparent;"
@@ -283,8 +291,6 @@ class WeekScheduleCard(QFrame):
                 )
             self.lbl_title.setStrikeOut(True)
         else:
-            p_color = {2: "#FF4D4F", 1: "#FAAD14", 0: "#52C41A"}.get(self._priority, "#52C41A")
-            self.dot.setStyleSheet(f"background-color: {p_color}; border-radius: 4px;")
             if self._dark_mode:
                 self.lbl_title.setStyleSheet(
                     "color: #FFFFFF; font-weight: bold; border: none; background: transparent;"
@@ -293,6 +299,53 @@ class WeekScheduleCard(QFrame):
                 self.lbl_title.setStyleSheet(
                     "color: #333333; font-weight: bold; border: none; background: transparent;"
                 )
+
+    def _apply_dot_style(self):
+        if self._multi_select_mode:
+            dot_color = (
+                StyleManager.color_to_rgba(
+                    AppConfig.COLOR_GRADIENT_START,
+                    0.65,
+                )
+                if self._selected_for_batch
+                else "#FFFFFF"
+            )
+            border = "1px solid rgba(255, 255, 255, 0.8)"
+        elif self._is_completed:
+            dot_color = "#CCCCCC"
+            border = "none"
+        else:
+            dot_color = {
+                2: "#FF4D4F",
+                1: "#FAAD14",
+                0: "#52C41A",
+            }.get(self._priority, "#52C41A")
+            border = "none"
+        self.dot.setStyleSheet(
+            f"background-color: {dot_color}; border-radius: 4px; "
+            f"border: {border};"
+        )
+
+    def set_multi_select_state(self, active, selected=False):
+        self._multi_select_mode = bool(active)
+        self._selected_for_batch = bool(selected) if active else False
+        self.dot.setCursor(
+            Qt.CursorShape.PointingHandCursor
+            if self._multi_select_mode
+            else Qt.CursorShape.ArrowCursor
+        )
+        self._apply_dot_style()
+
+    def eventFilter(self, watched, event):
+        if (
+            watched is self.dot
+            and self._multi_select_mode
+            and event.type() == QEvent.Type.MouseButtonRelease
+            and event.button() == Qt.MouseButton.LeftButton
+        ):
+            self.selection_toggled.emit(self.data.id)
+            return True
+        return super().eventFilter(watched, event)
 
     def _apply_time_style(self):
         """根据暗色模式设置时间标签颜色"""
@@ -359,12 +412,27 @@ class WeekScheduleCard(QFrame):
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton and hasattr(self, '_click_pos'):
-            if (event.pos() - self._click_pos).manhattanLength() < 5:
+            if (
+                not self._multi_select_mode
+                and (event.pos() - self._click_pos).manhattanLength() < 5
+            ):
                 self.clicked.emit(self.schedule_obj)
             del self._click_pos
             event.accept()
         else:
             super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        if (
+            self._multi_select_mode
+            and event.button() == Qt.MouseButton.LeftButton
+        ):
+            if hasattr(self, '_click_pos'):
+                del self._click_pos
+            self.clicked.emit(self.schedule_obj)
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -2124,6 +2192,8 @@ class WeekWindow(FramelessMainWindow):
     def apply_schedule_display_mode(self, mode_id):
         if mode_id not in {"card", "timetable"}:
             return
+        if mode_id != "card" and self._week_multi_select_active:
+            self.exit_week_multi_select_mode()
         self.schedule_display_mode = mode_id
         self._sync_schedule_display_mode_ui()
 
@@ -2151,6 +2221,10 @@ class WeekWindow(FramelessMainWindow):
         self._search_options_panel = None
         self._filter_options_panel = None
         self._sort_options_panel = None
+        self._week_multi_select_active = False
+        self._week_multi_select_days = set(range(7))
+        self._week_selected_schedule_ids = set()
+        self._week_multi_select_popup = None
         self._drag_edge_entered_at = 0.0
         self._drag_last_turn_at = 0.0
         self._drag_edge_timer = QTimer(self)
@@ -2393,6 +2467,7 @@ class WeekWindow(FramelessMainWindow):
         self.btn_suspend._tooltip_filter = ToolTipFilter("挂起周视图", self.btn_suspend)
         self.btn_suspend.installEventFilter(self.btn_suspend._tooltip_filter)
         self.btn_suspend.clicked.connect(self.suspend_requested.emit)
+
         status_row.addStretch()
 
         win_ctrl_layout = QHBoxLayout()
@@ -2519,7 +2594,10 @@ class WeekWindow(FramelessMainWindow):
         }
         
         for i in range(7):
-            scroll_area = QScrollArea()
+            scroll_area = CardStepScrollArea(
+                WeekScheduleCard.CARD_HEIGHT,
+                2,
+            )
             scroll_area.setWidgetResizable(True) 
             scroll_area.setFrameShape(QFrame.Shape.NoFrame) 
             scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -2835,7 +2913,6 @@ class WeekWindow(FramelessMainWindow):
         if hasattr(self, "view_selector_container"):
             self.view_selector_container.setStyleSheet(self._view_selector_style())
             self._apply_view_selector_button_styles()
-
         if hasattr(self, "btn_suspend"):
             self._set_tinted_png_icon(self.btn_suspend, "assets/icons/hang_up.png", 14)
             self.btn_suspend.setStyleSheet(
@@ -3027,7 +3104,8 @@ class WeekWindow(FramelessMainWindow):
         if self.current_selected_date.toPyDate() < today:
             print("该日期已过期，无法添加日程") 
             return
-            
+
+        self.exit_week_multi_select_mode()
         self.page_add.reset()
         self.body_stack.setCurrentWidget(self.page_add)
         self._set_edit_mode_bg(True)
@@ -3588,6 +3666,13 @@ class WeekWindow(FramelessMainWindow):
                     card.req_delete.connect(self._handle_schedule_delete)
                     card.drag_started.connect(self._begin_card_drag)
                     card.drag_finished.connect(self._finish_card_drag)
+                    card.selection_toggled.connect(
+                        self._toggle_week_schedule_selection
+                    )
+                    card.set_multi_select_state(
+                        self._week_multi_select_active,
+                        sched_obj.id in self._week_selected_schedule_ids,
+                    )
                     panel_layout.insertWidget(panel_layout.count() - 1, card)
 
         has_any_schedule = (
@@ -3604,6 +3689,8 @@ class WeekWindow(FramelessMainWindow):
         self.page_week_timetable_placeholder.set_selected_day(
             self.current_selected_date
         )
+        if self._week_multi_select_active:
+            self._sync_week_multi_select_state()
         self._sync_panel_scroll_heights()
 
     def update_placeholder_visibility(self, has_any_schedule: bool):
@@ -3614,10 +3701,18 @@ class WeekWindow(FramelessMainWindow):
             lbl.setVisible(not has_any_schedule)
 
     def _sync_panel_scroll_heights(self):
-        for panel in self.bottom_panels:
+        for day_index, panel in enumerate(self.bottom_panels):
             layout = panel.layout()
             if layout is not None:
-                panel.setMinimumHeight(layout.sizeHint().height())
+                card_count = sum(
+                    1
+                    for item_index in range(layout.count())
+                    if isinstance(
+                        layout.itemAt(item_index).widget(),
+                        WeekScheduleCard,
+                    )
+                )
+                self.bottom_scroll_areas[day_index].set_card_count(card_count)
 
     def update_weather_ui(self, data):
         if not data: return
@@ -3751,9 +3846,259 @@ class WeekWindow(FramelessMainWindow):
         self._on_day_clicked(qdate)
         self.day_double_clicked.emit(qdate)
 
+    def _week_schedule_cards_by_day(self):
+        cards_by_day = {}
+        for day_index, panel in enumerate(self.bottom_panels):
+            layout = panel.layout()
+            cards_by_day[day_index] = [
+                layout.itemAt(item_index).widget()
+                for item_index in range(layout.count())
+                if isinstance(
+                    layout.itemAt(item_index).widget(),
+                    WeekScheduleCard,
+                )
+            ]
+        return cards_by_day
+
+    def _week_schedule_cards(self):
+        cards_by_day = self._week_schedule_cards_by_day()
+        return [
+            card
+            for day_index in range(7)
+            for card in cards_by_day[day_index]
+        ]
+
+    def is_week_multi_select_active(self):
+        return self._week_multi_select_active
+
+    def toggle_week_multi_select_mode(self):
+        if self._week_multi_select_active:
+            self.exit_week_multi_select_mode()
+        else:
+            self.enter_week_multi_select_mode()
+
+    def _open_week_multi_select_popup(self):
+        popup = self._week_multi_select_popup
+        if popup is not None:
+            try:
+                popup.show_near(self)
+                return
+            except RuntimeError:
+                self._week_multi_select_popup = None
+
+        popup = ScheduleMultiSelectPopup("week", self)
+        popup.day_scope_toggled.connect(
+            self._toggle_week_multi_select_day
+        )
+        popup.action_requested.connect(
+            self._handle_week_multi_select_action
+        )
+        popup.closed.connect(self._handle_week_multi_select_popup_closed)
+        self._week_multi_select_popup = popup
+        popup.show_near(self)
+
+    def _handle_week_multi_select_popup_closed(self, popup):
+        if self._week_multi_select_popup is popup:
+            self._week_multi_select_popup = None
+        if self._week_multi_select_active:
+            self.exit_week_multi_select_mode(close_popup=False)
+
+    def enter_week_multi_select_mode(self):
+        if (
+            self.schedule_display_mode != "card"
+            or self.body_stack.currentWidget() is not self.page_week_board
+        ):
+            return
+        cards = self._week_schedule_cards()
+        if not cards:
+            return
+        self.close_view_selector()
+        self._hide_week_query_panels()
+        self._week_multi_select_active = True
+        self._week_multi_select_days = set(range(7))
+        self._week_selected_schedule_ids.clear()
+        self._open_week_multi_select_popup()
+        self._sync_week_multi_select_state()
+
+    def exit_week_multi_select_mode(self, close_popup=True):
+        if (
+            not self._week_multi_select_active
+            and self._week_multi_select_popup is None
+        ):
+            return
+        self._week_multi_select_active = False
+        self._week_selected_schedule_ids.clear()
+        popup = self._week_multi_select_popup
+        self._week_multi_select_popup = None
+        if close_popup and popup is not None:
+            try:
+                popup.close()
+            except RuntimeError:
+                pass
+        for card in self._week_schedule_cards():
+            card.set_multi_select_state(False)
+
+    def _toggle_week_multi_select_day(self, day_index):
+        if not self._week_multi_select_active:
+            return
+        if day_index == 7:
+            self._week_multi_select_days = (
+                set()
+                if len(self._week_multi_select_days) == 7
+                else set(range(7))
+            )
+        elif 0 <= day_index < 7:
+            if day_index in self._week_multi_select_days:
+                self._week_multi_select_days.remove(day_index)
+            else:
+                self._week_multi_select_days.add(day_index)
+        self._sync_week_multi_select_state()
+
+    def _toggle_week_schedule_selection(self, schedule_id):
+        if not self._week_multi_select_active:
+            return
+        if schedule_id in self._week_selected_schedule_ids:
+            self._week_selected_schedule_ids.remove(schedule_id)
+        else:
+            self._week_selected_schedule_ids.add(schedule_id)
+        self._sync_week_multi_select_state()
+
+    def _sync_week_multi_select_state(self):
+        cards_by_day = self._week_schedule_cards_by_day()
+        cards = [
+            card
+            for day_index in range(7)
+            for card in cards_by_day[day_index]
+        ]
+        visible_ids = {card.data.id for card in cards}
+        active_drag_card = self._active_drag_card
+        if active_drag_card is not None:
+            active_drag_id = getattr(
+                getattr(active_drag_card, "data", None),
+                "id",
+                None,
+            )
+            if active_drag_id is not None:
+                visible_ids.add(active_drag_id)
+        self._week_selected_schedule_ids.intersection_update(visible_ids)
+
+        for card in cards:
+            card.set_multi_select_state(
+                self._week_multi_select_active,
+                card.data.id in self._week_selected_schedule_ids,
+            )
+
+        if not self._week_multi_select_active:
+            return
+
+        scope_cards = [
+            card
+            for day_index in self._week_multi_select_days
+            for card in cards_by_day.get(day_index, [])
+        ]
+        scope_ids = {card.data.id for card in scope_cards}
+        selected_cards = [
+            card
+            for card in cards
+            if card.data.id in self._week_selected_schedule_ids
+        ]
+        has_selection = bool(selected_cards)
+        all_scope_selected = bool(scope_ids) and scope_ids.issubset(
+            self._week_selected_schedule_ids
+        )
+        can_complete = has_selection and any(
+            getattr(card.data, "status", 0) != 1
+            for card in selected_cards
+        )
+        can_undo = has_selection and any(
+            getattr(card.data, "status", 0) == 1
+            for card in selected_cards
+        )
+
+        popup = self._week_multi_select_popup
+        if popup is None:
+            return
+        popup.set_scope_state(
+            self._week_multi_select_days
+        )
+        popup.set_action_state(
+            has_scope_cards=bool(scope_ids),
+            all_scope_selected=all_scope_selected,
+            can_complete=can_complete,
+            can_undo=can_undo,
+            can_delete=has_selection,
+        )
+
+    def _handle_week_multi_select_action(self, action_id):
+        if action_id == "exit":
+            self.exit_week_multi_select_mode()
+            return
+        if not self._week_multi_select_active:
+            return
+
+        cards_by_day = self._week_schedule_cards_by_day()
+        cards = [
+            card
+            for day_index in range(7)
+            for card in cards_by_day[day_index]
+        ]
+        visible_ids = {card.data.id for card in cards}
+
+        if action_id == "select_all":
+            scope_ids = {
+                card.data.id
+                for day_index in self._week_multi_select_days
+                for card in cards_by_day.get(day_index, [])
+            }
+            if not scope_ids:
+                return
+            if scope_ids.issubset(self._week_selected_schedule_ids):
+                self._week_selected_schedule_ids.difference_update(scope_ids)
+            else:
+                self._week_selected_schedule_ids.update(scope_ids)
+            self._sync_week_multi_select_state()
+            return
+
+        selected_ids = sorted(
+            self._week_selected_schedule_ids & visible_ids
+        )
+        if not selected_ids:
+            return
+
+        if action_id == "complete":
+            if not any(
+                getattr(card.data, "status", 0) != 1
+                for card in cards
+                if card.data.id in selected_ids
+            ):
+                return
+            success = db_manager.update_schedule_statuses(selected_ids, 1)
+        elif action_id == "undo":
+            if not any(
+                getattr(card.data, "status", 0) == 1
+                for card in cards
+                if card.data.id in selected_ids
+            ):
+                return
+            success = db_manager.update_schedule_statuses(selected_ids, 0)
+        elif action_id == "delete":
+            success = db_manager.delete_schedules(selected_ids)
+            if success:
+                self._week_selected_schedule_ids.difference_update(
+                    selected_ids
+                )
+        else:
+            return
+
+        if success:
+            self.refresh_week_data()
+            self.schedule_updated.emit(None)
+
     def _handle_week_context_action(self, action_name):
         if action_name == "add":
             self.switch_to_add_page()
+        elif action_name == "multiple_choice":
+            self.toggle_week_multi_select_mode()
 
     def _handle_week_context_view(self, view_name):
         self._on_view_selected(view_name)
@@ -3771,6 +4116,7 @@ class WeekWindow(FramelessMainWindow):
             show_drag_options=is_timetable,
             drag_snap_minutes=self.page_week_timetable_placeholder.edit_snap_minutes,
             show_multiple_choice=not is_timetable,
+            multiple_choice_active=self._week_multi_select_active,
         )
         menu.action_requested.connect(self._handle_week_context_action)
         menu.view_requested.connect(self._handle_week_context_view)
@@ -3814,6 +4160,7 @@ class WeekWindow(FramelessMainWindow):
                 menu = ActionContextMenu(
                     self,
                     show_multiple_choice=True,
+                    multiple_choice_active=self._week_multi_select_active,
                 )
                 menu.action_requested.connect(self._handle_week_context_action)
                 menu.view_requested.connect(self._handle_week_context_view)
@@ -3961,6 +4308,7 @@ class WeekWindow(FramelessMainWindow):
         if vid == "week":
             pass # 当前已经在周视图，无操作
         else:
+            self.exit_week_multi_select_mode()
             # 无论是日视图、月视图还是待办，统交由主路由处理
             self.view_selected.emit(vid)
 

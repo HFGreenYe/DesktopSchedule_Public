@@ -1163,6 +1163,10 @@ class MainWindow(FramelessMainWindow):
     def handle_header_action(self, action_name):
         if action_name == "toggle_day_collapse":
             self.toggle_day_collapsed()
+        elif action_name == "multiple_choice":
+            self._expand_day_for_body_action()
+            if self.is_day_view_active():
+                self.page_dashboard.toggle_multi_select_mode()
         elif action_name == "add":
             self._expand_day_for_body_action()
             self.switch_to_add_page()
@@ -1203,6 +1207,8 @@ class MainWindow(FramelessMainWindow):
     def _handle_dashboard_context_action(self, action_name):
         if action_name == "toggle_day_collapse":
             self.toggle_day_collapsed()
+        elif action_name == "multiple_choice":
+            self.page_dashboard.toggle_multi_select_mode()
         elif action_name == "add":
             self.switch_to_add_page()
 
@@ -1268,6 +1274,8 @@ class MainWindow(FramelessMainWindow):
     # 澶勭悊瑙嗗浘鍒囨崲
     def switch_view(self, view_name):
         route_action = ViewRouter.classify_main_view(view_name)
+        if route_action != "day" and self.page_dashboard.is_multi_select_active():
+            self.page_dashboard.exit_multi_select_mode()
         if self._day_collapsed and route_action != "day":
             self.set_day_collapsed(False)
         self._exit_sort_state_for_view_switch(route_action)

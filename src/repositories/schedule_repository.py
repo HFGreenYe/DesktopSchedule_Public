@@ -28,6 +28,38 @@ class ScheduleRepository:
         except Exception:
             return False
 
+    def update_schedule_statuses(self, schedule_ids, new_status):
+        try:
+            normalized_ids = sorted(
+                {int(schedule_id) for schedule_id in schedule_ids}
+            )
+            if not normalized_ids:
+                return True
+            database = self._schedule_model._meta.database
+            with database.atomic():
+                self._schedule_model.update(status=new_status).where(
+                    self._schedule_model.id.in_(normalized_ids)
+                ).execute()
+            return True
+        except Exception:
+            return False
+
+    def delete_schedules(self, schedule_ids):
+        try:
+            normalized_ids = sorted(
+                {int(schedule_id) for schedule_id in schedule_ids}
+            )
+            if not normalized_ids:
+                return True
+            database = self._schedule_model._meta.database
+            with database.atomic():
+                self._schedule_model.delete().where(
+                    self._schedule_model.id.in_(normalized_ids)
+                ).execute()
+            return True
+        except Exception:
+            return False
+
     def update_schedule_fields(self, schedule_id, **kwargs):
         try:
             self._schedule_model.update(**kwargs).where(self._schedule_model.id == schedule_id).execute()
