@@ -452,18 +452,34 @@ class AddScheduleView(QWidget):
             
         self._update_info_card()
 
+    def _format_time_range(self, start, end):
+        """格式化时间范围显示。同天：MM-DD S - E；跨天同年：MM-DD S - MM-DD E；跨年：YY-MM-DD S - YY-MM-DD E"""
+        if not end:
+            return None
+        start = start or end
+        if start.date() == end.date():
+            return f"{start:%m-%d %H:%M} - {end:%H:%M}"
+        if start.year == end.year:
+            return f"{start:%m-%d %H:%M} - {end:%m-%d %H:%M}"
+        return f"{start:%y-%m-%d %H:%M} - {end:%y-%m-%d %H:%M}"
+
     def _update_info_card(self):
-        # 1. 更新时间文本
+        # 1. 更新时间文本（自适应字号）
         if self.selected_end_time:
-            date_str = self.selected_end_time.strftime("%m-%d")
-            end_str = self.selected_end_time.strftime("%H:%M")
             if self.selected_start_time:
-                start_str = self.selected_start_time.strftime("%H:%M")
-                text = f"{date_str} {start_str} - {end_str}"
+                text = self._format_time_range(self.selected_start_time, self.selected_end_time)
             else:
-                text = f"{date_str} 截止: {end_str}"
+                text = f"{self.selected_end_time:%m-%d} 截止: {self.selected_end_time:%H:%M}"
             self.lbl_info_time.setText(text)
-            self.lbl_info_time.setStyleSheet("color: #FFFFFF; font-weight: bold; font-size: 15px;") 
+            if len(text) > 18:
+                fs = "11px"
+            elif len(text) > 14:
+                fs = "13px"
+            else:
+                fs = "15px"
+            self.lbl_info_time.setStyleSheet(
+                f"color: #FFFFFF; font-weight: bold; font-size: {fs};"
+            ) 
         else:
             self.lbl_info_time.setText("时间未设置")
             self.lbl_info_time.setStyleSheet("color: rgba(255,255,255,0.6); font-size: 14px;") 

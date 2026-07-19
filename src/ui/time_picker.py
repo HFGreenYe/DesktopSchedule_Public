@@ -437,41 +437,24 @@ class TimePickerView(QWidget):
             )
 
     def _show_end_date_calendar(self):
-        """双击日期标签弹出日历选择完成日期。"""
-        cal = QCalendarWidget()
-        cal.setWindowFlags(Qt.WindowType.Popup)
-        cal.setGridVisible(False)
-        cal.setVerticalHeaderFormat(QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader)
-        cal.setStyleSheet(StyleManager.get_calendar_style())
-        cal.setMinimumDate(self.current_date)
-        target_date = self.current_date.addDays(self._end_day_offset)
-        cal.setSelectedDate(target_date)
-        # 日历导航箭头
-        arrow_color = StyleManager.mix_colors(
-            AppConfig.COLOR_GRADIENT_START,
-            "#ffffff",
-            primary_ratio=0.98,
-        )
-        prev_btn = cal.findChild(QToolButton, "qt_calendar_prevmonth")
-        if prev_btn:
-            prev_btn.setIcon(self._get_colored_icon("assets/icons/cal_left.svg", arrow_color))
-            prev_btn.setIconSize(QSize(18, 18))
-        next_btn = cal.findChild(QToolButton, "qt_calendar_nextmonth")
-        if next_btn:
-            next_btn.setIcon(self._get_colored_icon("assets/icons/cal_right.svg", arrow_color))
-            next_btn.setIconSize(QSize(18, 18))
+        """双击日期标签弹出暗色日历选择完成日期。"""
+        from .calendar_pop import CalendarPop
 
-        def on_date_selected(qdate):
-            days_diff = self.current_date.daysTo(qdate)
+        cal_pop = CalendarPop(self, export_theme=False, schedule_markers=False)
+        cal_pop.calendar.setMinimumDate(self.current_date)
+        target_date = self.current_date.addDays(self._end_day_offset)
+        cal_pop.calendar.setSelectedDate(target_date)
+
+        def on_date_selected(py_date):
+            days_diff = self.current_date.daysTo(
+                QDate(py_date.year, py_date.month, py_date.day)
+            )
             self._end_day_offset = max(0, days_diff)
             self._update_end_date_label()
-            cal.close()
 
-        cal.clicked.connect(on_date_selected)
-        # 定位到日期标签下方
+        cal_pop.date_selected.connect(on_date_selected)
         global_pos = self.lbl_end_date.mapToGlobal(QPoint(0, self.lbl_end_date.height()))
-        cal.move(global_pos)
-        cal.show()
+        cal_pop.show_at(global_pos)
 
     def eventFilter(self, watched, event):
         if (

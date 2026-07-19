@@ -445,7 +445,7 @@ class CalendarPop(QWidget):
         bg = QColor("#2b2b2b") if self.current_theme == "dark" else QColor("#ffffff")
         painter.setBrush(QBrush(bg))
         painter.setPen(QPen(QColor("rgba(255, 255, 255, 0.2)"), 1))
-        painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 8, 8)
+        painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 10, 10)
 
     def show_at(self, pos, current_date=None):
         self._apply_theme()
