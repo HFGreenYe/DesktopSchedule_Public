@@ -581,8 +581,9 @@ class TimetablePlaceholderFrame(QFrame):
     EDIT_SNAP_MINUTES = 1
     EDIT_MIN_DURATION_MINUTES = 5
     EDIT_AUTO_SCROLL_MARGIN_PX = 24.0
-    EDIT_AUTO_SCROLL_STEP_MINUTES = 1
-    EDIT_AUTO_SCROLL_INTERVAL_MS = 120
+    EDIT_AUTO_SCROLL_MIN_STEP_MINUTES = 2
+    EDIT_AUTO_SCROLL_MAX_STEP_MINUTES = 18
+    EDIT_AUTO_SCROLL_INTERVAL_MS = 50
     SELECTION_COLOR = QColor("#FFD700")
     EVENT_PALETTE = (
         "#ff6b6b",
@@ -1086,6 +1087,22 @@ class TimetablePlaceholderFrame(QFrame):
             return 1
         return 0
 
+    def _time_edit_auto_scroll_step_minutes(self, position):
+        """动态滚动速度：鼠标推入边缘越深，滚动越快。"""
+        direction = self._time_edit_auto_scroll_direction(position)
+        if direction == 0:
+            return 0
+        margin = self.EDIT_AUTO_SCROLL_MARGIN_PX
+        if direction == -1:
+            penetration = max(0.0, margin - position.y())
+        else:
+            penetration = max(0.0, position.y() - (self.height() - margin))
+        ratio = min(1.0, penetration / margin)
+        step = self.EDIT_AUTO_SCROLL_MIN_STEP_MINUTES + ratio * (
+            self.EDIT_AUTO_SCROLL_MAX_STEP_MINUTES - self.EDIT_AUTO_SCROLL_MIN_STEP_MINUTES
+        )
+        return int(round(step))
+
     def _update_time_edit_auto_scroll(self, position):
         self._last_time_edit_pos = QPointF(position)
         if self._active_time_edit is None:
@@ -1108,7 +1125,7 @@ class TimetablePlaceholderFrame(QFrame):
             return
 
         next_start = self.visible_start_minutes + (
-            direction * self.EDIT_AUTO_SCROLL_STEP_MINUTES
+            direction * self._time_edit_auto_scroll_step_minutes(self._last_time_edit_pos)
         )
         next_start = max(-self.DAY_MINUTES, min(self.DAY_MINUTES * 2, next_start))
         if next_start == self.visible_start_minutes:

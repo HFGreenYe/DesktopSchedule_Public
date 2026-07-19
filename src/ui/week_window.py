@@ -473,7 +473,9 @@ class WeekTimetableBoard(QFrame):
     EDIT_SNAP_MINUTES = 1
     EDIT_MIN_DURATION_MINUTES = 5
     EDIT_AUTO_SCROLL_MARGIN_PX = 22.0
-    EDIT_AUTO_SCROLL_INTERVAL_MS = 650
+    EDIT_AUTO_SCROLL_MIN_STEP_MINUTES = 3
+    EDIT_AUTO_SCROLL_MAX_STEP_MINUTES = 20
+    EDIT_AUTO_SCROLL_INTERVAL_MS = 60
     EDIT_WEEK_TURN_EDGE_PX = 28.0
     EDIT_WEEK_TURN_Y_TOLERANCE_PX = 30.0
     EDIT_WEEK_TURN_DELAY_SEC = 0.45
@@ -1155,6 +1157,20 @@ class WeekTimetableBoard(QFrame):
             return 1
         return 0
 
+    def _time_edit_auto_scroll_step_hours(self, position):
+        """动态滚动速度：鼠标推入边缘越深，滚动的整时数越多（1-3 小时）。"""
+        direction = self._time_edit_auto_scroll_direction(position)
+        if direction == 0:
+            return 0
+        margin = self.EDIT_AUTO_SCROLL_MARGIN_PX
+        if direction == -1:
+            penetration = max(0.0, margin - position.y())
+        else:
+            penetration = max(0.0, position.y() - (self.height() - margin))
+        ratio = min(1.0, penetration / margin)
+        step = 1 + int(round(ratio * 2))
+        return step
+
     def _reset_time_edit_week_turn_state(self, stop_timer=True):
         self._time_edit_week_turn_direction = 0
         self._time_edit_week_turn_entered_at = 0.0
@@ -1213,14 +1229,15 @@ class WeekTimetableBoard(QFrame):
             self._time_edit_scroll_timer.stop()
             return
         direction = self._time_edit_auto_scroll_direction(self._last_time_edit_pos)
+        step_hours = self._time_edit_auto_scroll_step_hours(self._last_time_edit_pos)
         day_index = self._time_edit_auto_scroll_day(self._last_time_edit_pos)
-        if direction == 0 or day_index is None or not (0 <= day_index < self.DAY_COUNT):
+        if direction == 0 or step_hours == 0 or day_index is None or not (0 <= day_index < self.DAY_COUNT):
             self._time_edit_scroll_timer.stop()
             return
 
         max_start_hour = max(0, 24 - self.HOUR_ROWS)
         current_hour = self._visible_start_hour_for_day(day_index)
-        next_hour = min(max(current_hour + direction, 0), max_start_hour)
+        next_hour = min(max(current_hour + direction * step_hours, 0), max_start_hour)
         if next_hour == current_hour:
             return
         self._visible_start_hours[day_index] = next_hour
