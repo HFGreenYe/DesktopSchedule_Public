@@ -2644,13 +2644,13 @@ class WeekWindow(FramelessMainWindow):
             if i in placeholder_config:
                 text, align_flag = placeholder_config[i]
                 lbl_placeholder = QLabel(text)
-                lbl_placeholder.setStyleSheet("color: #CCCCCC; font-size: 15px; font-weight: bold; font-family: 'Microsoft YaHei'; padding-top: 60px;") 
-                lbl_placeholder.setAlignment(align_flag | Qt.AlignmentFlag.AlignTop)
+                lbl_placeholder.setStyleSheet("color: #CCCCCC; font-size: 15px; font-weight: bold; font-family: 'Microsoft YaHei';")
+                lbl_placeholder.setAlignment(align_flag | Qt.AlignmentFlag.AlignCenter)
+                lbl_placeholder.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
                 p_layout.addWidget(lbl_placeholder)
                 self.placeholder_labels.append(lbl_placeholder)
-                
-        
-            p_layout.addStretch()
+            else:
+                p_layout.addStretch()
             
             scroll_area.setWidget(panel)
             self.bottom_panels.append(panel)
