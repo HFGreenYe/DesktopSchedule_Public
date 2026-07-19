@@ -674,7 +674,7 @@ class AllSchedulesPanel(QWidget):
         self.empty_label = QLabel("暂无日程数据")
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.empty_label.setStyleSheet(
-            "color: rgba(0, 102, 204, 0.72); font-size: 12px; "
+            f"color: {AppConfig.COLOR_GRADIENT_END}; font-size: 12px; "
             "font-family: 'Microsoft YaHei UI'; background: transparent; border: none;"
         )
         self.scroll_area.setWidget(self.results_container)
