@@ -18,6 +18,7 @@ from .schedule_detail_pop import ScheduleDetailPop
 
 # 复用主界面的组件
 from .dashboard import DraggableWidget, ViewSelectorCard, AdaptiveLabel
+from .common.card_step_scroll_area import CardStepScrollArea
 
 
 class TodoCard(QFrame):
@@ -360,7 +361,7 @@ class TodoView(QWidget):
         """)
         layout.addWidget(self.lbl_empty)
 
-        self.scroll_area = QScrollArea()
+        self.scroll_area = CardStepScrollArea(60, 8)
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -533,6 +534,7 @@ class TodoView(QWidget):
             )
             self.lbl_empty.show()
             self.scroll_area.hide()
+            self.scroll_area.set_card_count(0)
             return
 
         self.lbl_empty.hide()
@@ -545,6 +547,7 @@ class TodoView(QWidget):
             card.req_status.connect(self._handle_status_change)
             card.req_show_detail.connect(self._show_detail_popup)
             self.list_layout.insertWidget(index, card)
+        self.scroll_area.set_card_count(len(visible_todos))
 
     def refresh_data(self):
         if hasattr(self, 'scroll_content') and getattr(self.scroll_content, 'current_drag_widget', None) is not None:
@@ -613,10 +616,15 @@ class TodoView(QWidget):
         if sender_card:
             self.list_layout.removeWidget(sender_card)
             sender_card.deleteLater()
+            remaining = sum(
+                1 for i in range(self.list_layout.count())
+                if isinstance(self.list_layout.itemAt(i).widget(), TodoCard)
+            )
+            self.scroll_area.set_card_count(remaining)
             if self.list_layout.count() <= 1:
                 self.lbl_empty.show()
                 self.scroll_area.hide()
-            self.req_refresh_all.emit() 
+            self.req_refresh_all.emit()
 
     def _handle_status_change(self, schedule_id, new_status):
         if db_manager.update_schedule_status(schedule_id, new_status):
