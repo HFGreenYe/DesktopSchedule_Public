@@ -393,19 +393,21 @@ class WeekScheduleCard(QFrame):
             if hasattr(self, 'icon_pin'): self.icon_pin.hide()
             
             self.drag_started.emit(self)
-            drag_result = drag.exec(Qt.DropAction.MoveAction)
-            self.drag_finished.emit(self, drag_result)
-            
-            # 恢复样式和组件
-            self.setStyleSheet(original_style)
-            self.dot.show()
-            self.lbl_title.show()
-            self.lbl_time.show()
-            if hasattr(self, 'icon_pin'): self.icon_pin.show()
-            
-            if hasattr(container, 'current_drag_widget'):
-                container.current_drag_widget = None
-            if hasattr(self, '_click_pos'): del self._click_pos
+            drag_result = Qt.DropAction.IgnoreAction
+            try:
+                drag_result = drag.exec(Qt.DropAction.MoveAction)
+            finally:
+                # 恢复样式和组件
+                self.setStyleSheet(original_style)
+                self.dot.show()
+                self.lbl_title.show()
+                self.lbl_time.show()
+                if hasattr(self, 'icon_pin'): self.icon_pin.show()
+
+                if hasattr(container, 'current_drag_widget'):
+                    container.current_drag_widget = None
+                if hasattr(self, '_click_pos'): del self._click_pos
+                self.drag_finished.emit(self, drag_result)
             event.accept()
         else:
             super().mouseMoveEvent(event)

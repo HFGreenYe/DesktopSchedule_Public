@@ -71,3 +71,48 @@
 - 删除日界面列表上方固定操作卡和周界面头部固定双行面板；进入多选不再改变日界面滚动位置、周头部布局或卡片可视数量。
 - 弹窗关闭键、系统关闭和退出图标都会同步退出对应多选状态并恢复卡片优先级圆点；切换课表 / 视图和周添加页仍自动关闭。
 - 共享弹窗、日界面和真实周窗口 PyQt6 offscreen 回归通过，视觉抓图确认遮罩、按钮背景、圆形白边及右上角控制键位置符合合同。
+
+## 2026-07-19：Claude Code 审查与拖拽保护修复
+
+### 审查触发
+
+用户在 Kimi Code（Kimi K3）中对未提交变更执行了代码审查，Kimi 完成了项目结构梳理、git diff 归纳、依赖核对和 py_compile 验证，但在运行时冒烟测试阶段卡住（`CardStepScrollArea` 的 `QTimer.singleShot(0)` 延迟同步导致测试时 `_snap_points` 仍为 `[0]`，断言反复失败）。用户将 Kimi 输出贴给 Claude Code 要求复核。
+
+### Claude Code 审查结果
+
+**编译**: ✅ 全部 9 个源文件 `py_compile` 通过
+**Git**: 未提交变更 `dfd7730`，25 文件 +1475/-62 行
+
+**确认 Bug #1（中高危）— 已修复**:
+
+`src/ui/week_window.py:395-408` — `WeekScheduleCard.mouseMoveEvent` 中拖拽清理逻辑**未受 try/finally 保护**，与日界面 `ScheduleCard`（`dashboard.py:282-295`）已修复的写法不一致：
+
+```python
+# 修复前 — 周界面（崩溃不清理）
+self.drag_started.emit(self)
+drag_result = drag.exec(Qt.DropAction.MoveAction)
+self.drag_finished.emit(self, drag_result)
+# 恢复样式和组件…  ← 若 drag.exec() 抛异常，以下永不执行
+```
+
+```python
+# 修复后 — 周界面（与日界面一致）
+drag_result = Qt.DropAction.IgnoreAction
+try:
+    drag_result = drag.exec(Qt.DropAction.MoveAction)
+finally:
+    # 恢复样式、显示组件、清理状态
+    self.drag_finished.emit(self, drag_result)
+```
+
+- 若 `drag.exec()` 崩溃，`drag_result` 保持 `Qt.DropAction.IgnoreAction`，`_finish_card_drag` 收到后走取消逻辑——行为正确
+- 影响范围：仅 `src/ui/week_window.py` 第 395-408 行，`py_compile` 通过
+
+**确认 Bug #3（非问题）— 无需修改**:
+
+`dashboard.py:_clear_schedule_cards` 从 `takeAt(0)` 改为 `reversed + isinstance(ScheduleCard)` 不是 bug。`list_layout` 仅含 `ScheduleCard` widget 和一个 `QSpacerItem`（stretch）。`QSpacerItem` 不是 `QWidget`，`item.widget()` 返回 `None`，`isinstance(None, ScheduleCard)` 为 `False`——stretch 被正确跳过。新写法比旧 `takeAt(0)` 更精确安全：将来即使 layout 多了非 ScheduleCard widget，也不会被误删。
+
+### 未修复的已知项（低优先级）
+
+- **CardStepScrollArea 初始化竞态**: `QTimer.singleShot(0)` 是 Qt 标准惯用模式，生产环境的事件循环自然顺序保证 sync 远在用户滚轮操作之前完成。仅在无事件循环的单元测试中需手动 `QApplication.processEvents()`。
+- **日/周 drag_finished 信号签名不一致**: 日 `pyqtSignal(object)` 单参，周 `pyqtSignal(object, object)` 双参（card + drag_result）。旧代码遗留差异，本次未统一。
