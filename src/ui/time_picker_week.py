@@ -277,9 +277,9 @@ class TimePickerViewWeek(QWidget):
         self._prev_end_hour = new_hour
         if prev is None:
             return
-        if prev == 0 and new_hour == 23:
+        if prev == 23 and new_hour == 0:
             self._end_day_offset += 1
-        elif prev == 23 and new_hour == 0:
+        elif prev == 0 and new_hour == 23:
             self._end_day_offset = max(0, self._end_day_offset - 1)
         self._update_end_date_label()
 
@@ -303,7 +303,8 @@ class TimePickerViewWeek(QWidget):
             )
 
     def _show_end_date_calendar(self):
-        cal = QCalendarWidget(self.window(), Qt.WindowType.Popup)
+        cal = QCalendarWidget()
+        cal.setWindowFlags(Qt.WindowType.Popup)
         cal.setGridVisible(False)
         cal.setVerticalHeaderFormat(QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader)
         cal.setStyleSheet(StyleManager.get_calendar_style())
