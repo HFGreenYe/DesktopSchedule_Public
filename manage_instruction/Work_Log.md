@@ -116,3 +116,55 @@ finally:
 
 - **CardStepScrollArea 初始化竞态**: `QTimer.singleShot(0)` 是 Qt 标准惯用模式，生产环境的事件循环自然顺序保证 sync 远在用户滚轮操作之前完成。仅在无事件循环的单元测试中需手动 `QApplication.processEvents()`。
 - **日/周 drag_finished 信号签名不一致**: 日 `pyqtSignal(object)` 单参，周 `pyqtSignal(object, object)` 双参（card + drag_result）。旧代码遗留差异，本次未统一。
+
+## 2026-07-19：课表拖拽自动滚动性能修复
+
+### 用户反馈
+
+日界面课表模式拖拽日程块到未显示时间区域时，拖拽速度非常慢、阻塞感强；拉时间久了松手后日程块仍在自行爬行。用户怀疑目标位置与实际拖动速度不匹配，且推测下拉和周界面也有同样问题。
+
+### 根因分析
+
+**日界面 `TimetablePlaceholderFrame`（dashboard.py）**：
+
+- `EDIT_AUTO_SCROLL_STEP_MINUTES = 1` — 每次 tick 仅滚动 1 分钟
+- `EDIT_AUTO_SCROLL_INTERVAL_MS = 120` — 每 120ms 才触发一次
+- 实际滚动速度 = 1分钟 / 120ms ≈ **8.3 分钟/秒**
+- 将日程从 14:00 拖到 08:00（6 小时 = 360 分钟），需按住边缘约 **43 秒**
+- 无加速曲线——鼠标推入边缘 1px 和推入 24px 速度完全一样
+
+**周界面 `WeekTimetablePlaceholder`（week_window.py）**：
+
+- `EDIT_AUTO_SCROLL_INTERVAL_MS = 650` — 极其缓慢
+- 步长固定为 1 整时，无动态加速
+
+**"松手后还在爬"的根因**：120ms 间隔意味着 mouseReleaseEvent 触发 `_finish_time_edit` → `timer.stop()` 时，可能已有 queued timer event 在事件队列中，该 tick 仍会执行一次 `_handle_time_edit_auto_scroll`。
+
+### 修复内容
+
+**日界面**（`dashboard.py` 第 583-585 行 + 第 1101-1137 行）：
+
+| 参数 | 修前 | 修后 |
+|------|------|------|
+| 定时器间隔 | 120ms | **50ms** |
+| 步长 | 固定 1 分钟 | **动态 2-18 分钟**（穿透比例驱动） |
+| 速度曲线 | 无边 → 有边（开关） | 线性加速（推越深→越快） |
+
+新增 `_time_edit_auto_scroll_step_minutes(position)`：计算鼠标在边缘区域内的穿透比例（0~1），线性映射到 `EDIT_AUTO_SCROLL_MIN_STEP_MINUTES`（2）和 `EDIT_AUTO_SCROLL_MAX_STEP_MINUTES`（18）之间。轻推边缘 ≈ 40 分钟/秒；全力推入 ≈ 360 分钟/秒（6 小时/秒）。
+
+`EDIT_AUTO_SCROLL_STEP_MINUTES` 常量已删除，替换为 `MIN`/`MAX` 双常量。
+
+**周界面**（`week_window.py` 第 475-476 行 + 第 1213-1245 行）：
+
+| 参数 | 修前 | 修后 |
+|------|------|------|
+| 定时器间隔 | 650ms | **60ms**（10.8x） |
+| 步长 | 固定 1 小时 | **动态 1-3 小时**（穿透比例驱动） |
+
+新增 `_time_edit_auto_scroll_step_hours(position)`：穿透比例 0→1 映射到 1-3 小时步长。`_visible_start_hours` 保持小时整数存储（改为分钟存储需较大重构，本次不做）。
+
+### 影响范围
+
+- `src/ui/dashboard.py`：类常量 3 行 + 新增方法 11 行 + handler 1 行，共约 15 行
+- `src/ui/week_window.py`：类常量 3 行 + 新增方法 12 行 + handler 3 行，共约 18 行
+- `py_compile` 通过，提交 `6cbf811`

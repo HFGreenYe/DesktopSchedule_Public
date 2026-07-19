@@ -258,7 +258,11 @@ class ScheduleMultiSelectPopup(QWidget):
                 if day_index == 7
                 else day_index in selected_days
             )
-            border = "2px solid white" if selected else "none"
+            border = (
+                f"2px solid {AppConfig.COLOR_GRADIENT_START}"
+                if selected
+                else "none"
+            )
             button.setStyleSheet(
                 "QPushButton {"
                 "background: transparent; color: #7A7A7A;"
