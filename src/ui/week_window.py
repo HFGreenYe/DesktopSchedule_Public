@@ -623,6 +623,26 @@ class WeekTimetableBoard(QFrame):
             and self._selected_schedule_id != active_schedule_id
         ):
             self._selected_schedule_id = None
+
+        # 按每天最早日程调整可见起点（避免有日程而视口停在 0 点看不到）
+        max_start = max(0, 24 - self.HOUR_ROWS)
+        today = QDate.currentDate()
+        for day_index in range(self.DAY_COUNT):
+            iter_date = self.current_monday.addDays(day_index)
+            day_scheds = self.schedules_by_day.get(day_index, [])
+            if not day_scheds:
+                continue
+            earliest = 24
+            for s in day_scheds:
+                st = getattr(s, "start_time", None)
+                if st and hasattr(st, "hour"):
+                    earliest = min(earliest, st.hour)
+                ddl = getattr(s, "end_time", None)
+                if ddl and not st and hasattr(ddl, "hour"):
+                    earliest = min(earliest, ddl.hour)
+            if earliest < 24:
+                self._visible_start_hours[day_index] = min(earliest, max_start)
+
         self.update()
 
     def set_selected_day(self, qdate):
