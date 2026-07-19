@@ -702,6 +702,7 @@ class AllSchedulesPanel(QWidget):
         self._install_resize_event_filters()
         self._update_header_icons()
         self._update_header_button_positions()
+        self._sync_display_frame_padding()
         self.refresh_results()
 
     def _prepare_option_grid(self, grid):
@@ -1427,6 +1428,21 @@ class AllSchedulesPanel(QWidget):
             180.0 if self._settings_visible else 0.0
         )
         self._settings_rotation_animation.start()
+        self._sync_display_frame_padding()
+        QTimer.singleShot(0, self._sync_viewport_size)
+
+    def _sync_display_frame_padding(self):
+        has_content = self._settings_visible or self._search_options_visible
+        display_layout = self.display_frame.layout()
+        if display_layout is not None:
+            display_layout.setContentsMargins(8, 0 if has_content else 0, 8, 8)
+
+    def _sync_viewport_size(self):
+        if not self._result_records:
+            self.results_container.setFixedSize(
+                max(1, self.scroll_area.viewport().width()),
+                max(1, self.scroll_area.viewport().height()),
+            )
 
     def _toggle_search_options_area(self):
         self._search_options_visible = not self._search_options_visible
