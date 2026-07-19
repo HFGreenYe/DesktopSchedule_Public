@@ -854,6 +854,7 @@ class MainWindow(FramelessMainWindow):
             return popup
 
         popup = ScheduleDetailPop(schedule_data, source_view="month")
+        popup.set_pinned(bool(owner_panel and owner_panel.is_pinned))
         popup.req_edit_time.connect(lambda data: self.go_to_time_picker_for_edit(data, "month"))
         popup.req_edit_alarm.connect(lambda data: self.go_to_alarm_picker_for_edit(data, "month"))
         popup.req_edit_list.connect(lambda data: self.go_to_list_picker_for_edit(data, "month"))
