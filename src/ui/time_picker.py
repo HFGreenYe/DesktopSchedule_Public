@@ -22,15 +22,19 @@ class TimePickerView(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.current_date = QDate.currentDate()
-        self.drag_pos = None 
-        
+        self.drag_pos = None
+        self._end_day_offset = 0
+        self._prev_end_hour = None
+
         self._setup_ui()
         self._connect_signals()
-        
+
         self._update_date_label()
         now = QTime.currentTime()
         self.scroll_end_hour.set_value(f"{now.hour():02d}")
         self.scroll_end_min.set_value(f"{now.minute():02d}")
+        self._prev_end_hour = int(self.scroll_end_hour.get_value())
+        self._update_end_date_label()
 
     def _get_colored_icon(self, icon_path, color_hex):
         """工具方法：将 SVG 动态渲染为指定颜色"""
@@ -165,12 +169,27 @@ class TimePickerView(QWidget):
         self.end_group = QWidget()
         v_end = QVBoxLayout(self.end_group)
         v_end.setContentsMargins(0,0,0,0)
+
+        end_label_row = QHBoxLayout()
+        end_label_row.setContentsMargins(0, 0, 0, 0)
+        end_label_row.setSpacing(0)
+        end_label_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_end = QLabel("完成时间")
-        lbl_end.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_end.setStyleSheet("color: rgba(255,255,255,0.7); font-size: 12px; margin-bottom: 5px;")
-        
+        self.lbl_end_date = QLabel("（今）")
+        self.lbl_end_date.setStyleSheet(
+            "color: rgba(255,255,255,0.85); font-size: 12px; margin-bottom: 5px; "
+            "font-weight: bold;"
+        )
+        self.lbl_end_date.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.lbl_end_date.setToolTip("双击切换完成日期")
+        self.lbl_end_date.installEventFilter(self)
+        end_label_row.addWidget(lbl_end)
+        end_label_row.addWidget(self.lbl_end_date)
+        end_label_row.addStretch()
+        v_end.addLayout(end_label_row)
+
         self.end_scroller_widget, self.scroll_end_hour, self.scroll_end_min = self._create_single_time_scroller()
-        v_end.addWidget(lbl_end)
         v_end.addWidget(self.end_scroller_widget)
 
         h_layout.addWidget(self.start_group)
@@ -294,24 +313,37 @@ class TimePickerView(QWidget):
     def set_initial_data(self, start_dt, end_dt):
         """显式控制界面显隐，防止状态残留"""
         target_dt = end_dt if end_dt else datetime.now()
-        self.current_date = QDate(target_dt.year, target_dt.month, target_dt.day)
+        self._end_day_offset = 0
+        if start_dt and end_dt:
+            start_date = start_dt.date()
+            end_date = end_dt.date()
+            offset_days = (end_date - start_date).days
+            if offset_days > 0:
+                self._end_day_offset = offset_days
+                self.current_date = QDate(start_date.year, start_date.month, start_date.day)
+            else:
+                self.current_date = QDate(target_dt.year, target_dt.month, target_dt.day)
+        else:
+            self.current_date = QDate(target_dt.year, target_dt.month, target_dt.day)
+        self._prev_end_hour = target_dt.hour
         self._update_date_label()
+        self._update_end_date_label()
         self.calendar.setSelectedDate(self.current_date)
-        
+
         self.scroll_end_hour.set_value(f"{target_dt.hour:02d}")
         self.scroll_end_min.set_value(f"{target_dt.minute:02d}")
-        
+
         if start_dt:
             self.chk_enable_start.setChecked(True)
             self.scroll_start_hour.set_value(f"{start_dt.hour:02d}")
             self.scroll_start_min.set_value(f"{start_dt.minute:02d}")
-            
+
             # 显式显示 (因为 setChecked 不发信号)
             self.start_group.show()
             self.duration_grid.show()
         else:
             self.chk_enable_start.setChecked(False)
-            
+
             # 显式隐藏 (这是修复 Bug 的核心)
             self.start_group.hide()
             self.duration_grid.hide()
@@ -320,6 +352,7 @@ class TimePickerView(QWidget):
         self.btn_date.clicked.connect(self._toggle_calendar)
         self.calendar.clicked.connect(self._on_date_selected)
         # 结束时间转轮
+        self.scroll_end_hour.value_changed.connect(self._on_end_hour_changed)
         self.scroll_end_hour.value_changed.connect(self._validate_scroll_time)
         self.scroll_end_min.value_changed.connect(self._validate_scroll_time)
         # 开始时间转轮
@@ -339,6 +372,7 @@ class TimePickerView(QWidget):
     def _on_date_selected(self, date):
         self.current_date = date
         self._update_date_label()
+        self._update_end_date_label()
 
     def _update_date_label(self):
         text = self.current_date.toString("yyyy年MM月dd日")
@@ -367,16 +401,105 @@ class TimePickerView(QWidget):
         self.scroll_start_hour.set_value(f"{dt_start.hour:02d}")
         self.scroll_start_min.set_value(f"{dt_start.minute:02d}")
 
+    def _on_end_hour_changed(self):
+        """检测小时滚轮 00↔23 跨越，推断跨天方向。"""
+        new_hour = int(self.scroll_end_hour.get_value())
+        prev = self._prev_end_hour
+        self._prev_end_hour = new_hour
+        if prev is None:
+            return
+        if prev == 0 and new_hour == 23:
+            self._end_day_offset += 1
+        elif prev == 23 and new_hour == 0:
+            self._end_day_offset = max(0, self._end_day_offset - 1)
+        self._update_end_date_label()
+
+    def _update_end_date_label(self):
+        offset = self._end_day_offset
+        if offset == 0:
+            text = "（今）"
+        elif 1 <= offset <= 9:
+            text = f"（后{offset}天）"
+        else:
+            end_date = self.current_date.addDays(offset)
+            text = f"（{end_date.toString('yy-MM-dd')}）"
+        self.lbl_end_date.setText(text)
+        # 自适应字号：超过 8 个字时缩小
+        if len(text) > 8:
+            self.lbl_end_date.setStyleSheet(
+                "color: rgba(255,255,255,0.85); font-size: 10px; margin-bottom: 5px; "
+                "font-weight: bold;"
+            )
+        else:
+            self.lbl_end_date.setStyleSheet(
+                "color: rgba(255,255,255,0.85); font-size: 12px; margin-bottom: 5px; "
+                "font-weight: bold;"
+            )
+
+    def _show_end_date_calendar(self):
+        """双击日期标签弹出日历选择完成日期。"""
+        cal = QCalendarWidget(self.window(), Qt.WindowType.Popup)
+        cal.setGridVisible(False)
+        cal.setVerticalHeaderFormat(QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader)
+        cal.setStyleSheet(StyleManager.get_calendar_style())
+        cal.setMinimumDate(self.current_date)
+        target_date = self.current_date.addDays(self._end_day_offset)
+        cal.setSelectedDate(target_date)
+        # 日历导航箭头
+        arrow_color = StyleManager.mix_colors(
+            AppConfig.COLOR_GRADIENT_START,
+            "#ffffff",
+            primary_ratio=0.98,
+        )
+        prev_btn = cal.findChild(QToolButton, "qt_calendar_prevmonth")
+        if prev_btn:
+            prev_btn.setIcon(self._get_colored_icon("assets/icons/cal_left.svg", arrow_color))
+            prev_btn.setIconSize(QSize(18, 18))
+        next_btn = cal.findChild(QToolButton, "qt_calendar_nextmonth")
+        if next_btn:
+            next_btn.setIcon(self._get_colored_icon("assets/icons/cal_right.svg", arrow_color))
+            next_btn.setIconSize(QSize(18, 18))
+
+        def on_date_selected(qdate):
+            days_diff = self.current_date.daysTo(qdate)
+            self._end_day_offset = max(0, days_diff)
+            self._update_end_date_label()
+            cal.close()
+
+        cal.clicked.connect(on_date_selected)
+        # 定位到日期标签下方
+        global_pos = self.lbl_end_date.mapToGlobal(QPoint(0, self.lbl_end_date.height()))
+        cal.move(global_pos)
+        cal.show()
+
+    def eventFilter(self, watched, event):
+        if (
+            watched is self.lbl_end_date
+            and event.type() == QEvent.Type.MouseButtonDblClick
+            and event.button() == Qt.MouseButton.LeftButton
+        ):
+            self._show_end_date_calendar()
+            return True
+        return super().eventFilter(watched, event)
+
     def _on_confirm(self):
         end_h = int(self.scroll_end_hour.get_value())
         end_m = int(self.scroll_end_min.get_value())
-        dt_end = datetime(self.current_date.year(), self.current_date.month(), self.current_date.day(), end_h, end_m)
-        
+        end_date = self.current_date.addDays(self._end_day_offset)
+        dt_end = datetime(end_date.year(), end_date.month(), end_date.day(), end_h, end_m)
+
         dt_start = None
         if self.chk_enable_start.isChecked():
             start_h = int(self.scroll_start_hour.get_value())
             start_m = int(self.scroll_start_min.get_value())
             dt_start = datetime(self.current_date.year(), self.current_date.month(), self.current_date.day(), start_h, start_m)
+            # 修正：若开始时间晚于完成时间（如 23:00→01:00 次日），
+            # 且未通过 day_offset 处理，则将完成推到下一天
+            if dt_start is not None and dt_end <= dt_start:
+                self._end_day_offset += 1
+                end_date = self.current_date.addDays(self._end_day_offset)
+                dt_end = datetime(end_date.year(), end_date.month(), end_date.day(), end_h, end_m)
+
         now = datetime.now()
         if dt_end < now:
             print("❌ 结束时间不能早于当前时间")
@@ -437,8 +560,11 @@ class TimePickerView(QWidget):
         selected_qdate = self.current_date
         today_qdate = QDate.currentDate()
 
-        # 只有在日期是“今天”时才需要限制
-        if selected_qdate == today_qdate:
+        # 完成时间在将来某天（offset>0），不受”今天”限制
+        end_qdate = selected_qdate.addDays(self._end_day_offset)
+
+        # 只有完成日期是”今天”时才需要限制
+        if selected_qdate == today_qdate and self._end_day_offset == 0:
             curr_h = now.hour
             curr_m = now.minute
 

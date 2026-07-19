@@ -1,7 +1,7 @@
 # src/ui/time_picker_week.py
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QCalendarWidget, QGridLayout, QFrame, QPushButton, QToolButton)
-from PyQt6.QtCore import Qt, QDate, QTime, pyqtSignal, QSize
+from PyQt6.QtCore import Qt, QDate, QTime, pyqtSignal, QSize, QPoint, QEvent
 from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor
 from PyQt6.QtSvg import QSvgRenderer
 from datetime import datetime, timedelta
@@ -17,13 +17,17 @@ class TimePickerViewWeek(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.current_date = QDate.currentDate()
+        self._end_day_offset = 0
+        self._prev_end_hour = None
         self._init_ui()
         self._connect_signals()
-        
+
         # 初始赋值
         now = QTime.currentTime()
         self.scroll_end_hour.set_value(f"{now.hour():02d}")
         self.scroll_end_min.set_value(f"{now.minute():02d}")
+        self._prev_end_hour = int(self.scroll_end_hour.get_value())
+        self._update_end_date_label()
 
     def _get_colored_icon(self, icon_path, color_hex):
         renderer = QSvgRenderer(icon_path)
@@ -107,7 +111,7 @@ class TimePickerViewWeek(QWidget):
         
         h_time_layout = QHBoxLayout(self.time_picker_container)
         self.start_group, self.scroll_start_hour, self.scroll_start_min = self._create_scroller_pair("开始时间")
-        self.end_group, self.scroll_end_hour, self.scroll_end_min = self._create_scroller_pair("完成时间")
+        self.end_group, self.scroll_end_hour, self.scroll_end_min = self._create_scroller_pair("完成时间", with_date_label=True)
         
         h_time_layout.addWidget(self.start_group)
         h_time_layout.addWidget(self.end_group)
@@ -148,29 +152,45 @@ class TimePickerViewWeek(QWidget):
 
         main_layout.addWidget(self.right_panel, 1)
 
-    def _create_scroller_pair(self, label):
+    def _create_scroller_pair(self, label, with_date_label=False):
         grp = QWidget()
         lay = QVBoxLayout(grp)
         lay.setContentsMargins(0,0,0,0)
+
+        label_row = QHBoxLayout()
+        label_row.setContentsMargins(0, 0, 0, 0)
+        label_row.setSpacing(0)
+        label_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl = QLabel(label)
-        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl.setStyleSheet("color: rgba(255,255,255,0.7); font-size: 11px;")
-        
+        label_row.addWidget(lbl)
+
+        if with_date_label:
+            self.lbl_end_date = QLabel("（今）")
+            self.lbl_end_date.setStyleSheet(
+                "color: rgba(255,255,255,0.85); font-size: 11px; font-weight: bold;"
+            )
+            self.lbl_end_date.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.lbl_end_date.setToolTip("双击切换完成日期")
+            self.lbl_end_date.installEventFilter(self)
+            label_row.addWidget(self.lbl_end_date)
+        label_row.addStretch()
+        lay.addLayout(label_row)
+
         h = QHBoxLayout()
         sh = NumberScroller([f"{i:02d}" for i in range(24)])
         sm = NumberScroller([f"{i:02d}" for i in range(60)])
-        
-        # 修正冒号居中逻辑 
+
+        # 修正冒号居中逻辑
         lbl_colon = QLabel(":")
         lbl_colon.setFixedWidth(10)
         lbl_colon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_colon.setStyleSheet("color: white; font-size: 20px; font-weight: bold; padding-bottom: 5px;")
-        
+
         h.addWidget(sh)
         h.addWidget(lbl_colon)
         h.addWidget(sm)
-        
-        lay.addWidget(lbl)
+
         lay.addLayout(h)
         return grp, sh, sm
 
@@ -179,10 +199,23 @@ class TimePickerViewWeek(QWidget):
 
     def set_initial_data(self, start_dt, end_dt):
         target = end_dt if end_dt else datetime.now()
-        self.current_date = QDate(target.year, target.month, target.day)
+        self._end_day_offset = 0
+        if start_dt and end_dt:
+            start_date = start_dt.date()
+            end_date = end_dt.date()
+            offset_days = (end_date - start_date).days
+            if offset_days > 0:
+                self._end_day_offset = offset_days
+                self.current_date = QDate(start_date.year, start_date.month, start_date.day)
+            else:
+                self.current_date = QDate(target.year, target.month, target.day)
+        else:
+            self.current_date = QDate(target.year, target.month, target.day)
+        self._prev_end_hour = target.hour
         self.calendar.setSelectedDate(self.current_date)
         self.scroll_end_hour.set_value(f"{target.hour:02d}")
         self.scroll_end_min.set_value(f"{target.minute:02d}")
+        self._update_end_date_label()
         if start_dt:
             self.chk_enable_start.setChecked(True)
             self.start_group.show()
@@ -199,12 +232,14 @@ class TimePickerViewWeek(QWidget):
         self.chk_enable_start.toggled.connect(self._on_switch_toggled)
         self.btn_cancel.clicked.connect(self.back_requested.emit)
         self.btn_ok.clicked.connect(self._on_confirm)
-        # 滚轮检测信号 [cite: 1388]
+        # 滚轮检测信号
+        self.scroll_end_hour.value_changed.connect(self._on_end_hour_changed)
         for s in [self.scroll_start_hour, self.scroll_start_min, self.scroll_end_hour, self.scroll_end_min]:
             s.value_changed.connect(self._validate_scroll_time)
 
     def _on_date_selected(self, date):
         self.current_date = date
+        self._update_end_date_label()
 
     def _on_switch_toggled(self, checked):
         self.start_group.setVisible(checked)
@@ -220,20 +255,99 @@ class TimePickerViewWeek(QWidget):
 
     def _on_confirm(self):
         d = self.calendar.selectedDate()
-        dt_end = datetime(d.year(), d.month(), d.day(), int(self.scroll_end_hour.get_value()), int(self.scroll_end_min.get_value()))
+        end_date = d.addDays(self._end_day_offset)
+        dt_end = datetime(end_date.year(), end_date.month(), end_date.day(), int(self.scroll_end_hour.get_value()), int(self.scroll_end_min.get_value()))
         dt_start = None
         if self.chk_enable_start.isChecked():
             dt_start = datetime(d.year(), d.month(), d.day(), int(self.scroll_start_hour.get_value()), int(self.scroll_start_min.get_value()))
-        
-        # 二次校验：确保不早于当前时间 [cite: 1394, 1395]
+            if dt_start is not None and dt_end <= dt_start:
+                self._end_day_offset += 1
+                end_date = d.addDays(self._end_day_offset)
+                dt_end = datetime(end_date.year(), end_date.month(), end_date.day(), int(self.scroll_end_hour.get_value()), int(self.scroll_end_min.get_value()))
+
+        # 二次校验：确保不早于当前时间
         now = datetime.now()
         if dt_end < now: return
-            
+
         self.confirm_requested.emit(dt_start, dt_end)
+
+    def _on_end_hour_changed(self):
+        new_hour = int(self.scroll_end_hour.get_value())
+        prev = self._prev_end_hour
+        self._prev_end_hour = new_hour
+        if prev is None:
+            return
+        if prev == 0 and new_hour == 23:
+            self._end_day_offset += 1
+        elif prev == 23 and new_hour == 0:
+            self._end_day_offset = max(0, self._end_day_offset - 1)
+        self._update_end_date_label()
+
+    def _update_end_date_label(self):
+        offset = self._end_day_offset
+        if offset == 0:
+            text = "（今）"
+        elif 1 <= offset <= 9:
+            text = f"（后{offset}天）"
+        else:
+            end_date = self.current_date.addDays(offset)
+            text = f"（{end_date.toString('yy-MM-dd')}）"
+        self.lbl_end_date.setText(text)
+        if len(text) > 8:
+            self.lbl_end_date.setStyleSheet(
+                "color: rgba(255,255,255,0.85); font-size: 9px; font-weight: bold;"
+            )
+        else:
+            self.lbl_end_date.setStyleSheet(
+                "color: rgba(255,255,255,0.85); font-size: 11px; font-weight: bold;"
+            )
+
+    def _show_end_date_calendar(self):
+        cal = QCalendarWidget(self.window(), Qt.WindowType.Popup)
+        cal.setGridVisible(False)
+        cal.setVerticalHeaderFormat(QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader)
+        cal.setStyleSheet(StyleManager.get_calendar_style())
+        cal.setMinimumDate(self.current_date)
+        target_date = self.current_date.addDays(self._end_day_offset)
+        cal.setSelectedDate(target_date)
+        arrow_color = StyleManager.mix_colors(
+            AppConfig.COLOR_GRADIENT_START,
+            "#ffffff",
+            primary_ratio=0.98,
+        )
+        prev_btn = cal.findChild(QToolButton, "qt_calendar_prevmonth")
+        if prev_btn:
+            prev_btn.setIcon(self._get_colored_icon("assets/icons/cal_left.svg", arrow_color))
+            prev_btn.setIconSize(QSize(18, 18))
+        next_btn = cal.findChild(QToolButton, "qt_calendar_nextmonth")
+        if next_btn:
+            next_btn.setIcon(self._get_colored_icon("assets/icons/cal_right.svg", arrow_color))
+            next_btn.setIconSize(QSize(18, 18))
+
+        def on_date_selected(qdate):
+            days_diff = self.current_date.daysTo(qdate)
+            self._end_day_offset = max(0, days_diff)
+            self._update_end_date_label()
+            cal.close()
+
+        cal.clicked.connect(on_date_selected)
+        global_pos = self.lbl_end_date.mapToGlobal(QPoint(0, self.lbl_end_date.height()))
+        cal.move(global_pos)
+        cal.show()
+
+    def eventFilter(self, watched, event):
+        if (
+            watched is self.lbl_end_date
+            and event.type() == QEvent.Type.MouseButtonDblClick
+            and event.button() == Qt.MouseButton.LeftButton
+        ):
+            self._show_end_date_calendar()
+            return True
+        return super().eventFilter(watched, event)
 
     def _validate_scroll_time(self):
         now = datetime.now()
-        if self.current_date == QDate.currentDate():
+        if self.current_date == QDate.currentDate() and self._end_day_offset == 0:
             curr_h, curr_m = now.hour, now.minute
 
             def check(sh, sm):
