@@ -1768,6 +1768,7 @@ class MonthDayPanel(QWidget):
         self._selected_schedule_ids.clear()
         self.multi_select_bar.show()
         self._sync_multi_select_state()
+        self.adjustSize()
 
     def exit_multi_select_mode(self):
         if not self._multi_select_active:
@@ -1777,6 +1778,7 @@ class MonthDayPanel(QWidget):
         self.multi_select_bar.hide()
         for item in self._ms_schedule_items():
             item.set_multi_select_state(False)
+        self.adjustSize()
 
     def _toggle_item_selection(self, schedule_id):
         if not self._multi_select_active:
