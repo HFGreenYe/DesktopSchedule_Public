@@ -495,7 +495,7 @@ class DayQueryOptionsPanel(QWidget):
         self._update_pin_button()
 
     def _update_pin_button(self):
-        pin_color = "#FFFFFF" if self.is_pinned else "#A0A0A0"
+        pin_color = "#FFFFFF" if self.is_pinned else "rgba(255,255,255,0.59)"
         pixmap = get_colored_icon("pin.svg", pin_color, 14)
         self.btn_pin.setIcon(
             QIcon(pixmap)
