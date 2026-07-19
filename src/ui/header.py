@@ -350,7 +350,14 @@ class HeaderBar(QWidget):
         # --- 顶部行 ---
         top_row = QHBoxLayout()
         top_row.setContentsMargins(0, 0, 0, 0)
-        top_row.addStretch()
+
+        # 双击收起/展开热区（搜索框右侧空白）
+        self._collapse_trigger = QWidget(self)
+        self._collapse_trigger.setStyleSheet("background: transparent;")
+        self._collapse_trigger.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._collapse_trigger.setToolTip("双击收起/展开日视图")
+        self._collapse_trigger.installEventFilter(self)
+        top_row.addWidget(self._collapse_trigger, stretch=1)
 
         self.btn_suspend = QPushButton(self)
         self.btn_suspend.setFixedSize(30, 30)
@@ -414,7 +421,12 @@ class HeaderBar(QWidget):
 
         hud_row.addLayout(left_container)
 
-        hud_row.addStretch()
+        # 时间与天气之间的空白双击热区
+        self._collapse_trigger_hud = QWidget(self)
+        self._collapse_trigger_hud.setStyleSheet("background: transparent;")
+        self._collapse_trigger_hud.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._collapse_trigger_hud.installEventFilter(self)
+        hud_row.addWidget(self._collapse_trigger_hud, stretch=1)
 
         right_container = QVBoxLayout()
         right_container.setSpacing(0)
@@ -547,6 +559,15 @@ class HeaderBar(QWidget):
             if event.button() == Qt.MouseButton.LeftButton:
                 self.req_open_calendar.emit()
                 return True
+
+        # 双击空白区 → 收起/展开日视图
+        for attr in ('_collapse_trigger', '_collapse_trigger_hud'):
+            if hasattr(self, attr) and obj is getattr(self, attr):
+                if event.type() == QEvent.Type.MouseButtonDblClick and event.button() == Qt.MouseButton.LeftButton:
+                    owner = self.window()
+                    if hasattr(owner, 'toggle_day_collapsed'):
+                        owner.toggle_day_collapsed()
+                    return True
 
         return super().eventFilter(obj, event)
 
