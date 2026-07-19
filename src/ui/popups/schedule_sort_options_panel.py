@@ -9,10 +9,16 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from PyQt6.QtGui import QIcon
+
 from src.config import AppConfig
 from src.services.schedule_sort_service import ScheduleSortOptions
-from src.ui.components import IOSSwitch
+from src.ui.components import IOSSwitch, get_colored_icon
 from src.ui.popups.day_query_options_panel import DayQueryOptionsPanel
+from src.utils.window_preferences import (
+    get_primary_pin_preference,
+    set_window_pin_state,
+)
 
 
 class SortSegmentGroup(QWidget):
@@ -93,12 +99,14 @@ class ScheduleSortOptionsPanel(QWidget):
         super().__init__(parent, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint)
         self.view_scope = view_scope if view_scope in {"day", "week", "month", "todo"} else "day"
         self._is_todo = self.view_scope == "todo"
+        self.is_pinned = bool(get_primary_pin_preference())
         self._drag_offset = None
         self._synchronizing_options = False
         self._options_enabled = False
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setFixedSize(276, 228 if self._is_todo else 330)
         self._setup_ui()
+        self._update_pin_button()
 
     def _setup_ui(self):
         outer = QVBoxLayout(self)
@@ -118,6 +126,17 @@ class ScheduleSortOptionsPanel(QWidget):
             "font-size: 15px; font-weight: bold; background: transparent;"
         )
         header.addWidget(self.title_label, 1)
+
+        self.btn_pin = QPushButton()
+        self.btn_pin.setFixedSize(24, 24)
+        self.btn_pin.setIconSize(QSize(14, 14))
+        self.btn_pin.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_pin.setStyleSheet(
+            "QPushButton { background: transparent; border: none; } "
+            "QPushButton:hover { background: rgba(255,255,255,0.18); border-radius: 12px; }"
+        )
+        self.btn_pin.clicked.connect(self._toggle_pin)
+        header.addWidget(self.btn_pin)
 
         self.btn_close = QPushButton("×")
         self.btn_close.setFixedSize(24, 24)
@@ -261,6 +280,28 @@ class ScheduleSortOptionsPanel(QWidget):
         if not self._synchronizing_options:
             self._options_enabled = True
             self.options_changed.emit(self.current_options())
+
+    def _toggle_pin(self):
+        self.set_pinned(not self.is_pinned)
+
+    def set_pinned(self, enabled):
+        self.is_pinned = bool(enabled)
+        position = self.pos()
+        set_window_pin_state(self, self.is_pinned)
+        self.move(position)
+        self._update_pin_button()
+
+    def _update_pin_button(self):
+        pin_color = "#FFFFFF" if self.is_pinned else "#A0A0A0"
+        pixmap = get_colored_icon("pin.svg", pin_color, 14)
+        self.btn_pin.setIcon(
+            QIcon(pixmap)
+            if not pixmap.isNull()
+            else QIcon("assets/icons/pin.svg")
+        )
+        self.btn_pin.setToolTip(
+            "取消窗口置顶" if self.is_pinned else "窗口置顶"
+        )
 
     def paintEvent(self, event):
         painter = QPainter(self)
