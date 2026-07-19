@@ -1683,12 +1683,8 @@ class MonthDayPanel(QWidget):
         """内嵌多选操作栏：按键排列和设计与 ScheduleMultiSelectPopup 一致。"""
         self.multi_select_bar = QWidget(self)
         self.multi_select_bar.setFixedHeight(44)
-        bar_bg = StyleManager.color_to_rgba(
-            AppConfig.COLOR_GRADIENT_START,
-            0.70,
-        )
         self.multi_select_bar.setStyleSheet(
-            f"QWidget {{ background: {bar_bg}; border-radius: 7px; }}"
+            "QWidget { background: transparent; border-radius: 7px; }"
         )
         bar_layout = QHBoxLayout(self.multi_select_bar)
         bar_layout.setContentsMargins(10, 0, 10, 0)
@@ -1739,12 +1735,13 @@ class MonthDayPanel(QWidget):
         button.setStyleSheet(
             "QPushButton {"
             f"background: {self._ms_button_bg_color()};"
-            "border: none; border-radius: 5px; padding: 0;"
+            "border: 1px solid rgba(255, 255, 255, 0.5); border-radius: 5px; padding: 0;"
             "}"
             "QPushButton:hover { background: rgba(255, 255, 255, 0.24); }"
             "QPushButton:pressed { background: rgba(0, 0, 0, 0.12); }"
             "QPushButton:disabled {"
             f"background: {self._ms_button_bg_color()};"
+            "border: 1px solid rgba(255, 255, 255, 0.2);"
             "}"
         )
 
