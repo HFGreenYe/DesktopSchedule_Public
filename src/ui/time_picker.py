@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QCalendarWidget, QGridLayout, 
                              QListWidget, QListWidgetItem, QScroller, 
                              QFrame, QScrollArea, QSizePolicy, QToolButton)
-from PyQt6.QtCore import Qt, QDate, QTime, pyqtSignal, QPropertyAnimation, QEasingCurve, QRect, QPoint, pyqtProperty, QSize
+from PyQt6.QtCore import Qt, QDate, QTime, pyqtSignal, QPropertyAnimation, QEasingCurve, QRect, QPoint, pyqtProperty, QSize, QEvent
 from PyQt6.QtGui import QColor, QPainter, QPainterPath, QBrush, QPen, QIcon, QPixmap
 from PyQt6.QtSvg import QSvgRenderer
 from datetime import datetime, timedelta
