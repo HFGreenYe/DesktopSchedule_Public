@@ -92,11 +92,12 @@ class ScheduleSortOptionsPanel(QWidget):
     def __init__(self, view_scope, parent=None):
         super().__init__(parent, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint)
         self.view_scope = view_scope if view_scope in {"day", "week", "month", "todo"} else "day"
+        self._is_todo = self.view_scope == "todo"
         self._drag_offset = None
         self._synchronizing_options = False
         self._options_enabled = False
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setFixedSize(276, 330)
+        self.setFixedSize(276, 228 if self._is_todo else 330)
         self._setup_ui()
 
     def _setup_ui(self):
@@ -153,21 +154,24 @@ class ScheduleSortOptionsPanel(QWidget):
         content_layout.setSpacing(8)
 
         self.completed_switch = IOSSwitch()
-        self.overdue_switch = IOSSwitch()
         self.completed_switch.toggled.connect(self._emit_options_changed)
-        self.overdue_switch.toggled.connect(self._emit_options_changed)
         content_layout.addLayout(self._switch_row("包括已完成", self.completed_switch))
-        content_layout.addLayout(self._switch_row("包括已过期", self.overdue_switch))
 
-        content_layout.addWidget(self._section_label("排序范围"))
-        self.scope_group = SortSegmentGroup(
-            (("全部", "all"), ("仅DDL", "point"), ("时间段", "interval"))
-        )
-        self.scope_group.value_changed.connect(self._emit_options_changed)
-        content_layout.addWidget(self.scope_group)
+        if not self._is_todo:
+            self.overdue_switch = IOSSwitch()
+            self.overdue_switch.toggled.connect(self._emit_options_changed)
+            content_layout.addLayout(self._switch_row("包括已过期", self.overdue_switch))
+
+            content_layout.addWidget(self._section_label("排序范围"))
+            self.scope_group = SortSegmentGroup(
+                (("全部", "all"), ("仅DDL", "point"), ("时间段", "interval"))
+            )
+            self.scope_group.value_changed.connect(self._emit_options_changed)
+            content_layout.addWidget(self.scope_group)
 
         content_layout.addWidget(self._section_label("排序方案"))
-        self.scheme_group = SortSegmentGroup((("按时间", "time"), ("按重要性", "priority")))
+        time_label = "按创建时间" if self._is_todo else "按时间"
+        self.scheme_group = SortSegmentGroup(((time_label, "time"), ("按重要性", "priority")))
         self.scheme_group.value_changed.connect(self._emit_options_changed)
         content_layout.addWidget(self.scheme_group)
 
@@ -215,8 +219,9 @@ class ScheduleSortOptionsPanel(QWidget):
         try:
             self._options_enabled = bool(getattr(options, "enabled", False))
             self.completed_switch.setChecked(bool(options.include_completed))
-            self.overdue_switch.setChecked(bool(options.include_overdue))
-            self.scope_group.set_value(options.item_scope)
+            if not self._is_todo:
+                self.overdue_switch.setChecked(bool(options.include_overdue))
+                self.scope_group.set_value(options.item_scope)
             if (
                 self.view_scope in {"day", "week"}
                 and not self._options_enabled
@@ -230,8 +235,16 @@ class ScheduleSortOptionsPanel(QWidget):
     def current_options(self):
         return ScheduleSortOptions(
             include_completed=self.completed_switch.isChecked(),
-            include_overdue=self.overdue_switch.isChecked(),
-            item_scope=self.scope_group.value(),
+            include_overdue=(
+                self.overdue_switch.isChecked()
+                if not self._is_todo
+                else False
+            ),
+            item_scope=(
+                self.scope_group.value()
+                if not self._is_todo
+                else "all"
+            ),
             scheme=self.scheme_group.value(),
             enabled=self._options_enabled,
         )

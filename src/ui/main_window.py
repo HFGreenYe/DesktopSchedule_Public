@@ -1336,6 +1336,8 @@ class MainWindow(FramelessMainWindow):
             self.body_stack.setCurrentWidget(self.page_todo)
             self.page_todo.refresh_data()
             self._sync_primary_query_header()
+            if hasattr(self.header, "set_schedule_display_mode"):
+                self.header.set_schedule_display_mode("card")
             
         elif route_action == "day":
             # 鍒囨崲鍥炴棩瑙嗗浘 (涓婚潰鏉?
