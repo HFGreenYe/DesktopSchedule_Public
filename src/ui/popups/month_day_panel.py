@@ -78,38 +78,40 @@ class _MonthScheduleItemFrame(QFrame):
 
     def _apply_multi_select_style(self):
         if not self._multi_select_mode:
-            self.setStyleSheet(
-                """
-                QFrame#monthDayPanelItem {
-                    background: rgba(255, 255, 255, 0.15);
-                    border: 1px solid rgba(255, 255, 255, 0.22);
-                    border-radius: 7px;
-                }
-                """
-            )
+            if hasattr(self, "_base_style"):
+                self.setStyleSheet(self._base_style)
+            else:
+                self.setStyleSheet(
+                    """
+                    QFrame#monthDayPanelItem {
+                        background: rgba(255, 255, 255, 0.15);
+                        border: 1px solid rgba(255, 255, 255, 0.22);
+                        border-radius: 7px;
+                    }
+                    """
+                )
             return
         if self._selected_for_batch:
-            border_color = StyleManager.color_to_rgba(
-                AppConfig.COLOR_GRADIENT_START,
-                0.85,
-            )
             self.setStyleSheet(
                 "QFrame#monthDayPanelItem {"
-                f"background: {StyleManager.color_to_rgba(AppConfig.COLOR_GRADIENT_START, 0.30)};"
-                f"border: 2px solid {border_color};"
+                "background: rgba(255, 255, 255, 0.25);"
+                "border: 1px solid white;"
                 "border-radius: 7px;"
                 "}"
             )
         else:
-            self.setStyleSheet(
-                """
-                QFrame#monthDayPanelItem {
-                    background: rgba(255, 255, 255, 0.15);
-                    border: 1px solid rgba(255, 255, 255, 0.22);
-                    border-radius: 7px;
-                }
-                """
-            )
+            if hasattr(self, "_base_style"):
+                self.setStyleSheet(self._base_style)
+            else:
+                self.setStyleSheet(
+                    """
+                    QFrame#monthDayPanelItem {
+                        background: rgba(255, 255, 255, 0.15);
+                        border: 1px solid rgba(255, 255, 255, 0.22);
+                        border-radius: 7px;
+                    }
+                    """
+                )
 
     def contextMenuEvent(self, event):
         if self._multi_select_mode:
@@ -186,6 +188,11 @@ class _ElidedTitleLabel(QLabel):
     def minimumSizeHint(self):
         hint = super().minimumSizeHint()
         return QSize(0, hint.height())
+
+    def setStrikeOut(self, strike):
+        font = self.font()
+        font.setStrikeOut(strike)
+        self.setFont(font)
 
     def _update_elided_text(self):
         available_width = max(self.contentsRect().width(), 0)
@@ -1863,6 +1870,10 @@ class MonthDayPanel(QWidget):
             ):
                 return
             success = db_manager.update_schedule_statuses(selected_ids, 1)
+            if success:
+                for s in self._schedules:
+                    if getattr(s, "id", None) in selected_ids:
+                        s.status = 1
         elif action_id == "undo":
             if not any(
                 getattr(item.schedule, "status", 0) == 1
@@ -1871,10 +1882,19 @@ class MonthDayPanel(QWidget):
             ):
                 return
             success = db_manager.update_schedule_statuses(selected_ids, 0)
+            if success:
+                for s in self._schedules:
+                    if getattr(s, "id", None) in selected_ids:
+                        s.status = 0
         elif action_id == "delete":
             success = db_manager.delete_schedules(selected_ids)
             if success:
                 self._selected_schedule_ids.clear()
+                selected_id_set = set(selected_ids)
+                self._schedules = [
+                    s for s in self._schedules
+                    if getattr(s, "id", None) not in selected_id_set
+                ]
                 for popup in list(self.child_detail_popups):
                     try:
                         if (
@@ -2050,28 +2070,47 @@ class MonthDayPanel(QWidget):
                 widget.deleteLater()
 
     def _build_schedule_item(self, schedule):
+        is_completed = int(getattr(schedule, "status", 0) or 0) == 1
+        now = datetime.datetime.now()
+        end_time = getattr(schedule, "end_time", None)
+        is_expired = (
+            not is_completed
+            and end_time is not None
+            and end_time < now
+        )
+
         item_frame = _MonthScheduleItemFrame(schedule)
         item_frame.setObjectName("monthDayPanelItem")
         item_frame.setFixedHeight(30)
+
+        if is_expired:
+            bg = "rgba(190, 190, 190, 0.7)"
+            border = "1px solid rgba(255, 255, 255, 0.22)"
+        elif is_completed:
+            bg = "rgba(255, 255, 255, 0.10)"
+            border = "1px solid rgba(255, 255, 255, 0.22)"
+        else:
+            bg = "rgba(255, 255, 255, 0.15)"
+            border = "1px solid rgba(255, 255, 255, 0.22)"
         item_frame.setStyleSheet(
-            """
-            QFrame#monthDayPanelItem {
-                background: rgba(255, 255, 255, 0.15);
-                border: 1px solid rgba(255, 255, 255, 0.22);
-                border-radius: 7px;
-            }
-            """
+            "QFrame#monthDayPanelItem {"
+            f"background: {bg};"
+            f"border: {border};"
+            "border-radius: 7px;"
+            "}"
         )
+        item_frame._base_style = item_frame.styleSheet()
 
         layout = QHBoxLayout(item_frame)
         layout.setContentsMargins(8, 4, 8, 4)
         layout.setSpacing(6)
 
+        text_color = "rgba(255, 255, 255, 0.5)" if is_completed else "white"
         time_label = QLabel(self._format_time_text(schedule))
         time_label.setFixedWidth(40)
         time_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         time_label.setStyleSheet(
-            "background: transparent; border: none; color: white; "
+            f"background: transparent; border: none; color: {text_color}; "
             "font-family: 'Segoe UI'; font-size: 11px; font-weight: bold;"
         )
         layout.addWidget(time_label)
@@ -2081,9 +2120,11 @@ class MonthDayPanel(QWidget):
         title_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         title_label.setWordWrap(False)
         title_label.setStyleSheet(
-            "background: transparent; border: none; color: white; "
+            f"background: transparent; border: none; color: {text_color}; "
             "font-family: 'Microsoft YaHei'; font-size: 11px; font-weight: bold;"
         )
+        if is_completed:
+            title_label.setStrikeOut(True)
         layout.addWidget(title_label, 1)
 
         meta_label = QLabel(
@@ -2092,7 +2133,7 @@ class MonthDayPanel(QWidget):
         meta_label.setFixedWidth(66)
         meta_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         meta_label.setStyleSheet(
-            "background: transparent; border: none; color: rgba(255, 255, 255, 0.84); "
+            f"background: transparent; border: none; color: {text_color}; "
             "font-family: 'Microsoft YaHei'; font-size: 10px;"
         )
         layout.addWidget(meta_label)
