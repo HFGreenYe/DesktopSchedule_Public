@@ -305,8 +305,12 @@ class TimePickerViewWeek(QWidget):
     def _show_end_date_calendar(self):
         from .calendar_pop import CalendarPop
 
-        cal_pop = CalendarPop(self, export_theme=False, schedule_markers=False)
+        cal_pop = CalendarPop(self, export_theme=False, schedule_markers=False, close_on_select=False)
         cal_pop.calendar.setMinimumDate(self.current_date)
+        # 已过期日期铺浅灰底色（以真实今天为界，非 minimumDate）
+        cal_pop.set_past_overlay_date(QDate.currentDate())
+        # 开始日期用白色虚线框标记
+        cal_pop.set_marker_date(self.current_date)
         target_date = self.current_date.addDays(self._end_day_offset)
         cal_pop.calendar.setSelectedDate(target_date)
 

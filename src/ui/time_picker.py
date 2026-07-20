@@ -75,8 +75,8 @@ class TimePickerView(QWidget):
         
         self.content_widget = QWidget()
         self.content_layout = QVBoxLayout(self.content_widget)
-        self.content_layout.setContentsMargins(20, 10, 20, 30)
-        self.content_layout.setSpacing(20)
+        self.content_layout.setContentsMargins(20, 8, 20, 20)
+        self.content_layout.setSpacing(12)
 
         self.scroll_area.setWidget(self.content_widget)
         outer_layout.addWidget(self.scroll_area)
@@ -143,26 +143,26 @@ class TimePickerView(QWidget):
         self.time_picker_container = QWidget()
         self.time_picker_container.setStyleSheet("""
             QWidget#TimeContainer {
-                background-color: rgba(255, 255, 255, 0.1);
-                border-radius: 12px;
+                background-color: transparent;
+                border-radius: 8px;
             }
         """)
         self.time_picker_container.setObjectName("TimeContainer")
         
         h_layout = QHBoxLayout(self.time_picker_container)
-        h_layout.setContentsMargins(5, 15, 5, 15)
+        h_layout.setContentsMargins(5, 13, 5, 13)
         h_layout.setSpacing(10) 
 
         # --> 左侧：开始时间
         self.start_group = QWidget()
         v_start = QVBoxLayout(self.start_group)
         v_start.setContentsMargins(0,0,0,0)
-        lbl_start = QLabel("开始时间")
-        lbl_start.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_start.setStyleSheet("color: rgba(255,255,255,0.7); font-size: 12px; margin-bottom: 5px;")
+        self.lbl_start = QLabel("开始")
+        self.lbl_start.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_start.setStyleSheet("color: rgba(255,255,255,0.75); font-size: 12px; font-weight: bold; margin-bottom: 5px;")
         
         self.start_scroller_widget, self.scroll_start_hour, self.scroll_start_min = self._create_single_time_scroller()
-        v_start.addWidget(lbl_start)
+        v_start.addWidget(self.lbl_start)
         v_start.addWidget(self.start_scroller_widget)
         
         # --> 右侧：完成时间
@@ -174,8 +174,8 @@ class TimePickerView(QWidget):
         end_label_row.setContentsMargins(0, 0, 0, 0)
         end_label_row.setSpacing(0)
         end_label_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_end = QLabel("完成时间")
-        lbl_end.setStyleSheet("color: rgba(255,255,255,0.7); font-size: 12px; margin-bottom: 5px;")
+        self.lbl_end = QLabel("完成时间")
+        self.lbl_end.setStyleSheet("color: rgba(255,255,255,0.75); font-size: 12px; font-weight: bold; margin-bottom: 5px; margin-left: 6px;")
         self.lbl_end_date = QLabel("（今）")
         self.lbl_end_date.setStyleSheet(
             "color: rgba(255,255,255,0.85); font-size: 12px; margin-bottom: 5px; "
@@ -184,7 +184,8 @@ class TimePickerView(QWidget):
         self.lbl_end_date.setCursor(Qt.CursorShape.PointingHandCursor)
         self.lbl_end_date.setToolTip("双击切换完成日期")
         self.lbl_end_date.installEventFilter(self)
-        end_label_row.addWidget(lbl_end)
+        end_label_row.addStretch()
+        end_label_row.addWidget(self.lbl_end)
         end_label_row.addWidget(self.lbl_end_date)
         end_label_row.addStretch()
         v_end.addLayout(end_label_row)
@@ -197,6 +198,7 @@ class TimePickerView(QWidget):
         
         h_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.start_group.hide()
+        self.lbl_end_date.hide()  # DDL 模式默认不需要日期偏移标签
 
         self.content_layout.addWidget(self.time_picker_container)
 
@@ -221,7 +223,7 @@ class TimePickerView(QWidget):
             btn.setStyleSheet("""
                 QPushButton {
                     background-color: rgba(255, 255, 255, 0.15); 
-                    border-radius: 16px; 
+                    border-radius: 8px;
                     color: white; 
                     border: 1px solid rgba(255,255,255,0.2);
                     font-size: 12px;
@@ -341,12 +343,18 @@ class TimePickerView(QWidget):
             # 显式显示 (因为 setChecked 不发信号)
             self.start_group.show()
             self.duration_grid.show()
+            self.lbl_end_date.show()
+            self.lbl_start.setText("开始")
+            self.lbl_end.setText("完成")
         else:
             self.chk_enable_start.setChecked(False)
 
             # 显式隐藏 (这是修复 Bug 的核心)
             self.start_group.hide()
             self.duration_grid.hide()
+            self.lbl_end_date.hide()
+            self.lbl_start.setText("开始时间")
+            self.lbl_end.setText("完成时间")
 
     def _connect_signals(self):
         self.btn_date.clicked.connect(self._toggle_calendar)
@@ -376,21 +384,29 @@ class TimePickerView(QWidget):
 
     def _update_date_label(self):
         text = self.current_date.toString("yyyy年MM月dd日")
-        self.btn_date.setText(text)
+        self.btn_date.setText("    " + text)
 
     def _on_switch_toggled(self, checked):
         if checked:
             self.start_group.show()
             self.duration_grid.show()
+            self.lbl_end_date.show()
+            self.lbl_start.setText("开始")
+            self.lbl_end.setText("完成")
             end_h = int(self.scroll_end_hour.get_value())
             end_m = int(self.scroll_end_min.get_value())
             dt_end = datetime(2024, 1, 1, end_h, end_m)
             dt_start = dt_end - timedelta(hours=1)
             self.scroll_start_hour.set_value(f"{dt_start.hour:02d}")
             self.scroll_start_min.set_value(f"{dt_start.minute:02d}")
+            # 滚回顶部避免日历头部被裁
+            self.scroll_area.verticalScrollBar().setValue(0)
         else:
             self.start_group.hide()
             self.duration_grid.hide()
+            self.lbl_end_date.hide()
+            self.lbl_start.setText("开始时间")
+            self.lbl_end.setText("完成时间")
 
     def _on_quick_set(self, btn):
         mins = btn.property("minutes")
@@ -440,8 +456,12 @@ class TimePickerView(QWidget):
         """双击日期标签弹出暗色日历选择完成日期。"""
         from .calendar_pop import CalendarPop
 
-        cal_pop = CalendarPop(self, export_theme=False, schedule_markers=False)
+        cal_pop = CalendarPop(self, export_theme=False, schedule_markers=False, close_on_select=False)
         cal_pop.calendar.setMinimumDate(self.current_date)
+        # 已过期日期铺浅灰底色（以真实今天为界，非 minimumDate）
+        cal_pop.set_past_overlay_date(QDate.currentDate())
+        # 开始日期用白色虚线框标记
+        cal_pop.set_marker_date(self.current_date)
         target_date = self.current_date.addDays(self._end_day_offset)
         cal_pop.calendar.setSelectedDate(target_date)
 
