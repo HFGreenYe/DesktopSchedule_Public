@@ -24,7 +24,7 @@ from PyQt6.QtGui import (
     QPainterPath,
     QPixmap,
 )
-from PyQt6.QtPdf import QPdfDocument
+from PyQt6.QtPdf import QPdfDocument, QPdfPageRenderer
 from PyQt6.QtPdfWidgets import QPdfView
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtWidgets import (
@@ -332,6 +332,12 @@ class _ExportClickableColorPreview(QLabel):
 class _ExportPreviewPopup(QWidget):
     print_requested = pyqtSignal()
 
+    _ZOOM_STEP_FACTOR = 1.12
+    _MIN_ZOOM_RATIO = 0.25
+    _MAX_ZOOM_RATIO = 4.0
+    _MIN_TEXT_ZOOM_STEPS = -6
+    _MAX_TEXT_ZOOM_STEPS = 18
+
     def __init__(self, text, parent=None):
         super().__init__(
             parent,
@@ -342,6 +348,9 @@ class _ExportPreviewPopup(QWidget):
         self._drag_offset = None
         self._document_format = "PDF"
         self._page_unit = "页"
+        self._text_zoom_steps = 0
+        self._pdf_zoom_expected_page = -1
+        self._pdf_zoom_expected_width = 0
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -396,6 +405,7 @@ class _ExportPreviewPopup(QWidget):
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
         self.preview_editor.setPlainText(text)
+        self.preview_editor.setToolTip("按住 Ctrl 并滚动鼠标滚轮可缩放预览")
         self.preview_editor.setStyleSheet(
             f"""
             QTextEdit {{
@@ -429,6 +439,30 @@ class _ExportPreviewPopup(QWidget):
         self.pdf_view.setStyleSheet(
             f"QPdfView {{ background: {pdf_bg}; border: none; }}"
         )
+        self.pdf_view.setToolTip("按住 Ctrl 并滚动鼠标滚轮可缩放预览")
+        self._pdf_zoom_overlay = QLabel(self.pdf_view.viewport())
+        self._pdf_zoom_overlay.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+            True,
+        )
+        self._pdf_zoom_overlay.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
+        )
+        self._pdf_zoom_overlay.setStyleSheet(
+            f"background: {pdf_bg}; border: none;"
+        )
+        self._pdf_zoom_overlay.hide()
+        self._pdf_zoom_overlay_timeout = QTimer(self)
+        self._pdf_zoom_overlay_timeout.setSingleShot(True)
+        self._pdf_zoom_overlay_timeout.setInterval(1500)
+        self._pdf_zoom_overlay_timeout.timeout.connect(
+            self._finish_pdf_zoom_transition
+        )
+        self._pdf_page_renderer = self.pdf_view.findChild(QPdfPageRenderer)
+        if self._pdf_page_renderer is not None:
+            self._pdf_page_renderer.pageRendered.connect(
+                self._handle_pdf_page_rendered
+            )
         self.pdf_view.pageNavigator().currentPageChanged.connect(
             self._update_pdf_title
         )
@@ -447,6 +481,11 @@ class _ExportPreviewPopup(QWidget):
         self._update_close_button_position()
 
     def set_preview_html(self, html):
+        if self._text_zoom_steps > 0:
+            self.preview_editor.zoomOut(self._text_zoom_steps)
+        elif self._text_zoom_steps < 0:
+            self.preview_editor.zoomIn(-self._text_zoom_steps)
+        self._text_zoom_steps = 0
         self.preview_editor.setHtml(html)
         self.title.setText("导出预览")
         self.preview_stack.setCurrentWidget(self.preview_editor)
@@ -461,15 +500,18 @@ class _ExportPreviewPopup(QWidget):
         self.set_preview_size(self._source_preview_size)
 
     def set_pdf_document(self, document, format_name="PDF"):
+        self._finish_pdf_zoom_transition()
         self._document_format = format_name
         self._page_unit = "张" if format_name == "PNG" else "页"
         self.pdf_view.setDocument(document)
+        self.pdf_view.setZoomMode(QPdfView.ZoomMode.FitToWidth)
         self._pdf_page_count = document.pageCount()
         self.preview_stack.setCurrentWidget(self.pdf_view)
         self.set_preview_size(self._source_preview_size)
         self._update_pdf_title(self.pdf_view.pageNavigator().currentPage())
 
     def clear_pdf_document(self):
+        self._finish_pdf_zoom_transition()
         self.pdf_view.setDocument(None)
         self._pdf_page_count = 0
 
@@ -552,6 +594,24 @@ class _ExportPreviewPopup(QWidget):
             self.print_requested.emit()
             event.accept()
             return True
+        if (
+            watched in (self.preview_editor.viewport(), self.pdf_view.viewport())
+            and event.type() == QEvent.Type.Wheel
+            and event.modifiers() & Qt.KeyboardModifier.ControlModifier
+        ):
+            wheel_steps = self._wheel_zoom_steps(event)
+            if wheel_steps:
+                if watched is self.pdf_view.viewport():
+                    self._zoom_pdf_preview(wheel_steps, event.position())
+                else:
+                    self._zoom_text_preview(wheel_steps)
+            event.accept()
+            return True
+        if (
+            watched is self.pdf_view.viewport()
+            and event.type() == QEvent.Type.Resize
+        ):
+            self._pdf_zoom_overlay.setGeometry(self.pdf_view.viewport().rect())
         header_drag = watched in (self.header_holder, self.title)
         content_drag = watched is self.content_frame
         preview_drag = watched is self.preview_editor.viewport()
@@ -588,6 +648,156 @@ class _ExportPreviewPopup(QWidget):
                 event.accept()
                 return True
         return super().eventFilter(watched, event)
+
+    @staticmethod
+    def _wheel_zoom_steps(event):
+        delta = event.angleDelta().y()
+        threshold = 120
+        if not delta:
+            delta = event.pixelDelta().y()
+            threshold = 40
+        if not delta:
+            return 0
+        steps = int(delta / threshold)
+        if not steps:
+            steps = 1 if delta > 0 else -1
+        return max(-4, min(4, steps))
+
+    def _zoom_text_preview(self, wheel_steps):
+        target_steps = max(
+            self._MIN_TEXT_ZOOM_STEPS,
+            min(self._MAX_TEXT_ZOOM_STEPS, self._text_zoom_steps + wheel_steps),
+        )
+        applied_steps = target_steps - self._text_zoom_steps
+        if applied_steps > 0:
+            self.preview_editor.zoomIn(applied_steps)
+        elif applied_steps < 0:
+            self.preview_editor.zoomOut(-applied_steps)
+        self._text_zoom_steps = target_steps
+
+    def _zoom_pdf_preview(self, wheel_steps, anchor_position):
+        fit_factor = self._pdf_fit_width_factor()
+        if fit_factor <= 0:
+            return
+        if self.pdf_view.zoomMode() == QPdfView.ZoomMode.Custom:
+            current_factor = self.pdf_view.zoomFactor()
+        else:
+            current_factor = fit_factor
+        minimum_factor = fit_factor * self._MIN_ZOOM_RATIO
+        maximum_factor = fit_factor * self._MAX_ZOOM_RATIO
+        target_factor = max(
+            minimum_factor,
+            min(
+                maximum_factor,
+                current_factor * (self._ZOOM_STEP_FACTOR**wheel_steps),
+            ),
+        )
+        if abs(target_factor - current_factor) < 0.0001:
+            return
+
+        horizontal_bar = self.pdf_view.horizontalScrollBar()
+        vertical_bar = self.pdf_view.verticalScrollBar()
+        old_horizontal = horizontal_bar.value()
+        old_vertical = vertical_bar.value()
+        scale_ratio = target_factor / current_factor
+        anchor_x = anchor_position.x()
+        anchor_y = anchor_position.y()
+
+        self._show_pdf_zoom_transition(scale_ratio, anchor_position)
+        self.pdf_view.setZoomMode(QPdfView.ZoomMode.Custom)
+        self.pdf_view.setZoomFactor(target_factor)
+        self._set_expected_pdf_render(target_factor)
+
+        def restore_anchor():
+            horizontal_bar.setValue(
+                round((old_horizontal + anchor_x) * scale_ratio - anchor_x)
+            )
+            vertical_bar.setValue(
+                round((old_vertical + anchor_y) * scale_ratio - anchor_y)
+            )
+
+        QTimer.singleShot(0, restore_anchor)
+
+    def _show_pdf_zoom_transition(self, scale_ratio, anchor_position):
+        viewport = self.pdf_view.viewport()
+        if self._pdf_zoom_overlay.isVisible():
+            snapshot = self._pdf_zoom_overlay.pixmap()
+        else:
+            snapshot = viewport.grab()
+        if snapshot is None or snapshot.isNull():
+            return
+
+        if scale_ratio < 1.0:
+            transition = QPixmap(snapshot)
+        else:
+            transition = QPixmap(snapshot.size())
+            transition.setDevicePixelRatio(snapshot.devicePixelRatio())
+            transition.fill(_theme_preview_bg_qcolor())
+            painter = QPainter(transition)
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+            painter.translate(anchor_position)
+            painter.scale(scale_ratio, scale_ratio)
+            painter.translate(-anchor_position)
+            painter.drawPixmap(0, 0, snapshot)
+            painter.end()
+
+        self._pdf_zoom_overlay.setGeometry(viewport.rect())
+        self._pdf_zoom_overlay.setPixmap(transition)
+        self._pdf_zoom_overlay.show()
+        self._pdf_zoom_overlay.raise_()
+        self._pdf_zoom_overlay_timeout.start()
+
+    def _set_expected_pdf_render(self, target_factor):
+        document = self.pdf_view.document()
+        if document is None or document.pageCount() <= 0:
+            self._pdf_zoom_expected_page = -1
+            self._pdf_zoom_expected_width = 0
+            return
+        current_page = self.pdf_view.pageNavigator().currentPage()
+        page_index = max(0, min(int(current_page), document.pageCount() - 1))
+        page_width = document.pagePointSize(page_index).width()
+        logical_width = page_width * self.pdf_view.logicalDpiX() / 72.0
+        self._pdf_zoom_expected_page = page_index
+        self._pdf_zoom_expected_width = round(
+            logical_width * target_factor * self.pdf_view.devicePixelRatioF()
+        )
+
+    def _handle_pdf_page_rendered(self, page_number, image_size, *_args):
+        if not self._pdf_zoom_overlay.isVisible():
+            return
+        if int(page_number) != self._pdf_zoom_expected_page:
+            return
+        width_tolerance = max(3, round(self._pdf_zoom_expected_width * 0.02))
+        if abs(image_size.width() - self._pdf_zoom_expected_width) > width_tolerance:
+            return
+        self.pdf_view.viewport().repaint()
+        self._finish_pdf_zoom_transition()
+
+    def _finish_pdf_zoom_transition(self):
+        if hasattr(self, "_pdf_zoom_overlay_timeout"):
+            self._pdf_zoom_overlay_timeout.stop()
+        if hasattr(self, "_pdf_zoom_overlay"):
+            self._pdf_zoom_overlay.hide()
+            self._pdf_zoom_overlay.clear()
+        self._pdf_zoom_expected_page = -1
+        self._pdf_zoom_expected_width = 0
+
+    def _pdf_fit_width_factor(self):
+        document = self.pdf_view.document()
+        if document is None or document.pageCount() <= 0:
+            return 0.0
+        current_page = self.pdf_view.pageNavigator().currentPage()
+        page_index = max(0, min(int(current_page), document.pageCount() - 1))
+        page_size = document.pagePointSize(page_index)
+        if page_size.width() <= 0:
+            return 0.0
+        margins = self.pdf_view.documentMargins()
+        available_width = max(
+            1,
+            self.pdf_view.viewport().width() - margins.left() - margins.right(),
+        )
+        page_pixel_width = page_size.width() * self.pdf_view.logicalDpiX() / 72.0
+        return available_width / page_pixel_width
 
     def _is_preview_blank_position(self, position):
         document_position = QPointF(position)

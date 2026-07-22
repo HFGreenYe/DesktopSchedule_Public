@@ -8,6 +8,7 @@ from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QImage, QPen
 from PyQt6.QtSvg import QSvgRenderer
 from ..config import AppConfig
 from ..data.database import db_manager
+from .add_view import MultiDatePopup
 
 
 class CenteredComboBox(QComboBox):
@@ -105,12 +106,14 @@ class AddScheduleViewWeek(QWidget):
         
         self.selected_start_time = None
         self.selected_end_time = None
+        self.selected_time_ranges = []
         self.selected_list_id = None 
         self.selected_reminder = None   
         self.is_alarm_mode = False      
         self.alarm_duration = 0         
         
         self._init_widgets()
+        self._multi_dates_popup = MultiDatePopup(self)
         self._setup_layout_structure()
         self._connect_signals()
         self._update_mode_ui()
@@ -171,6 +174,9 @@ class AddScheduleViewWeek(QWidget):
         # 5. 重要性与重复 
         self.priority_container, self.combo_priority = self._create_property_group("重要性：", ["   低", "   中", "   高"])
         self.repeat_container, self.combo_repeat = self._create_property_group("重复：", ["   无", "  每天", "  每周", "  每月"])
+        self._custom_repeat_index = self.combo_repeat.count()
+        self.combo_repeat.addItem("自定义")
+        self.combo_repeat.view().setRowHidden(self._custom_repeat_index, True)
 
         # 6. 信息结果卡片 
         self.info_card = QFrame()
@@ -186,6 +192,8 @@ class AddScheduleViewWeek(QWidget):
         self.lbl_info_time = self._create_info_row("time.svg", "时间未设置")
         self.lbl_info_alarm = self._create_info_row("alarm.svg", "无提醒")
         self.lbl_info_list = self._create_info_row("list.svg", "未选择") 
+        self.lbl_info_time.installEventFilter(self)
+        self.lbl_info_alarm.installEventFilter(self)
 
         # 7. 底部保存与取消按键
         self.btn_cancel = self._create_footer_btn("取消", is_primary=False)
@@ -374,9 +382,9 @@ class AddScheduleViewWeek(QWidget):
             QComboBox::drop-down { border: none; width: 0px; }
             QListView { background-color: #ffffff; color: #333333; border: 1px solid #dddddd; outline: 0px; }
             QListView::item { background-color: #ffffff; color: #333333; padding: 4px 8px; }
-            QListView::item:selected { background-color: #0cc0df; color: #ffffff; }
+            QListView::item:selected { background-color: __THEME_PRIMARY__; color: #ffffff; }
             QListView::item:hover { background-color: #f0f0f0; color: #333333; }
-        """)
+        """.replace("__THEME_PRIMARY__", AppConfig.COLOR_GRADIENT_START))
         layout.addWidget(lbl)
         layout.addWidget(combo)
         return container, combo
@@ -400,7 +408,18 @@ class AddScheduleViewWeek(QWidget):
         btn.setFixedSize(80, 32)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         if is_primary:
-            btn.setStyleSheet(f"QPushButton {{ background-color: white; border: none; border-radius: 16px; color: {AppConfig.COLOR_GRADIENT_START}; font-size: 13px; font-weight: bold; font-family: 'Microsoft YaHei'; }} QPushButton:hover {{ background-color: #f2f2f2; }}")
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: #ffffff;
+                    border: none;
+                    border-radius: 16px;
+                    color: {AppConfig.COLOR_GRADIENT_START};
+                    font-weight: bold;
+                    font-size: 13px;
+                    font-family: 'Microsoft YaHei';
+                }}
+                QPushButton:hover {{ background-color: #f0f0f0; }}
+            """)
         else:
             btn.setStyleSheet("QPushButton { background-color: transparent; border: 1px solid rgba(255, 255, 255, 0.7); border-radius: 16px; color: white;font-weight: bold; font-size: 13px; font-family: 'Microsoft YaHei'; } QPushButton:hover { background-color: rgba(255, 255, 255, 0.1); border: 1px solid white; }")
         return btn
@@ -413,6 +432,7 @@ class AddScheduleViewWeek(QWidget):
         self.btn_time.clicked.connect(self._emit_time_request)
         self.btn_alarm.clicked.connect(self._emit_alarm_request)
         self.btn_list.clicked.connect(self._emit_list_request)
+        self.combo_repeat.activated.connect(self._on_repeat_activated)
         
         # 绑定详情按钮点击事件，切换右侧显示区域
         self.btn_detail.clicked.connect(self._toggle_details_view)
@@ -466,7 +486,41 @@ class AddScheduleViewWeek(QWidget):
         self.alarm_duration = duration_mode
         self._update_info_card()
 
+    def _set_repeat_index_silently(self, index):
+        self.combo_repeat.blockSignals(True)
+        self.combo_repeat.setCurrentIndex(index)
+        self.combo_repeat.blockSignals(False)
+
+    def _clear_multi_time_state(self, clear_times=True, clear_reminder=True):
+        self.selected_time_ranges = []
+        self._multi_dates_popup.hide()
+        if clear_times:
+            self.selected_start_time = None
+            self.selected_end_time = None
+        if clear_reminder:
+            self.selected_reminder = None
+            self.is_alarm_mode = False
+            self.alarm_duration = 0
+        has_time = self.selected_start_time is not None or self.selected_end_time is not None
+        self.btn_alarm.setGraphicsEffect(
+            self._get_opacity_effect(1.0 if has_time else 0.5)
+        )
+
+    def _on_repeat_activated(self, index):
+        if index == self._custom_repeat_index:
+            return
+        if self.selected_time_ranges:
+            self._clear_multi_time_state(clear_times=True, clear_reminder=True)
+            self._update_info_card()
+
     def set_time_data(self, start, end):
+        was_custom = self.combo_repeat.currentIndex() == self._custom_repeat_index
+        self._clear_multi_time_state(
+            clear_times=False,
+            clear_reminder=was_custom,
+        )
+        if was_custom:
+            self._set_repeat_index_silently(0)
         self.selected_start_time = start
         self.selected_end_time = end
         
@@ -474,26 +528,103 @@ class AddScheduleViewWeek(QWidget):
             self.btn_alarm.setGraphicsEffect(self._get_opacity_effect(1.0))
         else:
             self.btn_alarm.setGraphicsEffect(self._get_opacity_effect(0.5))
-            
+
         self._update_info_card()
 
+    def set_multiple_time_data(self, ranges):
+        normalized_ranges = sorted(
+            list(ranges or []),
+            key=lambda value: (value[0] or value[1]),
+        )
+        was_custom = self.combo_repeat.currentIndex() == self._custom_repeat_index
+        if len(normalized_ranges) > 1:
+            self.selected_time_ranges = normalized_ranges
+            self.selected_start_time, self.selected_end_time = normalized_ranges[0]
+            self._set_repeat_index_silently(self._custom_repeat_index)
+            self.btn_alarm.setGraphicsEffect(self._get_opacity_effect(1.0))
+        elif normalized_ranges:
+            self.selected_time_ranges = []
+            self.selected_start_time, self.selected_end_time = normalized_ranges[0]
+            if was_custom:
+                self._set_repeat_index_silently(0)
+                self.selected_reminder = None
+                self.is_alarm_mode = False
+                self.alarm_duration = 0
+            self.btn_alarm.setGraphicsEffect(self._get_opacity_effect(1.0))
+        else:
+            self.selected_time_ranges = []
+            self.selected_start_time = None
+            self.selected_end_time = None
+            if was_custom:
+                self._set_repeat_index_silently(0)
+                self.selected_reminder = None
+                self.is_alarm_mode = False
+                self.alarm_duration = 0
+            self.btn_alarm.setGraphicsEffect(self._get_opacity_effect(0.5))
+        self._update_info_card()
+
+    @staticmethod
+    def _shift_reminder_time(reminder_time, base_target, target_time):
+        if reminder_time is None or base_target is None or target_time is None:
+            return None
+        return target_time + (reminder_time - base_target)
+
+    def _multiple_reminder_times(self):
+        base_target = self.selected_start_time or self.selected_end_time
+        return [
+            reminder_time
+            for start_time, end_time in self.selected_time_ranges
+            if (
+                reminder_time := self._shift_reminder_time(
+                    self.selected_reminder,
+                    base_target,
+                    start_time or end_time,
+                )
+            ) is not None
+        ]
+
+    def _format_time_range(self, start, end):
+        """格式化时间范围显示。同天：MM-DD S - E；跨天同年：MM-DD S - MM-DD E；跨年：YY-MM-DD S - YY-MM-DD E"""
+        if not end:
+            return None
+        start = start or end
+        if start.date() == end.date():
+            return f"{start:%m-%d %H:%M} - {end:%H:%M}"
+        if start.year == end.year:
+            return f"{start:%m-%d %H:%M} - {end:%m-%d %H:%M}"
+        return f"{start:%y-%m-%d %H:%M} - {end:%y-%m-%d %H:%M}"
+
     def _update_info_card(self):
-        if self.selected_end_time:
-            date_str = self.selected_end_time.strftime("%m-%d")
-            end_str = self.selected_end_time.strftime("%H:%M")
+        if self.selected_time_ranges:
+            self.lbl_info_time.setText("多选")
+            self.lbl_info_time.setStyleSheet(
+                "color: #FFFFFF; font-weight: bold; font-size: 14px;"
+            )
+        elif self.selected_end_time:
             if self.selected_start_time:
-                start_str = self.selected_start_time.strftime("%H:%M")
-                text = f"{date_str} {start_str} - {end_str}"
+                text = self._format_time_range(self.selected_start_time, self.selected_end_time)
             else:
-                text = f"{date_str} 截止: {end_str}"
+                text = f"{self.selected_end_time:%m-%d} 截止: {self.selected_end_time:%H:%M}"
             self.lbl_info_time.setText(text)
-            self.lbl_info_time.setStyleSheet("color: #FFFFFF; font-weight: bold; font-size: 14px;") 
+            if len(text) > 18:
+                fs = "10px"
+            elif len(text) > 14:
+                fs = "12px"
+            else:
+                fs = "14px"
+            self.lbl_info_time.setStyleSheet(
+                f"color: #FFFFFF; font-weight: bold; font-size: {fs};"
+            )
         else:
             self.lbl_info_time.setText("时间未设置")
             self.lbl_info_time.setStyleSheet("color: rgba(255,255,255,0.6); font-size: 13px;") 
 
         if self.selected_reminder:
-            remind_str = self.selected_reminder.strftime("%m-%d %H:%M")
+            remind_str = (
+                "多选"
+                if self.selected_time_ranges
+                else self.selected_reminder.strftime("%m-%d %H:%M")
+            )
             icon_prefix = "" if self.is_alarm_mode else ""
             self.lbl_info_alarm.setText(f"{icon_prefix}{remind_str}")
             self.lbl_info_alarm.setStyleSheet("color: #FFFFFF; font-weight: bold; font-size: 14px;") 
@@ -572,6 +703,8 @@ class AddScheduleViewWeek(QWidget):
         
         self.selected_start_time = None
         self.selected_end_time = None
+        self.selected_time_ranges = []
+        self._multi_dates_popup.hide()
         self.selected_list_id = None
         self.selected_reminder = None 
         self.is_alarm_mode = False
@@ -621,8 +754,49 @@ class AddScheduleViewWeek(QWidget):
             'category_id': self.selected_list_id
         }
 
-        if db_manager.add_schedule(schedule_data):
+        save_succeeded = False
+        if self.selected_time_ranges:
+            base_target = self.selected_start_time or self.selected_end_time
+            custom_items = []
+            for start_time, end_time in self.selected_time_ranges:
+                item_data = schedule_data.copy()
+                item_data['start_time'] = start_time
+                item_data['end_time'] = end_time
+                item_data['reminder_time'] = self._shift_reminder_time(
+                    self.selected_reminder,
+                    base_target,
+                    start_time or end_time,
+                )
+                custom_items.append(item_data)
+            save_succeeded = db_manager.add_custom_schedules(custom_items)
+        else:
+            save_succeeded = db_manager.add_schedule(schedule_data)
+
+        if save_succeeded:
             self.saved.emit() 
             self.reset()
         else:
             print("❌ [DB] 保存失败")
+
+    def eventFilter(self, watched, event):
+        if watched is self.lbl_info_time:
+            if event.type() == QEvent.Type.Enter and self.selected_time_ranges:
+                position = self.lbl_info_time.mapToGlobal(
+                    QPoint(self.lbl_info_time.width() + 8, 0)
+                )
+                self._multi_dates_popup.show_time_ranges(
+                    self.selected_time_ranges,
+                    position,
+                )
+            elif event.type() in (QEvent.Type.Leave, QEvent.Type.Hide):
+                self._multi_dates_popup.hide()
+        elif watched is self.lbl_info_alarm:
+            reminder_times = self._multiple_reminder_times()
+            if event.type() == QEvent.Type.Enter and reminder_times:
+                position = self.lbl_info_alarm.mapToGlobal(
+                    QPoint(self.lbl_info_alarm.width() + 8, 0)
+                )
+                self._multi_dates_popup.show_reminders(reminder_times, position)
+            elif event.type() in (QEvent.Type.Leave, QEvent.Type.Hide):
+                self._multi_dates_popup.hide()
+        return super().eventFilter(watched, event)

@@ -41,6 +41,103 @@ class CustomToolTip(QLabel):
         QTimer.singleShot(2500, self.close) # 稍微延长一点报错显示时间
 
 
+class CardSnapScrollArea(QScrollArea):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._card_snap_enabled = False
+        self._snap_points = [0]
+        self._content_widget = None
+        self._row_count = 0
+        self._card_height = 0
+        self._card_spacing = 0
+        self._top_margin = 0
+        self._bottom_margin = 0
+
+    def set_card_snap_enabled(self, enabled):
+        self._card_snap_enabled = bool(enabled)
+        self._rebuild_snap_points()
+
+    def configure_card_rows(
+        self,
+        content_widget,
+        row_count,
+        card_height,
+        spacing,
+        top_margin,
+        bottom_margin,
+    ):
+        self._content_widget = content_widget
+        self._row_count = max(0, int(row_count))
+        self._card_height = max(0, int(card_height))
+        self._card_spacing = max(0, int(spacing))
+        self._top_margin = max(0, int(top_margin))
+        self._bottom_margin = max(0, int(bottom_margin))
+        self._rebuild_snap_points()
+
+    def _rebuild_snap_points(self):
+        if (
+            not self._card_snap_enabled
+            or self._content_widget is None
+            or self._row_count <= 0
+            or self._card_height <= 0
+        ):
+            self._snap_points = [0]
+            return
+
+        row_pitch = self._card_height + self._card_spacing
+        viewport_height = max(1, self.viewport().height())
+        usable_height = max(
+            1,
+            viewport_height - self._top_margin - self._bottom_margin,
+        )
+        visible_rows = max(1, (usable_height + self._card_spacing) // row_pitch)
+        hidden_rows = max(0, self._row_count - visible_rows)
+        self._snap_points = [index * row_pitch for index in range(hidden_rows + 1)]
+
+        previous_value = self.verticalScrollBar().value()
+        target_value = min(
+            self._snap_points,
+            key=lambda point: abs(point - previous_value),
+        )
+        scroll_limit = self._snap_points[-1]
+        self._content_widget.setMinimumHeight(viewport_height + scroll_limit)
+        QTimer.singleShot(
+            0,
+            lambda: self.verticalScrollBar().setValue(
+                min(target_value, self.verticalScrollBar().maximum())
+            ),
+        )
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._rebuild_snap_points()
+
+    def wheelEvent(self, event):
+        angle_delta = event.angleDelta().y()
+        scroll_bar = self.verticalScrollBar()
+        if (
+            not self._card_snap_enabled
+            or angle_delta == 0
+            or len(self._snap_points) <= 1
+            or scroll_bar.maximum() <= 0
+        ):
+            super().wheelEvent(event)
+            return
+
+        current_index = min(
+            range(len(self._snap_points)),
+            key=lambda index: abs(self._snap_points[index] - scroll_bar.value()),
+        )
+        notch_count = max(1, abs(angle_delta) // 120)
+        direction = -1 if angle_delta > 0 else 1
+        target_index = max(
+            0,
+            min(len(self._snap_points) - 1, current_index + direction * notch_count),
+        )
+        scroll_bar.setValue(self._snap_points[target_index])
+        event.accept()
+
+
 class CategoryCard(QFrame):
     clicked = pyqtSignal(int)
     delete_requested = pyqtSignal(int, str) # 传递 id 和 名字
@@ -142,6 +239,7 @@ class ListPickerView(QWidget):
         self.selected_cat_id = None
         self.drag_pos = None 
         self.current_list_type = 'schedule'
+        self._loaded_category_count = 0
         self._setup_ui()
         self._connect_signals()
 
@@ -167,7 +265,7 @@ class ListPickerView(QWidget):
         layout.addWidget(self.header_container)
 
         # 2. 内容区
-        self.scroll_area = QScrollArea()
+        self.scroll_area = CardSnapScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setStyleSheet("background: transparent; border: none;")
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -302,6 +400,23 @@ class ListPickerView(QWidget):
         else:
             self.lbl_title.setStyleSheet("color: white; font-size: 24px; font-weight: bold; font-family: 'Microsoft YaHei';")
 
+    def set_card_snap_scrolling(self, enabled):
+        self.scroll_area.set_card_snap_enabled(enabled)
+        self._refresh_card_snap_scrolling()
+
+    def _refresh_card_snap_scrolling(self):
+        top_margin = self.content_layout.contentsMargins().top()
+        if self.input_container.isVisible():
+            top_margin += self.input_container.height() + self.content_layout.spacing()
+        self.scroll_area.configure_card_rows(
+            self.content_widget,
+            self._loaded_category_count,
+            50,
+            self.cards_layout.spacing(),
+            top_margin,
+            self.content_layout.contentsMargins().bottom(),
+        )
+
     def _connect_signals(self):
         self.btn_add_new.clicked.connect(self._toggle_input_box)
         self.btn_confirm_add.clicked.connect(self._add_category)
@@ -339,6 +454,8 @@ class ListPickerView(QWidget):
             card.clicked.connect(self._on_card_clicked)
             card.delete_requested.connect(self._delete_category_logic)
             self.cards_layout.addWidget(card)
+        self._loaded_category_count = len(categories)
+        QTimer.singleShot(0, self._refresh_card_snap_scrolling)
 
     def _toggle_input_box(self):
         if self.input_container.isVisible():
@@ -346,6 +463,7 @@ class ListPickerView(QWidget):
         else:
             self.input_container.show()
             self.input_new.setFocus()
+        QTimer.singleShot(0, self._refresh_card_snap_scrolling)
 
     def _add_category(self):
         name = self.input_new.text().strip()

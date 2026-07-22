@@ -69,6 +69,16 @@ class CardStepScrollArea(QScrollArea):
 
         scroll_bar = self.verticalScrollBar()
         previous_row = round(scroll_bar.value() / self.row_pitch)
+
+        # 无卡片时：不强制最小高度，让内容回归自然尺寸
+        if self._card_count == 0:
+            self._snap_points = [0]
+            self._bottom_viewport_margin = 0
+            self.setViewportMargins(0, 0, 0, 0)
+            content_widget.setMinimumHeight(0)
+            scroll_bar.setSingleStep(self.row_pitch)
+            return
+
         available_height = max(
             1,
             self.viewport().height() + self._bottom_viewport_margin,

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QFrame, QToolButton, QLineEdit, QSizePolicy, QStackedWidget, QScrollArea, QApplication)
-from PyQt6.QtCore import Qt, pyqtSignal, QDate, QTime, QTimer, QPointF, QRectF, QSize, QSettings, QEvent
+from PyQt6.QtCore import Qt, pyqtSignal, QDate, QTime, QTimer, QPointF, QRectF, QSize, QEvent
 from PyQt6.QtGui import QPainter, QPainterPath, QColor, QBrush, QLinearGradient, QIcon, QPixmap, QCursor, QPen, QFont, QFontMetrics, QImage
 from PyQt6.QtSvg import QSvgRenderer
 from qframelesswindow import FramelessMainWindow
@@ -623,6 +623,26 @@ class WeekTimetableBoard(QFrame):
             and self._selected_schedule_id != active_schedule_id
         ):
             self._selected_schedule_id = None
+
+        # 按每天最早日程调整可见起点（避免有日程而视口停在 0 点看不到）
+        max_start = max(0, 24 - self.HOUR_ROWS)
+        today = QDate.currentDate()
+        for day_index in range(self.DAY_COUNT):
+            iter_date = self.current_monday.addDays(day_index)
+            day_scheds = self.schedules_by_day.get(day_index, [])
+            if not day_scheds:
+                continue
+            earliest = 24
+            for s in day_scheds:
+                st = getattr(s, "start_time", None)
+                if st and hasattr(st, "hour"):
+                    earliest = min(earliest, st.hour)
+                ddl = getattr(s, "end_time", None)
+                if ddl and not st and hasattr(ddl, "hour"):
+                    earliest = min(earliest, ddl.hour)
+            if earliest < 24:
+                self._visible_start_hours[day_index] = min(earliest, max_start)
+
         self.update()
 
     def set_selected_day(self, qdate):
@@ -1873,6 +1893,21 @@ class WeekTimetableBoard(QFrame):
             day_index,
         )
 
+    def _days_with_schedule_data(self):
+        days_with_content = set()
+        for day_index, schedules in self.schedules_by_day.items():
+            if any(
+                getattr(schedule, "status", 0) != 2
+                and not ScheduleQueryService.is_todo(schedule)
+                and (
+                    getattr(schedule, "start_time", None) is not None
+                    or getattr(schedule, "end_time", None) is not None
+                )
+                for schedule in schedules
+            ):
+                days_with_content.add(day_index)
+        return days_with_content
+
     def _draw_current_time_line(self, painter, board_rect, day_width, row_height):
         today = QDate.currentDate()
         day_index = self.current_monday.daysTo(today)
@@ -2006,11 +2041,7 @@ class WeekTimetableBoard(QFrame):
         self._draw_selected_schedule_overlays(painter)
 
         # 空日程占位文字
-        days_with_content = set()
-        for region in self._hit_regions:
-            day_idx = int(region["rect"].left() / day_width)
-            if 0 <= day_idx < self.DAY_COUNT:
-                days_with_content.add(day_idx)
+        days_with_content = self._days_with_schedule_data()
 
         empty_font = painter.font()
         empty_font.setFamily("Microsoft YaHei")
@@ -2251,13 +2282,11 @@ class WeekWindow(FramelessMainWindow):
         self._drag_edge_timer.timeout.connect(self._check_drag_week_edge)
         # 编辑模式状态位，控制背景渲染！
         self.is_edit_mode = False
-        # 暗色模式
-        self._dark_mode = QSettings("Lankor", "DesktopSchedule").value(
-            "week/dark_mode", False, type=bool
-        )
+        # 周界面暂时只启用浅色模式。
+        self._dark_mode = False
 
         self._setup_ui()
-        self._apply_dark_mode()  # 应用初始暗色模式状态
+        self._apply_dark_mode()
         self._window_drag_controller = WindowDragController(
             self,
             drag_started=self._on_window_drag_started,
@@ -2468,12 +2497,9 @@ class WeekWindow(FramelessMainWindow):
         status_row.addWidget(self.weather_container, alignment=Qt.AlignmentFlag.AlignVCenter)
         status_row.addSpacing(0)
         status_row.addWidget(self.tools_container, alignment=Qt.AlignmentFlag.AlignVCenter)
-        # 暗色模式双击热区（搜索框右侧空白区域）
+        # 保留弹性空白区，仅用于维持头部原有布局。
         self._dark_mode_trigger = QWidget()
         self._dark_mode_trigger.setStyleSheet("background: transparent;")
-        self._dark_mode_trigger.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._dark_mode_trigger.setToolTip("双击切换暗色模式")
-        self._dark_mode_trigger.installEventFilter(self)
         status_row.addWidget(self._dark_mode_trigger, stretch=1)
 
         self.btn_suspend = QPushButton(self.top_container)
@@ -2644,12 +2670,11 @@ class WeekWindow(FramelessMainWindow):
             if i in placeholder_config:
                 text, align_flag = placeholder_config[i]
                 lbl_placeholder = QLabel(text)
-                lbl_placeholder.setStyleSheet("color: #CCCCCC; font-size: 15px; font-weight: bold; font-family: 'Microsoft YaHei'; padding-top: 60px;") 
-                lbl_placeholder.setAlignment(align_flag | Qt.AlignmentFlag.AlignTop)
-                p_layout.addWidget(lbl_placeholder)
+                lbl_placeholder.setStyleSheet("color: #CCCCCC; font-size: 15px; font-weight: bold; font-family: 'Microsoft YaHei';")
+                lbl_placeholder.setAlignment(align_flag | Qt.AlignmentFlag.AlignCenter)
+                lbl_placeholder.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+                p_layout.addWidget(lbl_placeholder, stretch=1)
                 self.placeholder_labels.append(lbl_placeholder)
-                
-        
             p_layout.addStretch()
             
             scroll_area.setWidget(panel)
@@ -2685,6 +2710,9 @@ class WeekWindow(FramelessMainWindow):
         self.page_time = TimePickerViewWeek()
         self.page_alarm = AlarmPickerViewWeek()
         self.page_list = ListPickerView()
+        self.page_list.set_card_snap_scrolling(True)
+        self.page_list.header_container.setFixedHeight(38)
+        self.page_list.header_container.layout().setContentsMargins(30, 0, 30, 0)
         self.page_list.btn_suspend.hide()
         self.page_list.btn_close.hide()
         
@@ -2995,23 +3023,21 @@ class WeekWindow(FramelessMainWindow):
         rect_bg = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
         path_bg.addRoundedRect(rect_bg, 8.0, 8.0)
 
-        
         if self.is_edit_mode:
-            gradient = QLinearGradient(0, 0, 0, self.height())
-            gradient.setColorAt(0.0, QColor(AppConfig.COLOR_GRADIENT_START))
-            gradient.setColorAt(1.0, QColor(AppConfig.COLOR_GRADIENT_END))
-            painter.fillPath(path_bg, QBrush(gradient))
-            
-        
+            window_gradient = QLinearGradient(0, 0, 0, self.height())
+            window_gradient.setColorAt(0.0, QColor(AppConfig.COLOR_GRADIENT_START))
+            window_gradient.setColorAt(1.0, QColor(AppConfig.COLOR_GRADIENT_END))
+            painter.fillPath(path_bg, QBrush(window_gradient))
         else:
             painter.fillPath(path_bg, QColor("#FFFFFF"))
 
-            path_top = QPainterPath()
-            path_top.setFillRule(Qt.FillRule.WindingFill)
-            rect_top = QRectF(0, 0, self.width(), self.top_container.height())
-            path_top.addRoundedRect(rect_top, 8.0, 8.0)
-            path_top.addRect(0, self.top_container.height() - 10, self.width(), 10)
-            
+        path_top = QPainterPath()
+        path_top.setFillRule(Qt.FillRule.WindingFill)
+        rect_top = QRectF(0, 0, self.width(), self.top_container.height())
+        path_top.addRoundedRect(rect_top, 8.0, 8.0)
+        path_top.addRect(0, self.top_container.height() - 10, self.width(), 10)
+
+        if not self.is_edit_mode:
             gradient = QLinearGradient(0, 0, 0, self.top_container.height())
             gradient.setColorAt(0.0, QColor(AppConfig.COLOR_GRADIENT_START))
             gradient.setColorAt(1.0, QColor(AppConfig.COLOR_GRADIENT_END))
@@ -3022,7 +3048,7 @@ class WeekWindow(FramelessMainWindow):
         painter.drawPath(path_bg)
 
     def _set_edit_mode_bg(self, is_edit):
-        """动态切换下半部分盒子的颜色，并命令窗口重绘自己"""
+        """编辑页使用贯穿整个周窗口的主题渐变。"""
         self.is_edit_mode = is_edit
         if is_edit:
             self.content_area.set_surface_colors(
@@ -3104,6 +3130,9 @@ class WeekWindow(FramelessMainWindow):
         self.page_add.req_open_time_picker.connect(self.go_to_time_picker)
         self.page_time.back_requested.connect(self.back_from_time_picker) 
         self.page_time.confirm_requested.connect(self.on_time_confirmed)
+        self.page_time.multiple_confirm_requested.connect(
+            self.on_multiple_time_confirmed
+        )
 
         self.page_add.req_open_alarm_picker.connect(self.go_to_alarm_picker)
         self.page_alarm.back_requested.connect(self.back_from_alarm_picker) 
@@ -3142,18 +3171,22 @@ class WeekWindow(FramelessMainWindow):
 
     def go_to_time_picker(self, start, end):
         self.time_picker_mode = 'add' # 重置为添加模式
+        self.page_time.set_selection_mode_available(True)
         self.page_time.set_title("设置时间")
         if not start and not end:
             dashboard_date = self.current_selected_date.toPyDate()
             now = datetime.now()
             end = datetime(dashboard_date.year, dashboard_date.month, dashboard_date.day, now.hour, now.minute)
         self.page_time.set_initial_data(start, end)
+        if self.page_add.selected_time_ranges:
+            self.page_time.set_multiple_ranges(self.page_add.selected_time_ranges)
         self.body_stack.setCurrentWidget(self.page_time)
 
     def go_to_time_picker_for_edit(self, schedule_data):
         """周界面的时间修改路由"""
         self.time_picker_mode = 'edit'
         self.editing_schedule = schedule_data
+        self.page_time.set_selection_mode_available(False)
         
         # 智能截断标题防止 UI 撑爆
         display_title = schedule_data.title if len(schedule_data.title) <= 8 else schedule_data.title[:7] + "..."
@@ -3189,6 +3222,12 @@ class WeekWindow(FramelessMainWindow):
         else:
             self.page_add.set_time_data(start, end)
             self.back_from_time_picker()
+
+    def on_multiple_time_confirmed(self, ranges):
+        if getattr(self, 'time_picker_mode', 'add') != 'add':
+            return
+        self.page_add.set_multiple_time_data(ranges)
+        self.back_from_time_picker()
 
     def go_to_alarm_picker(self, target_time, is_alarm, duration):
         self.alarm_picker_mode = 'add'
@@ -3242,8 +3281,17 @@ class WeekWindow(FramelessMainWindow):
     def go_to_list_picker(self, current_category_id):
         self.list_picker_mode = 'add'
         self.page_list.set_title("选择清单")
+        self.page_list.lbl_title.setStyleSheet(
+            "color: white; font-size: 18px; font-weight: bold; "
+            "font-family: 'Microsoft YaHei';"
+        )
+        self.page_list.scroll_area.verticalScrollBar().setValue(0)
         self.page_list.load_data(current_category_id)
         self.body_stack.setCurrentWidget(self.page_list)
+        QTimer.singleShot(
+            0,
+            lambda: self.page_list.scroll_area.verticalScrollBar().setValue(0),
+        )
 
     def go_to_list_picker_for_edit(self, schedule_data):
         """周界面的清单修改路由"""
@@ -3253,8 +3301,13 @@ class WeekWindow(FramelessMainWindow):
         display_title = schedule_data.title if len(schedule_data.title) <= 8 else schedule_data.title[:7] + "..."
         self.page_list.set_title(f"修改【{display_title}】清单")
         
+        self.page_list.scroll_area.verticalScrollBar().setValue(0)
         self.page_list.load_data(schedule_data.category_id)
         self.body_stack.setCurrentWidget(self.page_list)
+        QTimer.singleShot(
+            0,
+            lambda: self.page_list.scroll_area.verticalScrollBar().setValue(0),
+        )
         self._set_edit_mode_bg(True)
 
     def back_from_list_picker(self):
@@ -4156,12 +4209,6 @@ class WeekWindow(FramelessMainWindow):
     def eventFilter(self, obj, event):
         from PyQt6.QtCore import QEvent
 
-        # 暗色模式双击热区
-        if hasattr(self, '_dark_mode_trigger') and obj is self._dark_mode_trigger:
-            if event.type() == QEvent.Type.MouseButtonDblClick and event.button() == Qt.MouseButton.LeftButton:
-                self._toggle_dark_mode()
-                return True
-
         # 拦截底层 7 个面板的鼠标事件
         if hasattr(self, 'bottom_panels') and obj in self.bottom_panels:
             if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.RightButton:
@@ -4239,14 +4286,6 @@ class WeekWindow(FramelessMainWindow):
             self.refresh_week_data()
             return
         self.toggle_sort_options_panel()
-
-    def _toggle_dark_mode(self):
-        """切换暗色模式并持久化"""
-        self._dark_mode = not self._dark_mode
-        QSettings("Lankor", "DesktopSchedule").setValue(
-            "week/dark_mode", self._dark_mode
-        )
-        self._apply_dark_mode()
 
     def _apply_dark_mode(self):
         """根据 _dark_mode 状态更新所有 UI 元素"""

@@ -1,7 +1,7 @@
 # src/ui/main_window.py
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QStackedWidget, QApplication
 from PyQt6.QtCore import Qt, QRectF, QTimer, QEvent, QPoint
-from PyQt6.QtGui import QPainter, QPainterPath, QBrush, QLinearGradient, QColor, QPen
+from PyQt6.QtGui import QPainter, QPainterPath, QBrush, QLinearGradient, QColor, QPen, QCursor
 from qframelesswindow import FramelessMainWindow
 from datetime import datetime, timedelta
 import winsound
@@ -59,6 +59,7 @@ class MainWindow(FramelessMainWindow):
         self._vertical_resize_edge = None
         self._vertical_resize_start_pos = QPoint()
         self._vertical_resize_start_geometry = None
+        self._vertical_resize_cursor_override = False
         self._day_collapsed = False
         self._day_expanded_height = 600
         self._day_expanded_minimum_height = 600
@@ -66,6 +67,7 @@ class MainWindow(FramelessMainWindow):
         self._day_expanded_layout_spacing = 10
         self._day_collapsed_detail_popups = []
         self._day_collapsed_height = 0
+        self._collapsed_return_page = None  # 收起前所在页面，展开时恢复
         
         self.setFixedWidth(AppConfig.DEFAULT_WIDTH)
         self.setMinimumHeight(600) 
@@ -203,7 +205,7 @@ class MainWindow(FramelessMainWindow):
         self.header.view_requested.connect(self.switch_view)
         self.header.mode_requested.connect(self.set_schedule_display_mode)
         # 瀹炰緥鍖栨棩鍘嗗脊绐?
-        self.calendar_pop = CalendarPop(self)
+        self.calendar_pop = CalendarPop(self, marker_vertical_offset=-3)
         # 鐩戝惉鏃ュ巻閫変腑鐨勬棩鏈?
         self.calendar_pop.date_selected.connect(self.on_calendar_date_picked)
         # 鐩戝惉 Header 鍙戝嚭鐨勬墦寮€鏃ュ巻璇锋眰
@@ -233,6 +235,7 @@ class MainWindow(FramelessMainWindow):
         self.page_add.req_open_time_picker.connect(self.go_to_time_picker)
         self.page_time.back_requested.connect(self.back_from_time_picker) 
         self.page_time.confirm_requested.connect(self.on_time_confirmed)
+        self.page_time.multiple_confirm_requested.connect(self.on_multiple_time_confirmed)
         self.page_dashboard.req_edit_time.connect(self.go_to_time_picker_for_edit) # 馃煝 鐩戝惉闈㈡澘浼犳潵鐨勪慨鏀硅姹?
 
         self.alarm_picker_mode = 'add'
@@ -907,6 +910,7 @@ class MainWindow(FramelessMainWindow):
     def go_to_time_picker(self, start, end):
         """Open time picker from add view."""
         self.time_picker_mode = 'add'
+        self.page_time.set_selection_mode_available(True)
         self.page_time.set_title("\u8bbe\u7f6e\u65f6\u95f4")
         
         # 濡傛灉鏄柊寤烘棩绋嬶紙娌′紶鏃堕棿锛夛紝灏辨妸 Dashboard 鍋滅暀鐨勬棩鏈熶紶缁欏畠锛?
@@ -917,6 +921,8 @@ class MainWindow(FramelessMainWindow):
             end = datetime(dashboard_date.year, dashboard_date.month, dashboard_date.day, now.hour, now.minute)
             
         self.page_time.set_initial_data(start, end)
+        if self.page_add.selected_time_ranges:
+            self.page_time.set_multiple_ranges(self.page_add.selected_time_ranges)
         self.body_stack.setCurrentWidget(self.page_time)
         self.header.hide() 
 
@@ -930,6 +936,7 @@ class MainWindow(FramelessMainWindow):
             self.month_window.go_to_time_picker_for_edit(schedule_data)
             return
         self.time_picker_mode = 'edit'
+        self.page_time.set_selection_mode_available(False)
         self.edit_picker_return_view = edit_target
         self.editing_schedule = schedule_data
         
@@ -975,6 +982,12 @@ class MainWindow(FramelessMainWindow):
                         p.refresh_created_display() 
                 self.back_from_time_picker()
             self._check_repeat_and_execute(self.editing_schedule, _do_update)
+
+    def on_multiple_time_confirmed(self, ranges):
+        if self.time_picker_mode != 'add':
+            return
+        self.page_add.set_multiple_time_data(ranges)
+        self.back_from_time_picker()
 
     def _check_repeat_and_execute(self, schedule_data, update_callback):
         from PyQt6.QtWidgets import QMessageBox
@@ -1441,13 +1454,12 @@ class MainWindow(FramelessMainWindow):
         return self._day_collapsed
 
     def is_day_view_active(self):
-        return (
-            hasattr(self, "page_dashboard")
-            and hasattr(self, "body_stack")
-            and self.body_stack.currentWidget() == self.page_dashboard
-            and not self.week_window.isVisible()
-            and not self.month_window.isVisible()
-        )
+        if not hasattr(self, "body_stack"):
+            return False
+        if self.week_window.isVisible() or self.month_window.isVisible():
+            return False
+        current = self.body_stack.currentWidget()
+        return current in (self.page_dashboard, self.page_add, self.page_todo)
 
     def toggle_day_collapsed(self):
         self.set_day_collapsed(not self._day_collapsed)
@@ -1472,6 +1484,8 @@ class MainWindow(FramelessMainWindow):
             return
 
         if collapsed:
+            # 记住当前页面，展开时恢复
+            self._collapsed_return_page = self.body_stack.currentWidget()
             self._hide_day_query_panels()
             self._day_expanded_height = self.height()
             self._day_expanded_minimum_height = self.minimumHeight()
@@ -1495,6 +1509,10 @@ class MainWindow(FramelessMainWindow):
             self.resize(self.width(), collapsed_height)
             self._day_collapsed = True
         else:
+            # 恢复收起前的页面
+            if self._collapsed_return_page is not None:
+                self.body_stack.setCurrentWidget(self._collapsed_return_page)
+                self._collapsed_return_page = None
             self.setMaximumHeight(self._day_expanded_maximum_height)
             self.setMinimumHeight(self._day_expanded_minimum_height)
             self.main_layout.setSpacing(self._day_expanded_layout_spacing)
@@ -1567,6 +1585,7 @@ class MainWindow(FramelessMainWindow):
                 if event.button() == Qt.MouseButton.LeftButton:
                     edge = self._vertical_resize_edge_at(self._event_global_pos(event))
                     if edge:
+                        self._set_vertical_resize_cursor(True)
                         self._vertical_resize_edge = edge
                         self._vertical_resize_start_pos = self._event_global_pos(event)
                         self._vertical_resize_start_geometry = self.geometry()
@@ -1574,25 +1593,47 @@ class MainWindow(FramelessMainWindow):
                         return True
             elif event_type == QEvent.Type.MouseMove:
                 if self._vertical_resize_edge:
+                    self._set_vertical_resize_cursor(True)
                     self._apply_vertical_resize(self._event_global_pos(event))
                     event.accept()
                     return True
-                if self._vertical_resize_edge_at(self._event_global_pos(event)):
-                    self.setCursor(Qt.CursorShape.SizeVerCursor)
-                elif self.cursor().shape() == Qt.CursorShape.SizeVerCursor:
-                    self.unsetCursor()
+                self._set_vertical_resize_cursor(
+                    bool(self._vertical_resize_edge_at(self._event_global_pos(event)))
+                )
             elif event_type == QEvent.Type.MouseButtonRelease:
                 if self._vertical_resize_edge:
                     self._vertical_resize_edge = None
                     self._vertical_resize_start_geometry = None
-                    self.unsetCursor()
+                    self._set_vertical_resize_cursor(
+                        bool(
+                            self._vertical_resize_edge_at(
+                                self._event_global_pos(event)
+                            )
+                        )
+                    )
                     event.accept()
                     return True
             elif event_type == QEvent.Type.Leave:
-                if not self._vertical_resize_edge and self.cursor().shape() == Qt.CursorShape.SizeVerCursor:
-                    self.unsetCursor()
+                if (
+                    not self._vertical_resize_edge
+                    and not self._vertical_resize_edge_at(QCursor.pos())
+                ):
+                    self._set_vertical_resize_cursor(False)
 
         return False
+
+    def _set_vertical_resize_cursor(self, active):
+        app = QApplication.instance()
+        if app is None:
+            return
+        if active:
+            if not self._vertical_resize_cursor_override:
+                app.setOverrideCursor(QCursor(Qt.CursorShape.SizeVerCursor))
+                self._vertical_resize_cursor_override = True
+            return
+        if self._vertical_resize_cursor_override:
+            app.restoreOverrideCursor()
+            self._vertical_resize_cursor_override = False
 
     def _event_global_pos(self, event):
         if hasattr(event, "globalPosition"):
@@ -1641,6 +1682,7 @@ class MainWindow(FramelessMainWindow):
             )
 
     def closeEvent(self, event):
+        self._set_vertical_resize_cursor(False)
         app = QApplication.instance()
         if app is not None:
             app.removeEventFilter(self)

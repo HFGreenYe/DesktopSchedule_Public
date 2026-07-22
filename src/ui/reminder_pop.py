@@ -17,7 +17,7 @@ class ReminderPop(FramelessWindow):
         super().__init__(parent=parent)
         self.data = schedule_data
         self.is_alarm_on = self.data.get('is_alarm', False)
-        
+
         self.drag_pos = None 
         
         self.setFixedSize(320, 180) 
@@ -85,9 +85,9 @@ class ReminderPop(FramelessWindow):
         self.btn_close = QPushButton("知道了")
         self.btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_close.setFixedHeight(34)
-        self.btn_close.setStyleSheet("""
-            QPushButton { background-color: white; border-radius: 17px; color: #0cc0df; font-weight: bold;}
-            QPushButton:hover { background-color: #f0f0f0; }
+        self.btn_close.setStyleSheet(f"""
+            QPushButton {{ background-color: white; border-radius: 17px; color: {AppConfig.COLOR_GRADIENT_START}; font-weight: bold;}}
+            QPushButton:hover {{ background-color: #f0f0f0; }}
         """)
         self.btn_close.clicked.connect(self.close)
         
@@ -203,7 +203,11 @@ class ReminderPop(FramelessWindow):
         path.addRoundedRect(rect, 12.0, 12.0)
         
         gradient = QLinearGradient(0, 0, 0, self.height())
-        gradient.setColorAt(0.0, QColor(12, 192, 223, 235)) 
-        gradient.setColorAt(1.0, QColor(19, 194, 224, 245))
-        
+        gradient_start = QColor(AppConfig.COLOR_GRADIENT_START)
+        gradient_start.setAlpha(235)
+        gradient_end = QColor(AppConfig.COLOR_GRADIENT_END)
+        gradient_end.setAlpha(245)
+        gradient.setColorAt(0.0, gradient_start)
+        gradient.setColorAt(1.0, gradient_end)
+
         painter.fillPath(path, QBrush(gradient))

@@ -10,6 +10,7 @@ class ScheduleRepeatService:
 
     NON_REPEAT_RULES = ("none", "无", "不重复", "")
     REPEAT_COUNTS = {"每天": 365, "每周": 52, "每月": 12}
+    CUSTOM_REPEAT_RULES = ("自定义",)
 
     @staticmethod
     def add_months(sourcedate, months):
@@ -71,7 +72,22 @@ class ScheduleRepeatService:
         return ScheduleRepeatService.REPEAT_COUNTS.get((rule or "").strip(), 0)
 
     @staticmethod
-    def build_repeat_insert_plan(base_data, rule, group_id, include_base=True):
+    def is_custom_repeat_rule(rule):
+        return (rule or "").strip() in ScheduleRepeatService.CUSTOM_REPEAT_RULES
+
+    @staticmethod
+    def get_anchor_datetime(start_time, end_time):
+        return start_time or end_time
+
+    @staticmethod
+    def build_repeat_insert_plan(
+        base_data,
+        rule,
+        group_id,
+        include_base=True,
+        excluded_anchor_dates=None,
+        minimum_anchor=None,
+    ):
         """Build insert plan dict list for legacy repeat generation."""
         normalized_rule = (rule or "").strip()
         base_item = dict(base_data or {})
@@ -90,6 +106,10 @@ class ScheduleRepeatService:
         base_start = base_item.get("start_time")
         base_end = base_item.get("end_time")
         base_reminder = base_item.get("reminder_time")
+        excluded_dates = {
+            value.date() if isinstance(value, datetime.datetime) else value
+            for value in (excluded_anchor_dates or ())
+        }
 
         for i in range(1, repeat_count + 1):
             new_item = base_item.copy()
@@ -102,6 +122,14 @@ class ScheduleRepeatService:
                 new_item["end_time"] = shifted_end
             if base_reminder:
                 new_item["reminder_time"] = shifted_reminder
+            anchor = ScheduleRepeatService.get_anchor_datetime(
+                new_item.get("start_time"),
+                new_item.get("end_time"),
+            )
+            if anchor is not None and anchor.date() in excluded_dates:
+                continue
+            if minimum_anchor is not None and anchor is not None and anchor < minimum_anchor:
+                continue
             plan.append(new_item)
 
         return plan

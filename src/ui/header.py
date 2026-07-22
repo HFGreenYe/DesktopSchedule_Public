@@ -350,7 +350,8 @@ class HeaderBar(QWidget):
         # --- 顶部行 ---
         top_row = QHBoxLayout()
         top_row.setContentsMargins(0, 0, 0, 0)
-        top_row.addStretch()
+
+        top_row.addStretch(1)
 
         self.btn_suspend = QPushButton(self)
         self.btn_suspend.setFixedSize(30, 30)
@@ -388,6 +389,7 @@ class HeaderBar(QWidget):
         self.content_container = QWidget()
         self.content_container.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.content_container.setFixedHeight(155)
+        self.content_container.installEventFilter(self)
         self.container_layout = QVBoxLayout(self.content_container)
         self.container_layout.setContentsMargins(0, 0, 0, 0)
 
@@ -414,7 +416,7 @@ class HeaderBar(QWidget):
 
         hud_row.addLayout(left_container)
 
-        hud_row.addStretch()
+        hud_row.addStretch(1)
 
         right_container = QVBoxLayout()
         right_container.setSpacing(0)
@@ -548,7 +550,62 @@ class HeaderBar(QWidget):
                 self.req_open_calendar.emit()
                 return True
 
+        if (
+            obj is getattr(self, "content_container", None)
+            and event.type() == QEvent.Type.MouseButtonDblClick
+            and event.button() == Qt.MouseButton.LeftButton
+            and self._is_hud_collapse_blank(event.globalPosition().toPoint())
+        ):
+            owner = self.window()
+            if (
+                hasattr(owner, "is_day_view_active")
+                and owner.is_day_view_active()
+                and hasattr(owner, "toggle_day_collapsed")
+            ):
+                owner.toggle_day_collapsed()
+                return True
+
         return super().eventFilter(obj, event)
+
+    def _is_hud_collapse_blank(self, global_pos):
+        if not hasattr(self, "content_container"):
+            return False
+        local_pos = self.content_container.mapFromGlobal(global_pos)
+        if not self.content_container.rect().contains(local_pos):
+            return False
+
+        left_widgets = (self.lbl_time, self.lbl_date_info)
+        right_widgets = (self.lbl_weather_icon, self.lbl_temp)
+        all_widgets = left_widgets + right_widgets
+        widget_positions = {
+            widget: widget.mapTo(self.content_container, QPoint(0, 0))
+            for widget in all_widgets
+        }
+        content_top = min(widget_positions[widget].y() for widget in all_widgets)
+        content_bottom = max(
+            widget_positions[widget].y() + widget.height()
+            for widget in all_widgets
+        )
+        if not content_top <= local_pos.y() <= content_bottom:
+            return False
+
+        left_edge = min(widget_positions[widget].x() for widget in left_widgets)
+        left_right = max(
+            widget_positions[widget].x() + widget.width()
+            for widget in left_widgets
+        )
+        right_left = min(
+            widget_positions[widget].x() for widget in right_widgets
+        )
+        right_edge = max(
+            widget_positions[widget].x() + widget.width()
+            for widget in right_widgets
+        )
+        return (
+            local_pos.x() < left_edge
+            or left_right <= local_pos.x() < right_left
+            or local_pos.x() >= right_edge
+        )
 
     def _show_header_context_menu(self, pos):
         from .common.action_context_menu import ActionContextMenu

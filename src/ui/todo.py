@@ -341,6 +341,7 @@ class TodoView(QWidget):
         self.refresh_data()
 
     def _setup_ui(self):
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.DefaultContextMenu)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(15, 10, 15, 20)
         layout.setSpacing(8)
@@ -548,6 +549,28 @@ class TodoView(QWidget):
             card.req_show_detail.connect(self._show_detail_popup)
             self.list_layout.insertWidget(index, card)
         self.scroll_area.set_card_count(len(visible_todos))
+
+    def contextMenuEvent(self, event):
+        """待办页面空白区域右键菜单：收起/展开切换。"""
+        # DefaultContextMenu 策略下，卡片上右键由卡片自己的菜单处理，
+        # 这里只处理空白区域的右键。
+        owner = self.window()
+        if not hasattr(owner, 'is_day_view_active'):
+            return
+        from .common.action_context_menu import ActionContextMenu
+        day_collapsed = (
+            hasattr(owner, 'is_day_collapsed') and owner.is_day_collapsed()
+        )
+        menu = ActionContextMenu(
+            self, show_day_collapse=True, day_collapsed=day_collapsed,
+        )
+        menu.action_requested.connect(
+            lambda action: (
+                owner.toggle_day_collapsed()
+                if action == "toggle_day_collapse" else None
+            )
+        )
+        menu.popup(event.globalPos())
 
     def refresh_data(self):
         if hasattr(self, 'scroll_content') and getattr(self.scroll_content, 'current_drag_widget', None) is not None:

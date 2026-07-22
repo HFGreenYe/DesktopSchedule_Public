@@ -6,6 +6,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QPoint
 from PyQt6.QtGui import QColor, QPainter, QPen
 from datetime import datetime, timedelta
 from ..config import AppConfig
+from ..utils.styles import StyleManager
 from .components import NumberScroller, IOSSwitch 
 from .components import get_colored_icon
 
@@ -182,14 +183,18 @@ class AlarmPickerViewWeek(QWidget):
         h_alarm_btns.setSpacing(8)
         
         self.alarm_group = QButtonGroup(self)
-        durations = [(0, "1分钟"), (1, "3分钟"), (2, "直到手动关闭")]
+        idle_alarm_color = StyleManager.color_to_rgba(
+            AppConfig.COLOR_GRADIENT_START,
+            0.35,
+        )
+        durations = [(0, "1分钟"), (1, "3分钟"), (2, "手动关闭")]
         for val, text in durations:
             btn = QPushButton(text)
             btn.setCheckable(True)
             btn.setFixedHeight(28)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setStyleSheet(f"""
-                QPushButton {{ background-color: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.3); border-radius: 14px; color: rgba(255,255,255,0.8); font-size: 11px; }}
+                QPushButton {{ background-color: {idle_alarm_color}; border: 1px solid rgba(255,255,255,0.3); border-radius: 14px; color: rgba(255,255,255,0.8); font-size: 11px; }}
                 QPushButton:checked {{ background-color: {AppConfig.COLOR_GRADIENT_START}; border: none; color: white; font-weight: bold; }}
             """)
             self.alarm_group.addButton(btn, val)
@@ -215,7 +220,16 @@ class AlarmPickerViewWeek(QWidget):
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             
         self.btn_cancel.setStyleSheet("QPushButton { background: transparent; border: 1px solid rgba(255,255,255,0.6); border-radius: 16px; color: white; } QPushButton:hover { background: rgba(255,255,255,0.1); }")
-        self.btn_ok.setStyleSheet(f"QPushButton {{ background: white; border: none; border-radius: 16px; color: {AppConfig.COLOR_GRADIENT_START}; font-weight: bold; }} QPushButton:hover {{ background: #f0f0f0; }}")
+        self.btn_ok.setStyleSheet(f"""
+            QPushButton {{
+                background: #ffffff;
+                border: none;
+                border-radius: 16px;
+                color: {AppConfig.COLOR_GRADIENT_START};
+                font-weight: bold;
+            }}
+            QPushButton:hover {{ background: #f0f0f0; }}
+        """)
         
         f_layout.addStretch()
         f_layout.addWidget(self.btn_cancel)
