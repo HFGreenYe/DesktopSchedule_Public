@@ -36,6 +36,7 @@ from .common.action_context_menu import ActionContextMenu
 from .common.weather_icon_label import WeatherIconLabel
 from .utils.window_drag_controller import WindowDragController
 from .time_picker import TimePickerView
+from .add_view import MultiDatePopup
 from .alarm_picker import AlarmPickerView
 from .list_picker import CategoryCard, ListPickerView
 from .popups.month_day_hover_preview import MonthDayHoverPreview
@@ -66,6 +67,21 @@ def _align_compact_close_button(view):
         return
     button.move(max(0, view.width() - button.width()), 0)
     button.raise_()
+
+
+class MonthMultiDatePopup(MultiDatePopup):
+    """月界面窄栏使用的紧凑多日期提示框。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.layout().setContentsMargins(7, 5, 7, 5)
+        self.label.setStyleSheet("""
+            color: #ffffff;
+            background: transparent;
+            border: none;
+            font-family: 'Microsoft YaHei';
+            font-size: 10px;
+        """)
 
 
 class MonthListPickerView(ListPickerView):
@@ -247,6 +263,16 @@ class MonthTimePickerView(TimePickerView):
         header_container = self.lbl_title.parentWidget()
         header_container.setFixedHeight(28)
         header_container.layout().setContentsMargins(4, 0, 30, 0)
+        self.btn_selection_mode.setFixedSize(38, 18)
+        self.btn_selection_mode.setStyleSheet("""
+            background: transparent;
+            border: none;
+            color: rgba(255, 255, 255, 0.72);
+            font-family: 'Microsoft YaHei';
+            font-size: 9px;
+            font-weight: bold;
+            padding: 0px;
+        """)
         self.set_title(self.lbl_title.text())
         self.btn_suspend.hide()
         self.btn_close.show()
@@ -322,6 +348,9 @@ class MonthTimePickerView(TimePickerView):
             "qt_calendar_calendarview",
         )
         if calendar_view is not None:
+            self._calendar_view = calendar_view
+            calendar_view.viewport().setMouseTracking(True)
+            calendar_view.viewport().installEventFilter(self)
             horizontal_header = calendar_view.horizontalHeader()
             horizontal_header.setMinimumSectionSize(1)
             horizontal_header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
@@ -542,6 +571,14 @@ class MonthTimePickerView(TimePickerView):
             "color: white; font-size: 12px; font-weight: bold; "
             "font-family: 'Microsoft YaHei';"
         )
+        QTimer.singleShot(0, self._position_selection_mode_button)
+
+    def set_selection_mode_available(self, available):
+        available = bool(available)
+        if not available:
+            self.set_selection_mode("single", [])
+        self.btn_selection_mode.setVisible(available)
+        QTimer.singleShot(0, self._position_selection_mode_button)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -987,12 +1024,14 @@ class InlineAddViewMonth(QWidget):
         self.is_schedule_mode = True
         self.selected_start_time = None
         self.selected_end_time = None
+        self.selected_time_ranges = []
         self.selected_reminder = None
         self.selected_alarm_duration = 0
         self.selected_list_id = None
         self.selected_list_name = None
         self.selected_is_alarm_mode = False
         self._setup_ui()
+        self._multi_dates_popup = MonthMultiDatePopup(self)
         self._update_summary_labels()
 
     def _setup_ui(self):
@@ -1058,28 +1097,32 @@ class InlineAddViewMonth(QWidget):
             "日": "每天",
             "周": "每周",
             "月": "每月",
+            "自定义": "自定义",
         }
 
         self.lbl_priority = QLabel("重要性")
-        self.lbl_priority.setStyleSheet("color: rgba(255,255,255,0.85); font-size: 11px; font-family: 'Microsoft YaHei';")
-        self.lbl_priority.setFixedWidth(36)
+        self.lbl_priority.setStyleSheet("color: rgba(255,255,255,0.85); font-size: 10px; font-family: 'Microsoft YaHei';")
+        self.lbl_priority.setFixedWidth(32)
         self.combo_priority = CenteredComboBox()
         self.combo_priority.setView(QListView())
         self.combo_priority.addItems(["高", "中", "低"])
         self.combo_priority.setCurrentIndex(2)
         self.combo_priority.setFixedHeight(22)
-        self.combo_priority.setFixedWidth(30)
+        self.combo_priority.setFixedWidth(28)
         self._center_combo_text(self.combo_priority)
         self.combo_priority.setStyleSheet(self._combo_style())
 
         self.lbl_repeat = QLabel("重复")
-        self.lbl_repeat.setStyleSheet("color: rgba(255,255,255,0.85); font-size: 11px; font-family: 'Microsoft YaHei';")
-        self.lbl_repeat.setFixedWidth(24)
+        self.lbl_repeat.setStyleSheet("color: rgba(255,255,255,0.85); font-size: 10px; font-family: 'Microsoft YaHei';")
+        self.lbl_repeat.setFixedWidth(20)
         self.combo_repeat = CenteredComboBox()
         self.combo_repeat.setView(QListView())
         self.combo_repeat.addItems(["无", "日", "周", "月"])
+        self._custom_repeat_index = self.combo_repeat.count()
+        self.combo_repeat.addItem("自定义")
+        self.combo_repeat.view().setRowHidden(self._custom_repeat_index, True)
         self.combo_repeat.setFixedHeight(22)
-        self.combo_repeat.setFixedWidth(30)
+        self.combo_repeat.setFixedWidth(44)
         self._center_combo_text(self.combo_repeat)
         self.combo_repeat.setStyleSheet(self._combo_style())
 
@@ -1113,6 +1156,8 @@ class InlineAddViewMonth(QWidget):
                 "border: none; padding: 0px;"
             )
             info_layout.addWidget(label)
+        self.lbl_info_time.installEventFilter(self)
+        self.lbl_info_alarm.installEventFilter(self)
 
         layout.addWidget(self.info_card)
 
@@ -1131,6 +1176,7 @@ class InlineAddViewMonth(QWidget):
         
         self.btn_cancel.clicked.connect(self.canceled.emit)
         self.btn_save.clicked.connect(self._on_save)
+        self.combo_repeat.activated.connect(self._on_repeat_activated)
         
         btn_layout.addWidget(self.btn_cancel)
         btn_layout.addWidget(self.btn_save)
@@ -1209,12 +1255,57 @@ class InlineAddViewMonth(QWidget):
             return ""
         return str(value)
 
+    def _set_repeat_index_silently(self, index):
+        self.combo_repeat.blockSignals(True)
+        self.combo_repeat.setCurrentIndex(index)
+        self.combo_repeat.blockSignals(False)
+
+    def _clear_multi_time_state(self, clear_times=True, clear_reminder=True):
+        self.selected_time_ranges = []
+        self._multi_dates_popup.hide()
+        if clear_times:
+            self.selected_start_time = None
+            self.selected_end_time = None
+        if clear_reminder:
+            self.selected_reminder = None
+            self.selected_is_alarm_mode = False
+            self.selected_alarm_duration = 0
+
+    def _on_repeat_activated(self, index):
+        if index == self._custom_repeat_index:
+            return
+        if self.selected_time_ranges:
+            self._clear_multi_time_state(clear_times=True, clear_reminder=True)
+            self._update_summary_labels()
+
+    @staticmethod
+    def _shift_reminder_time(reminder_time, base_target, target_time):
+        if reminder_time is None or base_target is None or target_time is None:
+            return None
+        return target_time + (reminder_time - base_target)
+
+    def _multiple_reminder_times(self):
+        base_target = self.selected_start_time or self.selected_end_time
+        return [
+            reminder_time
+            for start_time, end_time in self.selected_time_ranges
+            if (
+                reminder_time := self._shift_reminder_time(
+                    self.selected_reminder,
+                    base_target,
+                    start_time or end_time,
+                )
+            ) is not None
+        ]
+
     def _update_summary_labels(self):
         start_text = self._format_state_value(self.selected_start_time)
         end_text = self._format_state_value(self.selected_end_time)
         reminder_text = self._format_state_value(self.selected_reminder)
 
-        if start_text and end_text:
+        if self.selected_time_ranges:
+            self.lbl_info_time.setText("时间：多选")
+        elif start_text and end_text:
             self.lbl_info_time.setText(f"时间：{start_text} - {end_text}")
         elif end_text:
             self.lbl_info_time.setText(f"时间：{end_text}")
@@ -1223,7 +1314,9 @@ class InlineAddViewMonth(QWidget):
         else:
             self.lbl_info_time.setText("时间未设置")
 
-        if reminder_text:
+        if reminder_text and self.selected_time_ranges:
+            self.lbl_info_alarm.setText("提醒：多选")
+        elif reminder_text:
             alarm_prefix = "强提醒 " if self.selected_is_alarm_mode else ""
             self.lbl_info_alarm.setText(f"提醒：{alarm_prefix}{reminder_text}")
         else:
@@ -1237,8 +1330,44 @@ class InlineAddViewMonth(QWidget):
             self.lbl_info_list.setText("清单未选择")
 
     def set_time_data(self, start_time, end_time):
+        was_custom = self.combo_repeat.currentIndex() == self._custom_repeat_index
+        self._clear_multi_time_state(
+            clear_times=False,
+            clear_reminder=was_custom,
+        )
+        if was_custom:
+            self._set_repeat_index_silently(0)
         self.selected_start_time = start_time
         self.selected_end_time = end_time
+        self._update_summary_labels()
+
+    def set_multiple_time_data(self, ranges):
+        normalized_ranges = sorted(
+            list(ranges or []),
+            key=lambda value: (value[0] or value[1]),
+        )
+        was_custom = self.combo_repeat.currentIndex() == self._custom_repeat_index
+        if len(normalized_ranges) > 1:
+            self.selected_time_ranges = normalized_ranges
+            self.selected_start_time, self.selected_end_time = normalized_ranges[0]
+            self._set_repeat_index_silently(self._custom_repeat_index)
+        elif normalized_ranges:
+            self.selected_time_ranges = []
+            self.selected_start_time, self.selected_end_time = normalized_ranges[0]
+            if was_custom:
+                self._set_repeat_index_silently(0)
+                self.selected_reminder = None
+                self.selected_is_alarm_mode = False
+                self.selected_alarm_duration = 0
+        else:
+            self.selected_time_ranges = []
+            self.selected_start_time = None
+            self.selected_end_time = None
+            if was_custom:
+                self._set_repeat_index_silently(0)
+                self.selected_reminder = None
+                self.selected_is_alarm_mode = False
+                self.selected_alarm_duration = 0
         self._update_summary_labels()
 
     def set_alarm_data(self, reminder_time, is_alarm_mode=False, alarm_duration=0):
@@ -1260,6 +1389,8 @@ class InlineAddViewMonth(QWidget):
         self.input_desc.clear()
         self.selected_start_time = None
         self.selected_end_time = None
+        self.selected_time_ranges = []
+        self._multi_dates_popup.hide()
         self.selected_reminder = None
         self.selected_alarm_duration = 0
         self.selected_list_id = None
@@ -1298,9 +1429,49 @@ class InlineAddViewMonth(QWidget):
             'category_id': self.selected_list_id
         }
 
-        from ..data.database import db_manager
-        if db_manager.add_schedule(schedule_data):
+        save_succeeded = False
+        if self.selected_time_ranges:
+            base_target = self.selected_start_time or self.selected_end_time
+            custom_items = []
+            for start_time, end_time in self.selected_time_ranges:
+                item_data = schedule_data.copy()
+                item_data['start_time'] = start_time
+                item_data['end_time'] = end_time
+                item_data['reminder_time'] = self._shift_reminder_time(
+                    self.selected_reminder,
+                    base_target,
+                    start_time or end_time,
+                )
+                custom_items.append(item_data)
+            save_succeeded = db_manager.add_custom_schedules(custom_items)
+        else:
+            save_succeeded = db_manager.add_schedule(schedule_data)
+
+        if save_succeeded:
             self.saved.emit()
+
+    def eventFilter(self, watched, event):
+        if watched is self.lbl_info_time:
+            if event.type() == QEvent.Type.Enter and self.selected_time_ranges:
+                position = self.lbl_info_time.mapToGlobal(
+                    QPoint(self.lbl_info_time.width() + 5, 0)
+                )
+                self._multi_dates_popup.show_time_ranges(
+                    self.selected_time_ranges,
+                    position,
+                )
+            elif event.type() in (QEvent.Type.Leave, QEvent.Type.Hide):
+                self._multi_dates_popup.hide()
+        elif watched is self.lbl_info_alarm:
+            reminder_times = self._multiple_reminder_times()
+            if event.type() == QEvent.Type.Enter and reminder_times:
+                position = self.lbl_info_alarm.mapToGlobal(
+                    QPoint(self.lbl_info_alarm.width() + 5, 0)
+                )
+                self._multi_dates_popup.show_reminders(reminder_times, position)
+            elif event.type() in (QEvent.Type.Leave, QEvent.Type.Hide):
+                self._multi_dates_popup.hide()
+        return super().eventFilter(watched, event)
 
 class MonthWindow(FramelessMainWindow):
     """
@@ -1655,6 +1826,9 @@ class MonthWindow(FramelessMainWindow):
             self.page_time.btn_close.clicked.connect(self.back_from_time_picker)
         self.page_time.back_requested.connect(self.back_from_time_picker)
         self.page_time.confirm_requested.connect(self.on_time_confirmed)
+        self.page_time.multiple_confirm_requested.connect(
+            self.on_multiple_time_confirmed
+        )
         bottom_tools_vbox.addWidget(self.page_time)
 
         self.page_alarm = MonthAlarmPickerView(self)
@@ -2604,6 +2778,7 @@ class MonthWindow(FramelessMainWindow):
 
     def go_to_time_picker(self, start, end):
         self.time_picker_mode = "add"
+        self.page_time.set_selection_mode_available(True)
         self._hide_hover_preview()
         self.close_day_panels()
 
@@ -2623,6 +2798,10 @@ class MonthWindow(FramelessMainWindow):
 
         self.page_time.set_title("设置时间")
         self.page_time.set_initial_data(start, end or default_end)
+        if self.inline_add_view.selected_time_ranges:
+            self.page_time.set_multiple_ranges(
+                self.inline_add_view.selected_time_ranges
+            )
         if not self.isVisible():
             self.show()
         self.page_alarm.hide()
@@ -2633,6 +2812,7 @@ class MonthWindow(FramelessMainWindow):
     def go_to_time_picker_for_edit(self, schedule_data):
         self.time_picker_mode = "edit"
         self.editing_schedule = schedule_data
+        self.page_time.set_selection_mode_available(False)
         self.page_time.set_title("修改时间")
         self.page_time.set_initial_data(schedule_data.start_time, schedule_data.end_time)
         self._show_edit_picker(self.page_time)
@@ -2666,6 +2846,12 @@ class MonthWindow(FramelessMainWindow):
             self._check_repeat_and_execute(schedule, _do_update)
             return
         self.inline_add_view.set_time_data(start, end)
+        self.back_from_time_picker()
+
+    def on_multiple_time_confirmed(self, ranges):
+        if self.time_picker_mode != "add":
+            return
+        self.inline_add_view.set_multiple_time_data(ranges)
         self.back_from_time_picker()
 
     def go_to_alarm_picker(self, target_time, is_alarm, duration):
