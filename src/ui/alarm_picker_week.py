@@ -220,7 +220,16 @@ class AlarmPickerViewWeek(QWidget):
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             
         self.btn_cancel.setStyleSheet("QPushButton { background: transparent; border: 1px solid rgba(255,255,255,0.6); border-radius: 16px; color: white; } QPushButton:hover { background: rgba(255,255,255,0.1); }")
-        self.btn_ok.setStyleSheet(self.btn_cancel.styleSheet())
+        self.btn_ok.setStyleSheet(f"""
+            QPushButton {{
+                background: #ffffff;
+                border: none;
+                border-radius: 16px;
+                color: {AppConfig.COLOR_GRADIENT_START};
+                font-weight: bold;
+            }}
+            QPushButton:hover {{ background: #f0f0f0; }}
+        """)
         
         f_layout.addStretch()
         f_layout.addWidget(self.btn_cancel)

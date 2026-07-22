@@ -2715,7 +2715,6 @@ class WeekWindow(FramelessMainWindow):
         self.page_list.header_container.layout().setContentsMargins(30, 0, 30, 0)
         self.page_list.btn_suspend.hide()
         self.page_list.btn_close.hide()
-        self.page_list.btn_ok.setStyleSheet(self.page_list.btn_cancel.styleSheet())
         
         self.body_stack.addWidget(self.page_add)
         self.body_stack.addWidget(self.page_time)
@@ -3024,8 +3023,13 @@ class WeekWindow(FramelessMainWindow):
         rect_bg = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
         path_bg.addRoundedRect(rect_bg, 8.0, 8.0)
 
-        base_color = self._edit_surface_color() if self.is_edit_mode else QColor("#FFFFFF")
-        painter.fillPath(path_bg, base_color)
+        if self.is_edit_mode:
+            window_gradient = QLinearGradient(0, 0, 0, self.height())
+            window_gradient.setColorAt(0.0, QColor(AppConfig.COLOR_GRADIENT_START))
+            window_gradient.setColorAt(1.0, QColor(AppConfig.COLOR_GRADIENT_END))
+            painter.fillPath(path_bg, QBrush(window_gradient))
+        else:
+            painter.fillPath(path_bg, QColor("#FFFFFF"))
 
         path_top = QPainterPath()
         path_top.setFillRule(Qt.FillRule.WindingFill)
@@ -3033,31 +3037,22 @@ class WeekWindow(FramelessMainWindow):
         path_top.addRoundedRect(rect_top, 8.0, 8.0)
         path_top.addRect(0, self.top_container.height() - 10, self.width(), 10)
 
-        gradient = QLinearGradient(0, 0, 0, self.top_container.height())
-        gradient.setColorAt(0.0, QColor(AppConfig.COLOR_GRADIENT_START))
-        gradient.setColorAt(1.0, QColor(AppConfig.COLOR_GRADIENT_END))
-        painter.fillPath(path_top, QBrush(gradient))
+        if not self.is_edit_mode:
+            gradient = QLinearGradient(0, 0, 0, self.top_container.height())
+            gradient.setColorAt(0.0, QColor(AppConfig.COLOR_GRADIENT_START))
+            gradient.setColorAt(1.0, QColor(AppConfig.COLOR_GRADIENT_END))
+            painter.fillPath(path_top, QBrush(gradient))
 
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(QPen(QColor(120, 120, 120, 140), 1))
         painter.drawPath(path_bg)
 
-    @staticmethod
-    def _edit_surface_color():
-        return QColor(
-            StyleManager.mix_colors(
-                AppConfig.COLOR_GRADIENT_END,
-                "#ffffff",
-                0.70,
-            )
-        )
-
     def _set_edit_mode_bg(self, is_edit):
-        """动态切换下半部分盒子的颜色，并命令窗口重绘自己"""
+        """编辑页使用贯穿整个周窗口的主题渐变。"""
         self.is_edit_mode = is_edit
         if is_edit:
             self.content_area.set_surface_colors(
-                self._edit_surface_color(),
+                QColor(0, 0, 0, 0),
                 QColor(120, 120, 120, 72),
             )
         else:
@@ -3135,6 +3130,9 @@ class WeekWindow(FramelessMainWindow):
         self.page_add.req_open_time_picker.connect(self.go_to_time_picker)
         self.page_time.back_requested.connect(self.back_from_time_picker) 
         self.page_time.confirm_requested.connect(self.on_time_confirmed)
+        self.page_time.multiple_confirm_requested.connect(
+            self.on_multiple_time_confirmed
+        )
 
         self.page_add.req_open_alarm_picker.connect(self.go_to_alarm_picker)
         self.page_alarm.back_requested.connect(self.back_from_alarm_picker) 
@@ -3173,18 +3171,22 @@ class WeekWindow(FramelessMainWindow):
 
     def go_to_time_picker(self, start, end):
         self.time_picker_mode = 'add' # 重置为添加模式
+        self.page_time.set_selection_mode_available(True)
         self.page_time.set_title("设置时间")
         if not start and not end:
             dashboard_date = self.current_selected_date.toPyDate()
             now = datetime.now()
             end = datetime(dashboard_date.year, dashboard_date.month, dashboard_date.day, now.hour, now.minute)
         self.page_time.set_initial_data(start, end)
+        if self.page_add.selected_time_ranges:
+            self.page_time.set_multiple_ranges(self.page_add.selected_time_ranges)
         self.body_stack.setCurrentWidget(self.page_time)
 
     def go_to_time_picker_for_edit(self, schedule_data):
         """周界面的时间修改路由"""
         self.time_picker_mode = 'edit'
         self.editing_schedule = schedule_data
+        self.page_time.set_selection_mode_available(False)
         
         # 智能截断标题防止 UI 撑爆
         display_title = schedule_data.title if len(schedule_data.title) <= 8 else schedule_data.title[:7] + "..."
@@ -3220,6 +3222,12 @@ class WeekWindow(FramelessMainWindow):
         else:
             self.page_add.set_time_data(start, end)
             self.back_from_time_picker()
+
+    def on_multiple_time_confirmed(self, ranges):
+        if getattr(self, 'time_picker_mode', 'add') != 'add':
+            return
+        self.page_add.set_multiple_time_data(ranges)
+        self.back_from_time_picker()
 
     def go_to_alarm_picker(self, target_time, is_alarm, duration):
         self.alarm_picker_mode = 'add'
