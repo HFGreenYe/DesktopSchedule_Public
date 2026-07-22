@@ -730,6 +730,19 @@ class ScheduleDetailPop(QWidget):
         text = self.repeat_options[index]
         val = "无" if text == "不重复" else text
         changed = False
+
+        if (self.data.repeat_rule or "").strip() == "自定义":
+            changed = db_manager.convert_custom_instance_repeat(
+                self.data.id,
+                val,
+                datetime.now(),
+            )
+            if changed:
+                self.data = Schedule.get_by_id(self.data.id)
+                self.refresh_repeat_display()
+                self.refresh_created_display()
+                self.schedule_updated.emit()
+            return
         
         if self.data.repeat_rule != val:
             update_future = False

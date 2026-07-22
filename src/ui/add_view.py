@@ -81,6 +81,7 @@ class ToolTipFilter(QObject):
 class MultiDatePopup(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent, Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setObjectName("MultiDatePopup")
         layout = QVBoxLayout(self)
@@ -90,12 +91,11 @@ class MultiDatePopup(QFrame):
         layout.addWidget(self.label)
         self.setStyleSheet(f"""
             QFrame#MultiDatePopup {{
-                background-color: rgba(255, 255, 255, 0.98);
-                border: 1px solid {AppConfig.COLOR_GRADIENT_START};
-                border-radius: 5px;
+                background: transparent;
+                border: none;
             }}
             QLabel {{
-                color: #333333;
+                color: #ffffff;
                 background: transparent;
                 border: none;
                 font-family: 'Microsoft YaHei';
@@ -103,8 +103,53 @@ class MultiDatePopup(QFrame):
             }}
         """)
 
-    def show_dates(self, dates, position):
-        self.label.setText("\n".join(value.strftime("%y-%m-%d") for value in dates))
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        background = QColor(StyleManager.mix_colors(
+            AppConfig.COLOR_GRADIENT_START,
+            "#ffffff",
+            0.70,
+        ))
+        painter.setPen(QPen(QColor("#ffffff"), 2))
+        painter.setBrush(background)
+        painter.drawRoundedRect(
+            QRectF(self.rect()).adjusted(1, 1, -1, -1),
+            5,
+            5,
+        )
+        super().paintEvent(event)
+
+    def show_time_ranges(self, ranges, position):
+        lines = []
+        for start_time, end_time in ranges:
+            if start_time is not None and end_time is not None:
+                if start_time.date() == end_time.date():
+                    text = (
+                        f"{start_time:%y-%m-%d %H:%M} - "
+                        f"{end_time:%H:%M}"
+                    )
+                else:
+                    text = (
+                        f"{start_time:%y-%m-%d %H:%M} - "
+                        f"{end_time:%y-%m-%d %H:%M}"
+                    )
+            else:
+                target_time = start_time or end_time
+                if target_time is None:
+                    continue
+                text = target_time.strftime("%y-%m-%d %H:%M")
+            lines.append(text)
+        self.label.setText("\n".join(lines))
+        self._show_at(position)
+
+    def show_reminders(self, reminders, position):
+        self.label.setText(
+            "\n".join(value.strftime("%y-%m-%d %H:%M") for value in reminders)
+        )
+        self._show_at(position)
+
+    def _show_at(self, position):
         self.adjustSize()
         screen = QApplication.screenAt(position)
         if screen is not None:
@@ -214,6 +259,9 @@ class AddScheduleView(QWidget):
         # Properties
         self.priority_container, self.combo_priority = self._create_property_group("重要性：", ["   低", "   中", "   高"])
         self.repeat_container, self.combo_repeat = self._create_property_group("重复：", ["   无", "  每天", "  每周", "  每月"])
+        self._custom_repeat_index = self.combo_repeat.count()
+        self.combo_repeat.addItem("自定义")
+        self.combo_repeat.view().setRowHidden(self._custom_repeat_index, True)
 
         # Info Card
         self.info_card = QFrame()
@@ -224,6 +272,7 @@ class AddScheduleView(QWidget):
         self.lbl_info_time.installEventFilter(self)
         self._multi_dates_popup = MultiDatePopup(self)
         self.lbl_info_alarm = self._create_info_row("alarm.svg", "无提醒")
+        self.lbl_info_alarm.installEventFilter(self)
         self.lbl_info_list = self._create_info_row("list.svg", "未选择") 
 
         # 重要性显示行 
@@ -417,6 +466,7 @@ class AddScheduleView(QWidget):
         self.btn_alarm.clicked.connect(self._emit_alarm_request)
         
         self.btn_list.clicked.connect(self._emit_list_request)
+        self.combo_repeat.activated.connect(self._on_repeat_activated)
 
     # 发射请求打开清单页的信号
     def _emit_list_request(self):
@@ -483,9 +533,41 @@ class AddScheduleView(QWidget):
         self.alarm_duration = duration_mode
         self._update_info_card()
 
-    def set_time_data(self, start, end):
+    def _set_repeat_index_silently(self, index):
+        self.combo_repeat.blockSignals(True)
+        self.combo_repeat.setCurrentIndex(index)
+        self.combo_repeat.blockSignals(False)
+
+    def _clear_multi_time_state(self, clear_times=True, clear_reminder=True):
         self.selected_time_ranges = []
         self._multi_dates_popup.hide()
+        if clear_times:
+            self.selected_start_time = None
+            self.selected_end_time = None
+        if clear_reminder:
+            self.selected_reminder = None
+            self.is_alarm_mode = False
+            self.alarm_duration = 0
+        has_time = self.selected_start_time is not None or self.selected_end_time is not None
+        self.btn_alarm.setGraphicsEffect(
+            self._get_opacity_effect(1.0 if has_time else 0.5)
+        )
+
+    def _on_repeat_activated(self, index):
+        if index == self._custom_repeat_index:
+            return
+        if self.selected_time_ranges:
+            self._clear_multi_time_state(clear_times=True, clear_reminder=True)
+            self._update_info_card()
+
+    def set_time_data(self, start, end):
+        was_custom = self.combo_repeat.currentIndex() == self._custom_repeat_index
+        self._clear_multi_time_state(
+            clear_times=False,
+            clear_reminder=was_custom,
+        )
+        if was_custom:
+            self._set_repeat_index_silently(0)
         self.selected_start_time = start
         self.selected_end_time = end
         
@@ -497,18 +579,56 @@ class AddScheduleView(QWidget):
         self._update_info_card()
 
     def set_multiple_time_data(self, ranges):
-        self.selected_time_ranges = sorted(
+        normalized_ranges = sorted(
             list(ranges or []),
             key=lambda value: (value[0] or value[1]),
         )
-        if self.selected_time_ranges:
+        was_custom = self.combo_repeat.currentIndex() == self._custom_repeat_index
+        if len(normalized_ranges) > 1:
+            self.selected_time_ranges = normalized_ranges
             self.selected_start_time, self.selected_end_time = self.selected_time_ranges[0]
+            self._set_repeat_index_silently(self._custom_repeat_index)
+            self.btn_alarm.setGraphicsEffect(self._get_opacity_effect(1.0))
+        elif normalized_ranges:
+            self.selected_time_ranges = []
+            self.selected_start_time, self.selected_end_time = normalized_ranges[0]
+            if was_custom:
+                self._set_repeat_index_silently(0)
+                self.selected_reminder = None
+                self.is_alarm_mode = False
+                self.alarm_duration = 0
             self.btn_alarm.setGraphicsEffect(self._get_opacity_effect(1.0))
         else:
+            self.selected_time_ranges = []
             self.selected_start_time = None
             self.selected_end_time = None
+            if was_custom:
+                self._set_repeat_index_silently(0)
+                self.selected_reminder = None
+                self.is_alarm_mode = False
+                self.alarm_duration = 0
             self.btn_alarm.setGraphicsEffect(self._get_opacity_effect(0.5))
         self._update_info_card()
+
+    @staticmethod
+    def _shift_reminder_time(reminder_time, base_target, target_time):
+        if reminder_time is None or base_target is None or target_time is None:
+            return None
+        return target_time + (reminder_time - base_target)
+
+    def _multiple_reminder_times(self):
+        base_target = self.selected_start_time or self.selected_end_time
+        return [
+            reminder_time
+            for start_time, end_time in self.selected_time_ranges
+            if (
+                reminder_time := self._shift_reminder_time(
+                    self.selected_reminder,
+                    base_target,
+                    start_time or end_time,
+                )
+            ) is not None
+        ]
 
     def _format_time_range(self, start, end):
         """格式化时间范围显示。同天：MM-DD S - E；跨天同年：MM-DD S - MM-DD E；跨年：YY-MM-DD S - YY-MM-DD E"""
@@ -549,9 +669,12 @@ class AddScheduleView(QWidget):
 
         # 2. 更新提醒文本
         if self.selected_reminder:
-            remind_str = self.selected_reminder.strftime("%m-%d %H:%M")
-            icon_prefix = "" if self.is_alarm_mode else "🔔 "
-            self.lbl_info_alarm.setText(f"{icon_prefix}{remind_str}")
+            remind_str = (
+                "多选"
+                if self.selected_time_ranges
+                else self.selected_reminder.strftime("%m-%d %H:%M")
+            )
+            self.lbl_info_alarm.setText(remind_str)
             self.lbl_info_alarm.setStyleSheet("color: #FFFFFF; font-weight: bold; font-size: 15px;") 
         else:
             self.lbl_info_alarm.setText("无提醒")
@@ -729,24 +852,19 @@ class AddScheduleView(QWidget):
         save_succeeded = False
         if self.selected_time_ranges:
             base_target = self.selected_start_time or self.selected_end_time
-            reminder_offset = (
-                self.selected_reminder - base_target
-                if self.selected_reminder and base_target
-                else None
-            )
-            save_succeeded = True
+            custom_items = []
             for start_time, end_time in self.selected_time_ranges:
                 item_data = schedule_data.copy()
                 item_data['start_time'] = start_time
                 item_data['end_time'] = end_time
                 target_time = start_time or end_time
-                item_data['reminder_time'] = (
-                    target_time + reminder_offset
-                    if reminder_offset is not None and target_time is not None
-                    else None
+                item_data['reminder_time'] = self._shift_reminder_time(
+                    self.selected_reminder,
+                    base_target,
+                    target_time,
                 )
-                if not db_manager.add_schedule(item_data):
-                    save_succeeded = False
+                custom_items.append(item_data)
+            save_succeeded = db_manager.add_custom_schedules(custom_items)
         else:
             save_succeeded = db_manager.add_schedule(schedule_data)
 
@@ -760,15 +878,22 @@ class AddScheduleView(QWidget):
     def eventFilter(self, watched, event):
         if watched is self.lbl_info_time:
             if event.type() == QEvent.Type.Enter and self.selected_time_ranges:
-                dates = [
-                    (start or end).date()
-                    for start, end in self.selected_time_ranges
-                    if start is not None or end is not None
-                ]
                 position = self.lbl_info_time.mapToGlobal(
                     QPoint(self.lbl_info_time.width() + 8, 0)
                 )
-                self._multi_dates_popup.show_dates(dates, position)
+                self._multi_dates_popup.show_time_ranges(
+                    self.selected_time_ranges,
+                    position,
+                )
+            elif event.type() in (QEvent.Type.Leave, QEvent.Type.Hide):
+                self._multi_dates_popup.hide()
+        elif watched is self.lbl_info_alarm:
+            reminder_times = self._multiple_reminder_times()
+            if event.type() == QEvent.Type.Enter and reminder_times:
+                position = self.lbl_info_alarm.mapToGlobal(
+                    QPoint(self.lbl_info_alarm.width() + 8, 0)
+                )
+                self._multi_dates_popup.show_reminders(reminder_times, position)
             elif event.type() in (QEvent.Type.Leave, QEvent.Type.Hide):
                 self._multi_dates_popup.hide()
         return super().eventFilter(watched, event)

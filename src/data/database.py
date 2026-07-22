@@ -123,6 +123,109 @@ class DatabaseManager:
             print(f"❌ [DB] 批量保存失败: {e}")
             return False
 
+    def add_custom_schedules(self, schedule_items):
+        items = [dict(item) for item in (schedule_items or [])]
+        if len(items) < 2:
+            return False
+
+        group_id = str(uuid.uuid4())
+        for item in items:
+            item['repeat_rule'] = '自定义'
+            item['group_id'] = group_id
+
+        try:
+            with db.atomic():
+                for index in range(0, len(items), 100):
+                    Schedule.insert_many(items[index:index + 100]).execute()
+            return True
+        except Exception as e:
+            print(f"❌ [DB] 自定义多日期日程保存失败: {e}")
+            return False
+
+    def convert_custom_instance_repeat(self, schedule_id, new_rule, created_at=None):
+        normalized_rule = (new_rule or '').strip()
+        if ScheduleRepeatService.is_custom_repeat_rule(normalized_rule):
+            return False
+        if (
+            not ScheduleRepeatService.is_non_repeat_rule(normalized_rule)
+            and ScheduleRepeatService.get_repeat_count(normalized_rule) == 0
+        ):
+            return False
+
+        try:
+            with db.atomic():
+                current_schedule = Schedule.get_by_id(schedule_id)
+                if not ScheduleRepeatService.is_custom_repeat_rule(
+                    current_schedule.repeat_rule
+                ):
+                    return False
+
+                old_group_id = current_schedule.group_id
+                siblings = []
+                if old_group_id:
+                    siblings = list(
+                        Schedule.select().where(
+                            (Schedule.group_id == old_group_id)
+                            & (Schedule.id != schedule_id)
+                        )
+                    )
+
+                excluded_dates = {
+                    anchor.date()
+                    for sibling in siblings
+                    if (
+                        anchor := ScheduleRepeatService.get_anchor_datetime(
+                            sibling.start_time,
+                            sibling.end_time,
+                        )
+                    ) is not None
+                }
+
+                is_non_repeat = ScheduleRepeatService.is_non_repeat_rule(
+                    normalized_rule
+                )
+                new_group_id = None if is_non_repeat else str(uuid.uuid4())
+                Schedule.update(
+                    repeat_rule=normalized_rule,
+                    group_id=new_group_id,
+                    created_at=created_at or datetime.datetime.now(),
+                ).where(Schedule.id == schedule_id).execute()
+
+                if old_group_id:
+                    remaining_query = Schedule.select().where(
+                        Schedule.group_id == old_group_id
+                    )
+                    remaining_count = remaining_query.count()
+                    if remaining_count <= 1:
+                        Schedule.update(
+                            repeat_rule='无',
+                            group_id=None,
+                        ).where(Schedule.group_id == old_group_id).execute()
+
+                if not is_non_repeat:
+                    updated_schedule = Schedule.get_by_id(schedule_id)
+                    base_data = updated_schedule.__data__.copy()
+                    base_data.pop('id', None)
+                    base_data.pop('created_at', None)
+                    schedules_to_insert = (
+                        ScheduleRepeatService.build_repeat_insert_plan(
+                            base_data,
+                            normalized_rule,
+                            new_group_id,
+                            include_base=False,
+                            excluded_anchor_dates=excluded_dates,
+                            minimum_anchor=datetime.datetime.now(),
+                        )
+                    )
+                    for index in range(0, len(schedules_to_insert), 100):
+                        Schedule.insert_many(
+                            schedules_to_insert[index:index + 100]
+                        ).execute()
+            return True
+        except Exception as e:
+            print(f"❌ [DB] 自定义日程派生重复规则失败: {e}")
+            return False
+
     # ==========================================
     # 专用于修改/取消重复规则
     # ==========================================
