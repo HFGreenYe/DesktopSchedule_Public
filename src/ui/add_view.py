@@ -1,7 +1,8 @@
 # src/ui/add_view.py
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                              QLineEdit, QPushButton, QComboBox, QListView, 
-                             QFrame, QTextEdit, QScrollArea, QSizePolicy)
+                             QFrame, QTextEdit, QScrollArea, QSizePolicy,
+                             QApplication)
 from PyQt6.QtCore import Qt, QSize, QEvent, QObject, pyqtSignal, QTimer, QRectF, QPoint
 from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QImage, QPen
 from PyQt6.QtSvg import QSvgRenderer
@@ -76,6 +77,44 @@ class ToolTipFilter(QObject):
             self.tooltip.close()
             self.tooltip = None
 
+
+class MultiDatePopup(QFrame):
+    def __init__(self, parent=None):
+        super().__init__(parent, Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setObjectName("MultiDatePopup")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 7, 10, 7)
+        self.label = QLabel()
+        self.label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(self.label)
+        self.setStyleSheet(f"""
+            QFrame#MultiDatePopup {{
+                background-color: rgba(255, 255, 255, 0.98);
+                border: 1px solid {AppConfig.COLOR_GRADIENT_START};
+                border-radius: 5px;
+            }}
+            QLabel {{
+                color: #333333;
+                background: transparent;
+                border: none;
+                font-family: 'Microsoft YaHei';
+                font-size: 12px;
+            }}
+        """)
+
+    def show_dates(self, dates, position):
+        self.label.setText("\n".join(value.strftime("%y-%m-%d") for value in dates))
+        self.adjustSize()
+        screen = QApplication.screenAt(position)
+        if screen is not None:
+            available = screen.availableGeometry()
+            position.setX(max(available.left(), min(position.x(), available.right() - self.width())))
+            position.setY(max(available.top(), min(position.y(), available.bottom() - self.height())))
+        self.move(position)
+        self.show()
+
+
 class AddScheduleView(QWidget):
     saved = pyqtSignal() 
     req_open_time_picker = pyqtSignal(object, object) 
@@ -89,6 +128,7 @@ class AddScheduleView(QWidget):
         
         self.selected_start_time = None
         self.selected_end_time = None
+        self.selected_time_ranges = []
         
         # 保存清单的 ID，而不是名字
         self.selected_list_id = None 
@@ -181,6 +221,8 @@ class AddScheduleView(QWidget):
         self.info_card.setStyleSheet("#InfoCard { background-color: transparent; }")
         
         self.lbl_info_time = self._create_info_row("time.svg", "时间未设置")
+        self.lbl_info_time.installEventFilter(self)
+        self._multi_dates_popup = MultiDatePopup(self)
         self.lbl_info_alarm = self._create_info_row("alarm.svg", "无提醒")
         self.lbl_info_list = self._create_info_row("list.svg", "未选择") 
 
@@ -331,9 +373,9 @@ class AddScheduleView(QWidget):
             QComboBox::drop-down { border: none; width: 0px; }
             QListView { background-color: #ffffff; color: #333333; border: 1px solid #dddddd; outline: 0px; }
             QListView::item { background-color: #ffffff; color: #333333; padding: 4px 8px; }
-            QListView::item:selected { background-color: #0cc0df; color: #ffffff; }
+            QListView::item:selected { background-color: __THEME_PRIMARY__; color: #ffffff; }
             QListView::item:hover { background-color: #f0f0f0; color: #333333; }
-        """)
+        """.replace("__THEME_PRIMARY__", AppConfig.COLOR_GRADIENT_START))
         layout.addWidget(lbl)
         layout.addWidget(combo)
         return container, combo
@@ -442,6 +484,8 @@ class AddScheduleView(QWidget):
         self._update_info_card()
 
     def set_time_data(self, start, end):
+        self.selected_time_ranges = []
+        self._multi_dates_popup.hide()
         self.selected_start_time = start
         self.selected_end_time = end
         
@@ -450,6 +494,20 @@ class AddScheduleView(QWidget):
         else:
             self.btn_alarm.setGraphicsEffect(self._get_opacity_effect(0.5))
             
+        self._update_info_card()
+
+    def set_multiple_time_data(self, ranges):
+        self.selected_time_ranges = sorted(
+            list(ranges or []),
+            key=lambda value: (value[0] or value[1]),
+        )
+        if self.selected_time_ranges:
+            self.selected_start_time, self.selected_end_time = self.selected_time_ranges[0]
+            self.btn_alarm.setGraphicsEffect(self._get_opacity_effect(1.0))
+        else:
+            self.selected_start_time = None
+            self.selected_end_time = None
+            self.btn_alarm.setGraphicsEffect(self._get_opacity_effect(0.5))
         self._update_info_card()
 
     def _format_time_range(self, start, end):
@@ -465,7 +523,12 @@ class AddScheduleView(QWidget):
 
     def _update_info_card(self):
         # 1. 更新时间文本（自适应字号）
-        if self.selected_end_time:
+        if self.selected_time_ranges:
+            self.lbl_info_time.setText("多选")
+            self.lbl_info_time.setStyleSheet(
+                "color: #FFFFFF; font-weight: bold; font-size: 15px;"
+            )
+        elif self.selected_end_time:
             if self.selected_start_time:
                 text = self._format_time_range(self.selected_start_time, self.selected_end_time)
             else:
@@ -606,6 +669,8 @@ class AddScheduleView(QWidget):
         
         self.selected_start_time = None
         self.selected_end_time = None
+        self.selected_time_ranges = []
+        self._multi_dates_popup.hide()
         
         # 重置时清空清单 ID
         self.selected_list_id = None
@@ -661,12 +726,52 @@ class AddScheduleView(QWidget):
             'category_id': self.selected_list_id
         }
 
-        if db_manager.add_schedule(schedule_data):
+        save_succeeded = False
+        if self.selected_time_ranges:
+            base_target = self.selected_start_time or self.selected_end_time
+            reminder_offset = (
+                self.selected_reminder - base_target
+                if self.selected_reminder and base_target
+                else None
+            )
+            save_succeeded = True
+            for start_time, end_time in self.selected_time_ranges:
+                item_data = schedule_data.copy()
+                item_data['start_time'] = start_time
+                item_data['end_time'] = end_time
+                target_time = start_time or end_time
+                item_data['reminder_time'] = (
+                    target_time + reminder_offset
+                    if reminder_offset is not None and target_time is not None
+                    else None
+                )
+                if not db_manager.add_schedule(item_data):
+                    save_succeeded = False
+        else:
+            save_succeeded = db_manager.add_schedule(schedule_data)
+
+        if save_succeeded:
             print(f"✅ [DB] 写入成功 ...")
             self.saved.emit() 
             self.reset()
         else:
             print("❌ [DB] 保存失败")
+
+    def eventFilter(self, watched, event):
+        if watched is self.lbl_info_time:
+            if event.type() == QEvent.Type.Enter and self.selected_time_ranges:
+                dates = [
+                    (start or end).date()
+                    for start, end in self.selected_time_ranges
+                    if start is not None or end is not None
+                ]
+                position = self.lbl_info_time.mapToGlobal(
+                    QPoint(self.lbl_info_time.width() + 8, 0)
+                )
+                self._multi_dates_popup.show_dates(dates, position)
+            elif event.type() in (QEvent.Type.Leave, QEvent.Type.Hide):
+                self._multi_dates_popup.hide()
+        return super().eventFilter(watched, event)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:

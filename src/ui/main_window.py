@@ -235,6 +235,7 @@ class MainWindow(FramelessMainWindow):
         self.page_add.req_open_time_picker.connect(self.go_to_time_picker)
         self.page_time.back_requested.connect(self.back_from_time_picker) 
         self.page_time.confirm_requested.connect(self.on_time_confirmed)
+        self.page_time.multiple_confirm_requested.connect(self.on_multiple_time_confirmed)
         self.page_dashboard.req_edit_time.connect(self.go_to_time_picker_for_edit) # 馃煝 鐩戝惉闈㈡澘浼犳潵鐨勪慨鏀硅姹?
 
         self.alarm_picker_mode = 'add'
@@ -909,6 +910,7 @@ class MainWindow(FramelessMainWindow):
     def go_to_time_picker(self, start, end):
         """Open time picker from add view."""
         self.time_picker_mode = 'add'
+        self.page_time.set_selection_mode_available(True)
         self.page_time.set_title("\u8bbe\u7f6e\u65f6\u95f4")
         
         # 濡傛灉鏄柊寤烘棩绋嬶紙娌′紶鏃堕棿锛夛紝灏辨妸 Dashboard 鍋滅暀鐨勬棩鏈熶紶缁欏畠锛?
@@ -919,6 +921,8 @@ class MainWindow(FramelessMainWindow):
             end = datetime(dashboard_date.year, dashboard_date.month, dashboard_date.day, now.hour, now.minute)
             
         self.page_time.set_initial_data(start, end)
+        if self.page_add.selected_time_ranges:
+            self.page_time.set_multiple_ranges(self.page_add.selected_time_ranges)
         self.body_stack.setCurrentWidget(self.page_time)
         self.header.hide() 
 
@@ -932,6 +936,7 @@ class MainWindow(FramelessMainWindow):
             self.month_window.go_to_time_picker_for_edit(schedule_data)
             return
         self.time_picker_mode = 'edit'
+        self.page_time.set_selection_mode_available(False)
         self.edit_picker_return_view = edit_target
         self.editing_schedule = schedule_data
         
@@ -977,6 +982,12 @@ class MainWindow(FramelessMainWindow):
                         p.refresh_created_display() 
                 self.back_from_time_picker()
             self._check_repeat_and_execute(self.editing_schedule, _do_update)
+
+    def on_multiple_time_confirmed(self, ranges):
+        if self.time_picker_mode != 'add':
+            return
+        self.page_add.set_multiple_time_data(ranges)
+        self.back_from_time_picker()
 
     def _check_repeat_and_execute(self, schedule_data, update_callback):
         from PyQt6.QtWidgets import QMessageBox

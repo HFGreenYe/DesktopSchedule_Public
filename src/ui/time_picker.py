@@ -3,9 +3,10 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QApplication, QPushButton, QCalendarWidget, QGridLayout,
                              QListWidget, QListWidgetItem, QScroller,
                              QFrame, QScrollArea, QSizePolicy, QTableView, QToolButton,
-                             QStyle, QStyleOptionButton, QStyledItemDelegate)
+                             QStyle, QStyleOptionButton, QStyledItemDelegate, QToolTip,
+                             QAbstractItemView)
 from PyQt6.QtCore import Qt, QDate, QTime, pyqtSignal, QPropertyAnimation, QEasingCurve, QRect, QRectF, QPoint, pyqtProperty, QSize, QEvent, QTimer
-from PyQt6.QtGui import QColor, QPainter, QPainterPath, QBrush, QPen, QIcon, QPalette, QPixmap, QTextCharFormat
+from PyQt6.QtGui import QColor, QPainter, QPainterPath, QBrush, QPen, QIcon, QPalette, QPixmap, QTextCharFormat, QCursor
 from PyQt6.QtSvg import QSvgRenderer
 from datetime import datetime, timedelta
 from ..config import AppConfig
@@ -91,12 +92,25 @@ class ThemePerforationSeparator(QWidget):
             ))
 
 
+class SelectionModeLabel(QLabel):
+    clicked = pyqtSignal()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+
 #  主视图 (TimePickerView)
 # =================================================================
 class TimePickerView(QWidget):
     back_requested = pyqtSignal() 
     suspend_requested = pyqtSignal()
     confirm_requested = pyqtSignal(object, object) 
+    multiple_confirm_requested = pyqtSignal(object)
+    selection_mode_changed = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -105,6 +119,14 @@ class TimePickerView(QWidget):
         self._end_day_offset = 0
         self._prev_end_hour = None
         self._embedded_calendar_style = EMBEDDED_CALENDAR_STYLE
+        self._selection_mode = "single"
+        self._selected_dates = set()
+        self._multi_drag_active = False
+        self._multi_drag_last_date = None
+        self._multi_press_date = None
+        self._multi_drag_happened = False
+        self._suppress_next_calendar_click = False
+        self._calendar_view = None
         self._calendar_style_switch_enabled = self.__class__ is TimePickerView
         self._date_icon_double_click_active = False
         self._date_icon_single_click_timer = QTimer(self)
@@ -113,6 +135,7 @@ class TimePickerView(QWidget):
 
         self._setup_ui()
         self._connect_signals()
+        QTimer.singleShot(0, self._position_selection_mode_button)
 
         self._update_date_label()
         now = QTime.currentTime()
@@ -147,12 +170,31 @@ class TimePickerView(QWidget):
 
         # 2. 标题栏
         header_container = QWidget()
+        self.header_container = header_container
         header_container.setFixedHeight(70)
         header_layout = QHBoxLayout(header_container)
         header_layout.setContentsMargins(30, 10, 30, 0)
+        header_layout.setSpacing(0)
         self.lbl_title = QLabel("设置时间")
         self.lbl_title.setStyleSheet("color: white; font-size: 24px; font-weight: bold; font-family: 'Microsoft YaHei';")
         header_layout.addWidget(self.lbl_title)
+        self.btn_selection_mode = SelectionModeLabel(header_container)
+        self.btn_selection_mode.setTextFormat(Qt.TextFormat.RichText)
+        self.btn_selection_mode.setText(self._selection_mode_text("单选"))
+        self.btn_selection_mode.setFixedSize(48, 24)
+        self.btn_selection_mode.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.btn_selection_mode.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_selection_mode.setToolTip("点击切换单选/多选")
+        self.btn_selection_mode.setStyleSheet("""
+            background: transparent;
+            border: none;
+            color: rgba(255, 255, 255, 0.72);
+            font-family: 'Microsoft YaHei';
+            font-size: 12px;
+            font-weight: bold;
+            padding: 0px;
+        """)
+        self.btn_selection_mode.setVisible(self.__class__ is TimePickerView)
         header_layout.addStretch()
         outer_layout.addWidget(header_container)
 
@@ -286,6 +328,9 @@ class TimePickerView(QWidget):
                 "qt_calendar_calendarview",
             )
             if calendar_view is not None:
+                self._calendar_view = calendar_view
+                calendar_view.viewport().setMouseTracking(True)
+                calendar_view.viewport().installEventFilter(self)
                 self._weekday_header_delegate = WeekdayHeaderDelegate(
                     calendar_view.itemDelegate(),
                     weekday_header_color,
@@ -494,6 +539,96 @@ class TimePickerView(QWidget):
             self.lbl_title.setStyleSheet("color: white; font-size: 17px; font-weight: bold; font-family: 'Microsoft YaHei';")
         else:
             self.lbl_title.setStyleSheet("color: white; font-size: 24px; font-weight: bold; font-family: 'Microsoft YaHei';")
+        QTimer.singleShot(0, self._position_selection_mode_button)
+
+    def _position_selection_mode_button(self):
+        if (
+            not hasattr(self, "btn_selection_mode")
+            or self.btn_selection_mode.isHidden()
+        ):
+            return
+
+        title_rect = self.lbl_title.geometry()
+        title_metrics = self.lbl_title.fontMetrics()
+        button_metrics = self.btn_selection_mode.fontMetrics()
+        title_baseline = (
+            title_rect.y()
+            + (title_rect.height() - title_metrics.height()) // 2
+            + title_metrics.ascent()
+        )
+        button_baseline_offset = (
+            (self.btn_selection_mode.height() - button_metrics.height()) // 2
+            + button_metrics.ascent()
+        )
+        button_x = (
+            title_rect.x()
+            + title_metrics.horizontalAdvance(self.lbl_title.text())
+            + 4
+        )
+        button_y = title_baseline - button_baseline_offset
+        self.btn_selection_mode.move(button_x, button_y)
+        self.btn_selection_mode.raise_()
+
+    def _toggle_selection_mode(self):
+        mode = "multiple" if self._selection_mode == "single" else "single"
+        self.set_selection_mode(mode)
+
+    def set_selection_mode(self, mode, selected_dates=None):
+        mode = "multiple" if mode == "multiple" else "single"
+        previous_mode = self._selection_mode
+        self._selection_mode = mode
+        if selected_dates is not None:
+            self._selected_dates = {
+                value.toPyDate() if isinstance(value, QDate) else value
+                for value in selected_dates
+            }
+        elif mode == "multiple" and previous_mode != "multiple":
+            self._selected_dates = {self.current_date.toPyDate()}
+
+        mode_text = "多选" if self._selection_mode == "multiple" else "单选"
+        self.btn_selection_mode.setText(self._selection_mode_text(mode_text))
+        if self._selection_mode == "single":
+            self.calendar.setSelectedDate(self.current_date)
+        if self._calendar_view is not None:
+            if self._selection_mode == "multiple":
+                self._calendar_view.setSelectionMode(
+                    QAbstractItemView.SelectionMode.NoSelection
+                )
+                self._calendar_view.clearSelection()
+            else:
+                self._calendar_view.setSelectionMode(
+                    QAbstractItemView.SelectionMode.SingleSelection
+                )
+        self.calendar.set_multi_selection(
+            self._selection_mode == "multiple",
+            self._selected_dates,
+        )
+        self.selection_mode_changed.emit(self._selection_mode)
+
+    def set_selection_mode_available(self, available):
+        available = bool(available) and self.__class__ is TimePickerView
+        if not available:
+            self.set_selection_mode("single", [])
+        self.btn_selection_mode.setVisible(available)
+        QTimer.singleShot(0, self._position_selection_mode_button)
+
+    def set_multiple_ranges(self, ranges):
+        dates = []
+        for start, end in ranges or []:
+            target = start or end
+            if target is not None:
+                dates.append(target.date())
+        if dates:
+            first = min(dates)
+            self.current_date = QDate(first.year, first.month, first.day)
+            self.calendar.setSelectedDate(self.current_date)
+            self._update_date_label()
+            self._update_end_date_label()
+            self.set_selection_mode("multiple", dates)
+
+    @staticmethod
+    def _selection_mode_text(mode_text):
+        return f'（<span style="color: #ffffff;">{mode_text}</span>）'
 
     def _create_single_time_scroller(self):
         """创建一个单独的 [时 : 分] 滚轮组"""
@@ -537,6 +672,7 @@ class TimePickerView(QWidget):
         else:
             self.current_date = QDate(target_dt.year, target_dt.month, target_dt.day)
         self._prev_end_hour = target_dt.hour
+        self.set_selection_mode("single", [])
         self._update_date_label()
         self._update_end_date_label()
         self.calendar.setSelectedDate(self.current_date)
@@ -570,6 +706,7 @@ class TimePickerView(QWidget):
     def _connect_signals(self):
         if self._calendar_style_switch_enabled:
             self.btn_date.installEventFilter(self)
+        self.btn_selection_mode.clicked.connect(self._toggle_selection_mode)
         self.btn_date.clicked.connect(self._toggle_calendar)
         self.calendar.clicked.connect(self._on_date_selected)
         # 结束时间转轮
@@ -725,6 +862,18 @@ class TimePickerView(QWidget):
         """)
 
     def _on_date_selected(self, date):
+        if self._selection_mode == "multiple":
+            if self._suppress_next_calendar_click:
+                self._suppress_next_calendar_click = False
+                if self._calendar_view is not None:
+                    self._calendar_view.clearSelection()
+                return
+            self._multi_drag_last_date = None
+            self._toggle_multi_date(date)
+            self._multi_drag_last_date = None
+            if self._calendar_view is not None:
+                self._calendar_view.clearSelection()
+            return
         self.current_date = date
         self._update_date_label()
         self._update_end_date_label()
@@ -833,6 +982,39 @@ class TimePickerView(QWidget):
 
     def eventFilter(self, watched, event):
         if (
+            self._calendar_view is not None
+            and watched is self._calendar_view.viewport()
+            and self._selection_mode == "multiple"
+        ):
+            if (
+                event.type() == QEvent.Type.MouseButtonPress
+                and event.button() == Qt.MouseButton.LeftButton
+            ):
+                self._multi_drag_active = True
+                self._multi_drag_happened = False
+                self._multi_drag_last_date = None
+                self._multi_press_date = self._calendar_date_at_cursor()
+                return False
+            elif event.type() == QEvent.Type.MouseMove and self._multi_drag_active:
+                if not self._multi_drag_happened:
+                    self._multi_drag_happened = True
+                    if self._multi_press_date is not None:
+                        self._toggle_multi_date(self._multi_press_date)
+                date = self._calendar_date_at_cursor()
+                if date is not None:
+                    self._toggle_multi_date(date)
+                return False
+            elif (
+                event.type() == QEvent.Type.MouseButtonRelease
+                and event.button() == Qt.MouseButton.LeftButton
+                and self._multi_drag_active
+            ):
+                self._suppress_next_calendar_click = self._multi_drag_happened
+                self._multi_drag_active = False
+                self._multi_drag_last_date = None
+                self._multi_press_date = None
+                return False
+        if (
             watched is self.btn_date
             and self._calendar_style_switch_enabled
             and event.type() in (
@@ -873,7 +1055,8 @@ class TimePickerView(QWidget):
         ):
             self._position_calendar_perforation()
         if (
-            watched is self.lbl_end_date
+            hasattr(self, "lbl_end_date")
+            and watched is self.lbl_end_date
             and event.type() == QEvent.Type.MouseButtonDblClick
             and event.button() == Qt.MouseButton.LeftButton
         ):
@@ -881,7 +1064,79 @@ class TimePickerView(QWidget):
             return True
         return super().eventFilter(watched, event)
 
+    def _calendar_date_at_cursor(self):
+        viewport_position = self._calendar_view.viewport().mapFromGlobal(QCursor.pos())
+        row = self._calendar_view.rowAt(viewport_position.y()) - 1
+        column = self._calendar_view.columnAt(viewport_position.x())
+        if row < 0 or column < 0:
+            return None
+
+        first_date = QDate(self.calendar.yearShown(), self.calendar.monthShown(), 1)
+        first_weekday = int(self.calendar.firstDayOfWeek().value)
+        leading_days = (first_date.dayOfWeek() - first_weekday) % 7
+        date = first_date.addDays(row * 7 + column - leading_days)
+        if date < self.calendar.minimumDate() or date > self.calendar.maximumDate():
+            return None
+        return date
+
+    def _toggle_multi_date(self, date):
+        py_date = date.toPyDate()
+        if py_date == self._multi_drag_last_date:
+            return
+        self._multi_drag_last_date = py_date
+        if py_date in self._selected_dates:
+            self._selected_dates.remove(py_date)
+        else:
+            self._selected_dates.add(py_date)
+        self.current_date = date
+        self._update_date_label()
+        self._update_end_date_label()
+        self.calendar.set_multi_selection(True, self._selected_dates)
+
+    def _time_range_for_date(self, base_date):
+        end_h = int(self.scroll_end_hour.get_value())
+        end_m = int(self.scroll_end_min.get_value())
+        day_offset = self._end_day_offset
+
+        dt_start = None
+        if self.chk_enable_start.isChecked():
+            start_h = int(self.scroll_start_hour.get_value())
+            start_m = int(self.scroll_start_min.get_value())
+            dt_start = datetime(
+                base_date.year(), base_date.month(), base_date.day(), start_h, start_m
+            )
+
+        end_date = base_date.addDays(day_offset)
+        dt_end = datetime(end_date.year(), end_date.month(), end_date.day(), end_h, end_m)
+        if dt_start is not None and dt_end <= dt_start:
+            end_date = base_date.addDays(day_offset + 1)
+            dt_end = datetime(end_date.year(), end_date.month(), end_date.day(), end_h, end_m)
+        return dt_start, dt_end
+
     def _on_confirm(self):
+        if self._selection_mode == "multiple":
+            if not self._selected_dates:
+                QToolTip.showText(
+                    self.btn_ok.mapToGlobal(QPoint(0, -28)),
+                    "选择日期不能为0",
+                    self.btn_ok,
+                    QRect(),
+                    1800,
+                )
+                return
+
+            ranges = []
+            now = datetime.now()
+            for py_date in sorted(self._selected_dates):
+                base_date = QDate(py_date.year, py_date.month, py_date.day)
+                dt_start, dt_end = self._time_range_for_date(base_date)
+                if dt_end < now:
+                    print("❌ 结束时间不能早于当前时间")
+                    return
+                ranges.append((dt_start, dt_end))
+            self.multiple_confirm_requested.emit(ranges)
+            return
+
         end_h = int(self.scroll_end_hour.get_value())
         end_m = int(self.scroll_end_min.get_value())
         end_date = self.current_date.addDays(self._end_day_offset)
@@ -940,6 +1195,7 @@ class TimePickerView(QWidget):
         if hasattr(self, 'btn_close'):
             self.btn_close.move(self.width() - 30, 0)
             self.btn_close.raise_()
+        self._position_selection_mode_button()
         self._position_calendar_perforation()
 
     def mousePressEvent(self, event):

@@ -374,9 +374,9 @@ class AddScheduleViewWeek(QWidget):
             QComboBox::drop-down { border: none; width: 0px; }
             QListView { background-color: #ffffff; color: #333333; border: 1px solid #dddddd; outline: 0px; }
             QListView::item { background-color: #ffffff; color: #333333; padding: 4px 8px; }
-            QListView::item:selected { background-color: #0cc0df; color: #ffffff; }
+            QListView::item:selected { background-color: __THEME_PRIMARY__; color: #ffffff; }
             QListView::item:hover { background-color: #f0f0f0; color: #333333; }
-        """)
+        """.replace("__THEME_PRIMARY__", AppConfig.COLOR_GRADIENT_START))
         layout.addWidget(lbl)
         layout.addWidget(combo)
         return container, combo

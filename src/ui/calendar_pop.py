@@ -88,8 +88,19 @@ class HighlightCalendarWidget(QCalendarWidget):
         self._embedded_foreground_color = QColor(
             embedded_foreground_color or AppConfig.COLOR_GRADIENT_START
         )
+        self._multi_selection_active = False
+        self._multi_selected_dates = set()
         self.date_status = {} # 字典，记录具体状态颜色
         self.update_schedule_dates()
+
+    def set_multi_selection(self, active, dates=None):
+        self._multi_selection_active = bool(active)
+        if dates is not None:
+            self._multi_selected_dates = {
+                value.toPyDate() if isinstance(value, QDate) else value
+                for value in dates
+            }
+        self.updateCells()
 
     def update_schedule_dates(self):
         """扫描数据库，计算每天的综合状态：全完成(白) / 逾期(灰) / 待办(青)"""
@@ -168,7 +179,11 @@ class HighlightCalendarWidget(QCalendarWidget):
         颜色规则：今日=金，周末=红，工作日=灰黑，非本月=浅灰。"""
         painter.save()
 
-        selected = date == self.selectedDate()
+        selected = (
+            date.toPyDate() in self._multi_selected_dates
+            if self._multi_selection_active
+            else date == self.selectedDate()
+        )
         in_current_month = (
             date.year() == self.yearShown() and date.month() == self.monthShown()
         )
@@ -253,7 +268,11 @@ class HighlightCalendarWidget(QCalendarWidget):
             round(overlay_start.green() + (overlay_end.green() - overlay_start.green()) * progress),
             round(overlay_start.blue() + (overlay_end.blue() - overlay_start.blue()) * progress),
         )
-        selected = date == self.selectedDate()
+        selected = (
+            date.toPyDate() in self._multi_selected_dates
+            if self._multi_selection_active
+            else date == self.selectedDate()
+        )
         painter.save()
         painter.fillRect(
             rect,

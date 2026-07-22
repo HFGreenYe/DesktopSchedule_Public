@@ -1893,6 +1893,21 @@ class WeekTimetableBoard(QFrame):
             day_index,
         )
 
+    def _days_with_schedule_data(self):
+        days_with_content = set()
+        for day_index, schedules in self.schedules_by_day.items():
+            if any(
+                getattr(schedule, "status", 0) != 2
+                and not ScheduleQueryService.is_todo(schedule)
+                and (
+                    getattr(schedule, "start_time", None) is not None
+                    or getattr(schedule, "end_time", None) is not None
+                )
+                for schedule in schedules
+            ):
+                days_with_content.add(day_index)
+        return days_with_content
+
     def _draw_current_time_line(self, painter, board_rect, day_width, row_height):
         today = QDate.currentDate()
         day_index = self.current_monday.daysTo(today)
@@ -2026,11 +2041,7 @@ class WeekTimetableBoard(QFrame):
         self._draw_selected_schedule_overlays(painter)
 
         # 空日程占位文字
-        days_with_content = set()
-        for region in self._hit_regions:
-            day_idx = int(region["rect"].left() / day_width)
-            if 0 <= day_idx < self.DAY_COUNT:
-                days_with_content.add(day_idx)
+        days_with_content = self._days_with_schedule_data()
 
         empty_font = painter.font()
         empty_font.setFamily("Microsoft YaHei")
