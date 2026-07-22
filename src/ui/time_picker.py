@@ -1,15 +1,73 @@
 # src/ui/time_picker.py
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-                             QPushButton, QCalendarWidget, QGridLayout, 
-                             QListWidget, QListWidgetItem, QScroller, 
-                             QFrame, QScrollArea, QSizePolicy, QToolButton)
-from PyQt6.QtCore import Qt, QDate, QTime, pyqtSignal, QPropertyAnimation, QEasingCurve, QRect, QPoint, pyqtProperty, QSize, QEvent
-from PyQt6.QtGui import QColor, QPainter, QPainterPath, QBrush, QPen, QIcon, QPixmap
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+                             QApplication, QPushButton, QCalendarWidget, QGridLayout,
+                             QListWidget, QListWidgetItem, QScroller,
+                             QFrame, QScrollArea, QSizePolicy, QTableView, QToolButton,
+                             QStyle, QStyleOptionButton)
+from PyQt6.QtCore import Qt, QDate, QTime, pyqtSignal, QPropertyAnimation, QEasingCurve, QRect, QRectF, QPoint, pyqtProperty, QSize, QEvent, QTimer
+from PyQt6.QtGui import QColor, QPainter, QPainterPath, QBrush, QPen, QIcon, QPalette, QPixmap, QTextCharFormat
 from PyQt6.QtSvg import QSvgRenderer
 from datetime import datetime, timedelta
 from ..config import AppConfig
 from ..utils.styles import StyleManager
 from .components import IOSSwitch, NumberScroller
+
+
+EMBEDDED_CALENDAR_STYLE = "theme_80"
+
+
+def _embedded_calendar_style_values(style_name):
+    if style_name == "white_65":
+        return 0.65, "#ffffff"
+    return 0.80, AppConfig.COLOR_GRADIENT_START
+
+
+class ThemePerforationSeparator(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(10)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
+
+    def _background_color(self):
+        window = self.window()
+        gradient_height = max(1, window.height())
+        if getattr(window, "_day_collapsed", False):
+            gradient_height = max(
+                gradient_height,
+                int(getattr(window, "_day_expanded_height", gradient_height)),
+            )
+        center_y = self.mapTo(window, QPoint(0, self.height() // 2)).y()
+        ratio = max(0.0, min(center_y / gradient_height, 1.0))
+        start = QColor(AppConfig.COLOR_GRADIENT_START)
+        end = QColor(AppConfig.COLOR_GRADIENT_END)
+        inverse = 1.0 - ratio
+        return QColor(
+            round(start.red() * inverse + end.red() * ratio),
+            round(start.green() * inverse + end.green() * ratio),
+            round(start.blue() * inverse + end.blue() * ratio),
+        )
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(self._background_color())
+
+        diameter = 5.0
+        radius = diameter / 2.0
+        span = max(1.0, float(self.width() - 1))
+        count = max(2, round(span / 8.0) + 1)
+        step = span / (count - 1)
+        center_y = self.height() / 2.0
+        for index in range(count):
+            center_x = index * step
+            painter.drawEllipse(QRectF(
+                center_x - radius,
+                center_y - radius,
+                diameter,
+                diameter,
+            ))
 
 
 #  主视图 (TimePickerView)
@@ -25,6 +83,12 @@ class TimePickerView(QWidget):
         self.drag_pos = None
         self._end_day_offset = 0
         self._prev_end_hour = None
+        self._embedded_calendar_style = EMBEDDED_CALENDAR_STYLE
+        self._calendar_style_switch_enabled = self.__class__ is TimePickerView
+        self._date_icon_double_click_active = False
+        self._date_icon_single_click_timer = QTimer(self)
+        self._date_icon_single_click_timer.setSingleShot(True)
+        self._date_icon_single_click_timer.timeout.connect(self._toggle_calendar)
 
         self._setup_ui()
         self._connect_signals()
@@ -50,6 +114,11 @@ class TimePickerView(QWidget):
         return QIcon(pixmap)
 
     def _setup_ui(self):
+        (
+            self._calendar_surface_alpha,
+            self._calendar_foreground_color,
+        ) = _embedded_calendar_style_values(self._embedded_calendar_style)
+
         # 1. 主布局
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
@@ -75,8 +144,8 @@ class TimePickerView(QWidget):
         
         self.content_widget = QWidget()
         self.content_layout = QVBoxLayout(self.content_widget)
-        self.content_layout.setContentsMargins(20, 8, 20, 20)
-        self.content_layout.setSpacing(12)
+        self.content_layout.setContentsMargins(20, 10, 20, 30)
+        self.content_layout.setSpacing(20)
 
         self.scroll_area.setWidget(self.content_widget)
         outer_layout.addWidget(self.scroll_area)
@@ -84,55 +153,155 @@ class TimePickerView(QWidget):
         # --- 内容 ---
 
         # 4. 日期按钮
+        self.date_calendar_container = QFrame()
+        self.date_calendar_container.setObjectName("DateCalendarContainer")
+        self.date_calendar_container.setStyleSheet("""
+            QFrame#DateCalendarContainer {
+                background-color: transparent;
+                border: none;
+            }
+        """)
+        self.date_calendar_layout = QVBoxLayout(self.date_calendar_container)
+        self.date_calendar_layout.setContentsMargins(0, 0, 0, 0)
+        self.date_calendar_layout.setSpacing(0)
+
         self.btn_date = QPushButton()
         self.btn_date.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_date.setFixedHeight(45)
         # 在这里设置日历 SVG 图标
-        self.btn_date.setIcon(self._get_colored_icon("assets/icons/calendar.svg", "#FFFFFF"))
+        self.btn_date.setIcon(self._get_colored_icon(
+            "assets/icons/calendar.svg",
+            self._calendar_foreground_color,
+        ))
         self.btn_date.setIconSize(QSize(20, 20))
-        self.btn_date.setStyleSheet("""
-            QPushButton {
-                background-color: rgba(255, 255, 255, 0.18);
-                border: 1px solid rgba(255, 255, 255, 0.2);
-                border-radius: 8px;
-                color: white;
-                font-size: 16px;
-                font-weight: bold;
-                font-family: 'Microsoft YaHei';
-            }
-            QPushButton:hover { background-color: rgba(255, 255, 255, 0.28); }
-        """)
-        self.content_layout.addWidget(self.btn_date)
+        self.date_calendar_layout.addWidget(self.btn_date)
 
-        # 5. 日历控件
-        self.calendar = QCalendarWidget()
+        # 5. 日历控件（暗色模式：深色背景 + 白色工作日 + 红色周末）
+        from .calendar_pop import HighlightCalendarWidget, _make_arrow_icon
+        self.calendar = HighlightCalendarWidget(
+            self, export_theme=False, schedule_markers=False,
+            dark_mode=True, embedded_calendar=True,
+            embedded_foreground_color=self._calendar_foreground_color,
+        )
         self.calendar.setGridVisible(False)
         self.calendar.setVerticalHeaderFormat(QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader)
         self.calendar.setNavigationBarVisible(True)
-        self.calendar.setStyleSheet(StyleManager.get_calendar_style())
         self.calendar.setMinimumDate(QDate.currentDate())
-        self.content_layout.addWidget(self.calendar)
 
-        # 箭头接近主题主色，混入少量白色保持原有轻微提亮效果。
-        arrow_color = StyleManager.mix_colors(
-            AppConfig.COLOR_GRADIENT_START,
-            "#ffffff",
-            primary_ratio=0.98,
-        )
+        weekday_format = QTextCharFormat()
+        weekday_format.setForeground(QColor(self._calendar_foreground_color))
+        for weekday in (
+            Qt.DayOfWeek.Monday,
+            Qt.DayOfWeek.Tuesday,
+            Qt.DayOfWeek.Wednesday,
+            Qt.DayOfWeek.Thursday,
+            Qt.DayOfWeek.Friday,
+        ):
+            self.calendar.setWeekdayTextFormat(weekday, weekday_format)
+
+        weekend_format = QTextCharFormat()
+        weekend_format.setForeground(QColor("#ff0000"))
+        self.calendar.setWeekdayTextFormat(Qt.DayOfWeek.Saturday, weekend_format)
+        self.calendar.setWeekdayTextFormat(Qt.DayOfWeek.Sunday, weekend_format)
+        self.calendar.setStyleSheet(f"""
+            QCalendarWidget {{
+                background-color: transparent;
+                border: none;
+            }}
+            QCalendarWidget QWidget {{
+                background-color: transparent;
+                alternate-background-color: transparent;
+                color: white;
+            }}
+            QCalendarWidget QAbstractItemView {{
+                background-color: transparent;
+                alternate-background-color: transparent;
+                border: none;
+                outline: 0;
+            }}
+            QCalendarWidget QWidget#qt_calendar_navigationbar {{
+                background-color: transparent;
+            }}
+            QCalendarWidget QToolButton {{
+                color: #333333; background-color: transparent; border: none;
+                border-radius: 4px; padding: 4px; font-weight: bold;
+            }}
+            QCalendarWidget QToolButton#qt_calendar_monthbutton,
+            QCalendarWidget QToolButton#qt_calendar_yearbutton {{
+                color: {self._calendar_foreground_color};
+            }}
+            QCalendarWidget QToolButton:disabled {{
+                color: #cccccc;
+            }}
+            QCalendarWidget QToolButton:hover {{
+                background-color: rgba(0, 0, 0, 0.06);
+            }}
+            QCalendarWidget QToolButton::menu-indicator {{ image: none; }}
+            QCalendarWidget QSpinBox {{
+                background-color: transparent; color: white; border: none;
+                font-weight: bold; padding-right: 10px;
+            }}
+            QCalendarWidget QSpinBox QLineEdit {{
+                color: white; background: transparent; border: none;
+            }}
+            QCalendarWidget QHeaderView::section {{
+                background-color: transparent; color: {self._calendar_foreground_color};
+                border: none; padding: 4px; font-weight: bold;
+            }}
+            QCalendarWidget QMenu {{
+                background-color: #2b2b2b; color: white;
+                border: 1px solid rgba(255,255,255,0.15);
+            }}
+        """)
+        self.calendar.setAutoFillBackground(False)
+
+        self.calendar_background = QFrame()
+        self.calendar_background.setObjectName("CalendarBackground")
+        self.calendar_background.setStyleSheet(f"""
+            QFrame#CalendarBackground {{
+                background-color: rgba(255, 255, 255, {self._calendar_surface_alpha:.2f});
+                border-top: none;
+                border-left: 1px solid rgba(255, 255, 255, 0.5);
+                border-right: 1px solid rgba(255, 255, 255, 0.5);
+                border-bottom: 1px solid rgba(255, 255, 255, 0.5);
+                border-bottom-left-radius: 8px;
+                border-bottom-right-radius: 8px;
+            }}
+        """)
+        calendar_layout = QVBoxLayout(self.calendar_background)
+        calendar_layout.setContentsMargins(0, 5, 0, 7)
+        calendar_layout.setSpacing(0)
+        calendar_layout.addWidget(self.calendar)
+        self.date_calendar_layout.addWidget(self.calendar_background)
+        self.content_layout.addWidget(self.date_calendar_container)
+        self._apply_date_button_style(expanded=True)
+
+        self.calendar_perforation = ThemePerforationSeparator(self.date_calendar_container)
+        self.date_calendar_container.installEventFilter(self)
+        self._position_calendar_perforation()
+
         prev_btn = self.calendar.findChild(QToolButton, "qt_calendar_prevmonth")
         if prev_btn:
-            prev_btn.setIcon(self._get_colored_icon("assets/icons/cal_left.svg", arrow_color))
+            prev_btn.setIcon(_make_arrow_icon(
+                "assets/icons/cal_left.svg",
+                enabled_color=self._calendar_foreground_color,
+                disabled_color="#bbbbbb",
+            ))
             prev_btn.setIconSize(QSize(18, 18))
 
         next_btn = self.calendar.findChild(QToolButton, "qt_calendar_nextmonth")
         if next_btn:
-            next_btn.setIcon(self._get_colored_icon("assets/icons/cal_right.svg", arrow_color))
+            next_btn.setIcon(_make_arrow_icon(
+                "assets/icons/cal_right.svg",
+                enabled_color=self._calendar_foreground_color,
+                disabled_color="#bbbbbb",
+            ))
             next_btn.setIconSize(QSize(18, 18))
 
         # 6. 开关行
         switch_row = QHBoxLayout()
         lbl_switch = QLabel("启用开始时间")
-        lbl_switch.setStyleSheet("color: white; font-size: 15px; font-weight: bold;")
+        lbl_switch.setStyleSheet("color: rgba(255,255,255,0.7); font-size: 15px; font-weight: bold;")
         self.chk_enable_start = IOSSwitch()
         switch_row.addWidget(lbl_switch)
         switch_row.addStretch()
@@ -150,8 +319,8 @@ class TimePickerView(QWidget):
         self.time_picker_container.setObjectName("TimeContainer")
         
         h_layout = QHBoxLayout(self.time_picker_container)
-        h_layout.setContentsMargins(5, 13, 5, 13)
-        h_layout.setSpacing(10) 
+        h_layout.setContentsMargins(5, 15, 5, 15)
+        h_layout.setSpacing(2)
 
         # --> 左侧：开始时间
         self.start_group = QWidget()
@@ -339,6 +508,7 @@ class TimePickerView(QWidget):
             self.chk_enable_start.setChecked(True)
             self.scroll_start_hour.set_value(f"{start_dt.hour:02d}")
             self.scroll_start_min.set_value(f"{start_dt.minute:02d}")
+            self._set_dual_time_group_layout(True)
 
             # 显式显示 (因为 setChecked 不发信号)
             self.start_group.show()
@@ -348,6 +518,7 @@ class TimePickerView(QWidget):
             self.lbl_end.setText("完成")
         else:
             self.chk_enable_start.setChecked(False)
+            self._set_dual_time_group_layout(False)
 
             # 显式隐藏 (这是修复 Bug 的核心)
             self.start_group.hide()
@@ -357,6 +528,8 @@ class TimePickerView(QWidget):
             self.lbl_end.setText("完成时间")
 
     def _connect_signals(self):
+        if self._calendar_style_switch_enabled:
+            self.btn_date.installEventFilter(self)
         self.btn_date.clicked.connect(self._toggle_calendar)
         self.calendar.clicked.connect(self._on_date_selected)
         # 结束时间转轮
@@ -372,10 +545,144 @@ class TimePickerView(QWidget):
         self.btn_ok.clicked.connect(self._on_confirm)
 
     def _toggle_calendar(self):
-        if self.calendar.isVisible():
-            self.calendar.hide()
-        else:
-            self.calendar.show()
+        expanded = self.calendar_background.isHidden()
+        self.calendar_background.setVisible(expanded)
+        self.calendar_perforation.setVisible(expanded)
+        self._apply_date_button_style(expanded=expanded)
+        self.date_calendar_container.updateGeometry()
+        self.content_widget.updateGeometry()
+        self._position_calendar_perforation()
+
+    def _position_calendar_perforation(self):
+        if not hasattr(self, "calendar_perforation"):
+            return
+        separator_height = self.calendar_perforation.height()
+        seam_y = self.btn_date.geometry().bottom() + 1
+        self.calendar_perforation.setGeometry(
+            0,
+            seam_y - separator_height // 2,
+            self.date_calendar_container.width(),
+            separator_height,
+        )
+        self.calendar_perforation.raise_()
+        self.calendar_perforation.update()
+
+    def _date_button_icon_rect(self):
+        option = QStyleOptionButton()
+        self.btn_date.initStyleOption(option)
+        contents = self.btn_date.style().subElementRect(
+            QStyle.SubElement.SE_PushButtonContents,
+            option,
+            self.btn_date,
+        )
+        icon_size = option.iconSize
+        text_width = option.fontMetrics.horizontalAdvance(option.text)
+        spacing = 4 if option.text else 0
+        content_width = icon_size.width() + spacing + text_width
+        icon_x = contents.x() + max(0, (contents.width() - content_width) // 2)
+        icon_y = contents.y() + (contents.height() - icon_size.height()) // 2
+        return QRect(icon_x, icon_y, icon_size.width(), icon_size.height()).adjusted(
+            -3, -3, 3, 3
+        )
+
+    def _switch_embedded_calendar_style(self):
+        style_name = (
+            "white_65"
+            if self._embedded_calendar_style == "theme_80"
+            else "theme_80"
+        )
+        self._apply_embedded_calendar_style(style_name)
+
+    def _apply_embedded_calendar_style(self, style_name):
+        from .calendar_pop import _make_arrow_icon
+
+        previous_foreground = self._calendar_foreground_color
+        self._embedded_calendar_style = style_name
+        (
+            self._calendar_surface_alpha,
+            self._calendar_foreground_color,
+        ) = _embedded_calendar_style_values(style_name)
+
+        self.btn_date.setIcon(self._get_colored_icon(
+            "assets/icons/calendar.svg",
+            self._calendar_foreground_color,
+        ))
+        self.calendar._embedded_foreground_color = QColor(
+            self._calendar_foreground_color
+        )
+
+        weekday_format = QTextCharFormat()
+        weekday_format.setForeground(QColor(self._calendar_foreground_color))
+        for weekday in (
+            Qt.DayOfWeek.Monday,
+            Qt.DayOfWeek.Tuesday,
+            Qt.DayOfWeek.Wednesday,
+            Qt.DayOfWeek.Thursday,
+            Qt.DayOfWeek.Friday,
+        ):
+            self.calendar.setWeekdayTextFormat(weekday, weekday_format)
+
+        calendar_style = self.calendar.styleSheet().replace(
+            previous_foreground,
+            self._calendar_foreground_color,
+        )
+        self.calendar.setStyleSheet(calendar_style)
+        self.calendar_background.setStyleSheet(f"""
+            QFrame#CalendarBackground {{
+                background-color: rgba(255, 255, 255, {self._calendar_surface_alpha:.2f});
+                border-top: none;
+                border-left: 1px solid rgba(255, 255, 255, 0.5);
+                border-right: 1px solid rgba(255, 255, 255, 0.5);
+                border-bottom: 1px solid rgba(255, 255, 255, 0.5);
+                border-bottom-left-radius: 8px;
+                border-bottom-right-radius: 8px;
+            }}
+        """)
+
+        prev_btn = self.calendar.findChild(QToolButton, "qt_calendar_prevmonth")
+        if prev_btn:
+            prev_btn.setIcon(_make_arrow_icon(
+                "assets/icons/cal_left.svg",
+                enabled_color=self._calendar_foreground_color,
+                disabled_color="#bbbbbb",
+            ))
+        next_btn = self.calendar.findChild(QToolButton, "qt_calendar_nextmonth")
+        if next_btn:
+            next_btn.setIcon(_make_arrow_icon(
+                "assets/icons/cal_right.svg",
+                enabled_color=self._calendar_foreground_color,
+                disabled_color="#bbbbbb",
+            ))
+
+        self._apply_date_button_style(
+            expanded=not self.calendar_background.isHidden()
+        )
+        self.calendar.updateCells()
+
+    def _apply_date_button_style(self, expanded):
+        bottom_radius = 0 if expanded else 8
+        bottom_border = "none" if expanded else "1px solid rgba(255, 255, 255, 0.5)"
+        hover_alpha = min(1.0, self._calendar_surface_alpha + 0.08)
+        self.btn_date.setStyleSheet(f"""
+            QPushButton {{
+                background-color: rgba(255, 255, 255, {self._calendar_surface_alpha:.2f});
+                border-top: 1px solid rgba(255, 255, 255, 0.5);
+                border-left: 1px solid rgba(255, 255, 255, 0.5);
+                border-right: 1px solid rgba(255, 255, 255, 0.5);
+                border-bottom: {bottom_border};
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+                border-bottom-left-radius: {bottom_radius}px;
+                border-bottom-right-radius: {bottom_radius}px;
+                color: {self._calendar_foreground_color};
+                font-size: 16px;
+                font-weight: bold;
+                font-family: 'Microsoft YaHei';
+            }}
+            QPushButton:hover {{
+                background-color: rgba(255, 255, 255, {hover_alpha:.2f});
+            }}
+        """)
 
     def _on_date_selected(self, date):
         self.current_date = date
@@ -386,7 +693,15 @@ class TimePickerView(QWidget):
         text = self.current_date.toString("yyyy年MM月dd日")
         self.btn_date.setText("    " + text)
 
+    def _set_dual_time_group_layout(self, enabled):
+        maximum_width = 124 if enabled else 16777215
+        self.start_group.setMaximumWidth(maximum_width)
+        self.end_group.setMaximumWidth(maximum_width)
+        self.time_picker_container.layout().invalidate()
+        self.time_picker_container.updateGeometry()
+
     def _on_switch_toggled(self, checked):
+        self._set_dual_time_group_layout(checked)
         if checked:
             self.start_group.show()
             self.duration_grid.show()
@@ -478,6 +793,46 @@ class TimePickerView(QWidget):
 
     def eventFilter(self, watched, event):
         if (
+            watched is self.btn_date
+            and self._calendar_style_switch_enabled
+            and event.type() in (
+                QEvent.Type.MouseButtonPress,
+                QEvent.Type.MouseButtonRelease,
+                QEvent.Type.MouseButtonDblClick,
+            )
+            and event.button() == Qt.MouseButton.LeftButton
+        ):
+            icon_hit = self._date_button_icon_rect().contains(
+                event.position().toPoint()
+            )
+            if event.type() == QEvent.Type.MouseButtonDblClick and icon_hit:
+                self._date_icon_single_click_timer.stop()
+                self._date_icon_double_click_active = True
+                self._switch_embedded_calendar_style()
+                return True
+            if event.type() == QEvent.Type.MouseButtonPress and icon_hit:
+                return True
+            if (
+                event.type() == QEvent.Type.MouseButtonRelease
+                and (icon_hit or self._date_icon_double_click_active)
+            ):
+                if self._date_icon_double_click_active:
+                    self._date_icon_double_click_active = False
+                else:
+                    app = QApplication.instance()
+                    interval = (
+                        app.styleHints().mouseDoubleClickInterval()
+                        if app is not None
+                        else 400
+                    )
+                    self._date_icon_single_click_timer.start(interval)
+                return True
+        if (
+            watched is self.date_calendar_container
+            and event.type() == QEvent.Type.Resize
+        ):
+            self._position_calendar_perforation()
+        if (
             watched is self.lbl_end_date
             and event.type() == QEvent.Type.MouseButtonDblClick
             and event.button() == Qt.MouseButton.LeftButton
@@ -545,6 +900,7 @@ class TimePickerView(QWidget):
         if hasattr(self, 'btn_close'):
             self.btn_close.move(self.width() - 30, 0)
             self.btn_close.raise_()
+        self._position_calendar_perforation()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:

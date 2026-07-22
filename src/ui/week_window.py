@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QFrame, QToolButton, QLineEdit, QSizePolicy, QStackedWidget, QScrollArea, QApplication)
-from PyQt6.QtCore import Qt, pyqtSignal, QDate, QTime, QTimer, QPointF, QRectF, QSize, QSettings, QEvent
+from PyQt6.QtCore import Qt, pyqtSignal, QDate, QTime, QTimer, QPointF, QRectF, QSize, QEvent
 from PyQt6.QtGui import QPainter, QPainterPath, QColor, QBrush, QLinearGradient, QIcon, QPixmap, QCursor, QPen, QFont, QFontMetrics, QImage
 from PyQt6.QtSvg import QSvgRenderer
 from qframelesswindow import FramelessMainWindow
@@ -2271,13 +2271,11 @@ class WeekWindow(FramelessMainWindow):
         self._drag_edge_timer.timeout.connect(self._check_drag_week_edge)
         # 编辑模式状态位，控制背景渲染！
         self.is_edit_mode = False
-        # 暗色模式
-        self._dark_mode = QSettings("Lankor", "DesktopSchedule").value(
-            "week/dark_mode", False, type=bool
-        )
+        # 周界面暂时只启用浅色模式。
+        self._dark_mode = False
 
         self._setup_ui()
-        self._apply_dark_mode()  # 应用初始暗色模式状态
+        self._apply_dark_mode()
         self._window_drag_controller = WindowDragController(
             self,
             drag_started=self._on_window_drag_started,
@@ -2488,12 +2486,9 @@ class WeekWindow(FramelessMainWindow):
         status_row.addWidget(self.weather_container, alignment=Qt.AlignmentFlag.AlignVCenter)
         status_row.addSpacing(0)
         status_row.addWidget(self.tools_container, alignment=Qt.AlignmentFlag.AlignVCenter)
-        # 暗色模式双击热区（搜索框右侧空白区域）
+        # 保留弹性空白区，仅用于维持头部原有布局。
         self._dark_mode_trigger = QWidget()
         self._dark_mode_trigger.setStyleSheet("background: transparent;")
-        self._dark_mode_trigger.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._dark_mode_trigger.setToolTip("双击切换暗色模式")
-        self._dark_mode_trigger.installEventFilter(self)
         status_row.addWidget(self._dark_mode_trigger, stretch=1)
 
         self.btn_suspend = QPushButton(self.top_container)
@@ -2667,10 +2662,9 @@ class WeekWindow(FramelessMainWindow):
                 lbl_placeholder.setStyleSheet("color: #CCCCCC; font-size: 15px; font-weight: bold; font-family: 'Microsoft YaHei';")
                 lbl_placeholder.setAlignment(align_flag | Qt.AlignmentFlag.AlignCenter)
                 lbl_placeholder.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
-                p_layout.addWidget(lbl_placeholder)
+                p_layout.addWidget(lbl_placeholder, stretch=1)
                 self.placeholder_labels.append(lbl_placeholder)
-            else:
-                p_layout.addStretch()
+            p_layout.addStretch()
             
             scroll_area.setWidget(panel)
             self.bottom_panels.append(panel)
@@ -2707,6 +2701,7 @@ class WeekWindow(FramelessMainWindow):
         self.page_list = ListPickerView()
         self.page_list.btn_suspend.hide()
         self.page_list.btn_close.hide()
+        self.page_list.btn_ok.setStyleSheet(self.page_list.btn_cancel.styleSheet())
         
         self.body_stack.addWidget(self.page_add)
         self.body_stack.addWidget(self.page_time)
@@ -3015,38 +3010,40 @@ class WeekWindow(FramelessMainWindow):
         rect_bg = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
         path_bg.addRoundedRect(rect_bg, 8.0, 8.0)
 
-        
-        if self.is_edit_mode:
-            gradient = QLinearGradient(0, 0, 0, self.height())
-            gradient.setColorAt(0.0, QColor(AppConfig.COLOR_GRADIENT_START))
-            gradient.setColorAt(1.0, QColor(AppConfig.COLOR_GRADIENT_END))
-            painter.fillPath(path_bg, QBrush(gradient))
-            
-        
-        else:
-            painter.fillPath(path_bg, QColor("#FFFFFF"))
+        base_color = self._edit_surface_color() if self.is_edit_mode else QColor("#FFFFFF")
+        painter.fillPath(path_bg, base_color)
 
-            path_top = QPainterPath()
-            path_top.setFillRule(Qt.FillRule.WindingFill)
-            rect_top = QRectF(0, 0, self.width(), self.top_container.height())
-            path_top.addRoundedRect(rect_top, 8.0, 8.0)
-            path_top.addRect(0, self.top_container.height() - 10, self.width(), 10)
-            
-            gradient = QLinearGradient(0, 0, 0, self.top_container.height())
-            gradient.setColorAt(0.0, QColor(AppConfig.COLOR_GRADIENT_START))
-            gradient.setColorAt(1.0, QColor(AppConfig.COLOR_GRADIENT_END))
-            painter.fillPath(path_top, QBrush(gradient))
+        path_top = QPainterPath()
+        path_top.setFillRule(Qt.FillRule.WindingFill)
+        rect_top = QRectF(0, 0, self.width(), self.top_container.height())
+        path_top.addRoundedRect(rect_top, 8.0, 8.0)
+        path_top.addRect(0, self.top_container.height() - 10, self.width(), 10)
+
+        gradient = QLinearGradient(0, 0, 0, self.top_container.height())
+        gradient.setColorAt(0.0, QColor(AppConfig.COLOR_GRADIENT_START))
+        gradient.setColorAt(1.0, QColor(AppConfig.COLOR_GRADIENT_END))
+        painter.fillPath(path_top, QBrush(gradient))
 
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(QPen(QColor(120, 120, 120, 140), 1))
         painter.drawPath(path_bg)
+
+    @staticmethod
+    def _edit_surface_color():
+        return QColor(
+            StyleManager.mix_colors(
+                AppConfig.COLOR_GRADIENT_END,
+                "#ffffff",
+                0.40,
+            )
+        )
 
     def _set_edit_mode_bg(self, is_edit):
         """动态切换下半部分盒子的颜色，并命令窗口重绘自己"""
         self.is_edit_mode = is_edit
         if is_edit:
             self.content_area.set_surface_colors(
-                QColor(0, 0, 0, 0),
+                self._edit_surface_color(),
                 QColor(120, 120, 120, 72),
             )
         else:
@@ -4176,12 +4173,6 @@ class WeekWindow(FramelessMainWindow):
     def eventFilter(self, obj, event):
         from PyQt6.QtCore import QEvent
 
-        # 暗色模式双击热区
-        if hasattr(self, '_dark_mode_trigger') and obj is self._dark_mode_trigger:
-            if event.type() == QEvent.Type.MouseButtonDblClick and event.button() == Qt.MouseButton.LeftButton:
-                self._toggle_dark_mode()
-                return True
-
         # 拦截底层 7 个面板的鼠标事件
         if hasattr(self, 'bottom_panels') and obj in self.bottom_panels:
             if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.RightButton:
@@ -4259,14 +4250,6 @@ class WeekWindow(FramelessMainWindow):
             self.refresh_week_data()
             return
         self.toggle_sort_options_panel()
-
-    def _toggle_dark_mode(self):
-        """切换暗色模式并持久化"""
-        self._dark_mode = not self._dark_mode
-        QSettings("Lankor", "DesktopSchedule").setValue(
-            "week/dark_mode", self._dark_mode
-        )
-        self._apply_dark_mode()
 
     def _apply_dark_mode(self):
         """根据 _dark_mode 状态更新所有 UI 元素"""

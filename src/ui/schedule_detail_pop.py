@@ -46,12 +46,18 @@ class RepeatConfirmDialog(QDialog):
             }
             QPushButton:hover { background-color: rgba(255, 255, 255, 0.2); }
         """
-        btn_style_highlight = """
-            QPushButton {
-                background-color: #0cc0df; color: white; border: none;
+        highlight_color = AppConfig.COLOR_GRADIENT_START
+        highlight_hover = StyleManager.mix_colors(
+            highlight_color,
+            "#ffffff",
+            0.85,
+        )
+        btn_style_highlight = f"""
+            QPushButton {{
+                background-color: {highlight_color}; color: white; border: none;
                 border-radius: 5px; padding: 6px 0px; font-family: 'Microsoft YaHei'; font-size: 12px; font-weight: bold;
-            }
-            QPushButton:hover { background-color: #11d0f0; }
+            }}
+            QPushButton:hover {{ background-color: {highlight_hover}; }}
         """
         
         btn_cancel = QPushButton("取消")

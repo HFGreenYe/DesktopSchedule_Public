@@ -74,10 +74,20 @@ class HighlightCalendarWidget(QCalendarWidget):
         parent=None,
         export_theme=False,
         schedule_markers=True,
+        dark_mode=False,
+        embedded_calendar=False,
+        marker_vertical_offset=0,
+        embedded_foreground_color=None,
     ):
         super().__init__(parent)
         self._export_theme = bool(export_theme)
         self._schedule_markers = bool(schedule_markers)
+        self._dark_mode = bool(dark_mode)
+        self._embedded_calendar = bool(embedded_calendar)
+        self._marker_vertical_offset = int(marker_vertical_offset)
+        self._embedded_foreground_color = QColor(
+            embedded_foreground_color or AppConfig.COLOR_GRADIENT_START
+        )
         self.date_status = {} # 字典，记录具体状态颜色
         self.update_schedule_dates()
 
@@ -147,7 +157,7 @@ class HighlightCalendarWidget(QCalendarWidget):
 
             dot_size = 4
             x = int(rect.center().x() - dot_size / 2)
-            y = int(rect.bottom() - 1)
+            y = int(rect.bottom() - 1 + self._marker_vertical_offset)
 
             painter.drawEllipse(x, y, dot_size, dot_size)
             painter.restore()
@@ -176,22 +186,25 @@ class HighlightCalendarWidget(QCalendarWidget):
         if has_past_overlay:
             painter.fillRect(rect, QColor("#e0e0e0"))
 
-        # ── 图层 2：高亮（选中日期=主题色，开始日期=文字变色） ──
+        # ── 图层 2：高亮 ──
         is_marker = marker_date is not None and date == marker_date
-        # 选中日期：主题色高亮
+        _emb = self._embedded_calendar
         if selected:
-            highlight = QColor(_calendar_accent_color())
-            highlight.setAlpha(120)
-            painter.fillRect(rect.adjusted(5, 5, -5, -5), highlight)
+            if _emb:
+                # 嵌入式：白色高亮填满整个格子，覆盖 QTableView 自带选中框
+                painter.fillRect(rect, QColor(255, 255, 255, 255))
+            else:
+                # 弹出日历：主题色高亮
+                highlight = QColor(_calendar_accent_color())
+                highlight.setAlpha(120)
+                painter.fillRect(rect.adjusted(5, 5, -5, -5), highlight)
 
         # ── 图层 3：文字颜色 ──
         if selected:
-            text_color = QColor("white")
+            text_color = QColor(AppConfig.COLOR_GRADIENT_START) if _emb else QColor("white")
         elif is_marker:
-            # 开始日期：文字用背景渐变色上沿（主题色）
             text_color = QColor(AppConfig.COLOR_GRADIENT_START)
         elif has_past_overlay:
-            # 浅灰底上保持周末红 / 工作日灰黑，整体稍暗以区分
             if not in_current_month:
                 text_color = QColor("#aaaaaa")
             elif dow in (6, 7):
@@ -201,9 +214,12 @@ class HighlightCalendarWidget(QCalendarWidget):
         elif not in_current_month:
             text_color = QColor("#999999")
         elif dow in (6, 7):  # 周六 / 周日
-            text_color = QColor("#ff3333")
+            text_color = QColor("#ff8888") if _emb else QColor("#ff3333")
         else:
-            text_color = QColor("#333333")
+            if _emb:
+                text_color = QColor(self._embedded_foreground_color)
+            else:
+                text_color = QColor("white") if self._dark_mode else QColor("#333333")
 
         if is_today and not selected and not has_past_overlay and not is_marker:
             text_color = QColor("#FFD700")
@@ -276,6 +292,7 @@ class CalendarPop(QWidget):
         export_theme=False,
         schedule_markers=True,
         close_on_select=True,
+        marker_vertical_offset=0,
     ):
         super().__init__(parent)
         self.setWindowFlags(
@@ -286,10 +303,11 @@ class CalendarPop(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedSize(225, 195)
 
-        self._corner_radius = 8
+        self._corner_radius = 5
         self._export_theme = bool(export_theme)
         self._schedule_markers = bool(schedule_markers)
         self._close_on_select = close_on_select
+        self._marker_vertical_offset = int(marker_vertical_offset)
         self.drag_pos = None
         self.last_today = QDate.currentDate()
         self._setup_ui()
@@ -302,6 +320,7 @@ class CalendarPop(QWidget):
             self,
             self._export_theme,
             self._schedule_markers,
+            marker_vertical_offset=self._marker_vertical_offset,
         )
         self.calendar.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.calendar.setFirstDayOfWeek(Qt.DayOfWeek.Monday)
@@ -419,7 +438,7 @@ class CalendarPop(QWidget):
             }}
             QCalendarWidget QToolButton {{
                 color: white; background-color: transparent; border: none;
-                border-radius: 4px; padding: 4px; font-weight: bold;
+                border-radius: 4px; padding: 2px 4px 6px 4px; font-weight: bold;
                 font-family: 'Microsoft YaHei'; font-size: 12px;
             }}
             QCalendarWidget QToolButton:disabled {{

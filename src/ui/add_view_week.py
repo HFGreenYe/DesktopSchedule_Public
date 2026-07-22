@@ -399,10 +399,7 @@ class AddScheduleViewWeek(QWidget):
         btn = QPushButton(text)
         btn.setFixedSize(80, 32)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        if is_primary:
-            btn.setStyleSheet(f"QPushButton {{ background-color: white; border: none; border-radius: 16px; color: {AppConfig.COLOR_GRADIENT_START}; font-size: 13px; font-weight: bold; font-family: 'Microsoft YaHei'; }} QPushButton:hover {{ background-color: #f2f2f2; }}")
-        else:
-            btn.setStyleSheet("QPushButton { background-color: transparent; border: 1px solid rgba(255, 255, 255, 0.7); border-radius: 16px; color: white;font-weight: bold; font-size: 13px; font-family: 'Microsoft YaHei'; } QPushButton:hover { background-color: rgba(255, 255, 255, 0.1); border: 1px solid white; }")
+        btn.setStyleSheet("QPushButton { background-color: transparent; border: 1px solid rgba(255, 255, 255, 0.7); border-radius: 16px; color: white;font-weight: bold; font-size: 13px; font-family: 'Microsoft YaHei'; } QPushButton:hover { background-color: rgba(255, 255, 255, 0.1); border: 1px solid white; }")
         return btn
 
     def _connect_signals(self):

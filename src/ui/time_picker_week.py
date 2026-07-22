@@ -143,7 +143,7 @@ class TimePickerViewWeek(QWidget):
             btn.setFixedSize(70, 32)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_cancel.setStyleSheet("QPushButton { background: transparent; border: 1px solid rgba(255,255,255,0.6); border-radius: 16px; color: white; }")
-        self.btn_ok.setStyleSheet(f"QPushButton {{ background: white; border: none; border-radius: 16px; color: {AppConfig.COLOR_GRADIENT_START}; font-weight: bold; }}")
+        self.btn_ok.setStyleSheet(self.btn_cancel.styleSheet())
         
         btn_row.addStretch()
         btn_row.addWidget(self.btn_cancel)
