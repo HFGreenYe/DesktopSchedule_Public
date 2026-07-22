@@ -225,7 +225,7 @@ class HighlightCalendarWidget(QCalendarWidget):
             text_color = QColor("#FFD700")
 
         font = painter.font()
-        font.setBold(is_today)
+        font.setBold(is_today or is_marker)
         painter.setFont(font)
         painter.setPen(text_color)
         painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, str(date.day()))

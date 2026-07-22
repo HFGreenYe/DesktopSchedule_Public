@@ -15,14 +15,14 @@ class AppConfig:
     DWMWCP_DONOTROUND = 1         # 禁用系统圆角，由应用 QSS 自行切圆角
     
     # --- 3. 视觉主题：渐变视界 ---
-    #COLOR_GRADIENT_START = "#181818" #影黑
-    #COLOR_GRADIENT_END = "#1F1F1F"
+    COLOR_GRADIENT_START = "#181818" #影黑
+    COLOR_GRADIENT_END = "#1F1F1F"
 
     #COLOR_GRADIENT_START = "#0cc0df" #湖青
     #COLOR_GRADIENT_END = "#78DCED" #"#99E4F1"
 
-    COLOR_GRADIENT_START = "#1E90FF" #天蓝
-    COLOR_GRADIENT_END = "#1D9FFF"
+    #COLOR_GRADIENT_START = "#1E90FF" #天蓝
+    #COLOR_GRADIENT_END = "#1D9FFF"
 
     #COLOR_GRADIENT_START = "#1485EE"
     #COLOR_GRADIENT_END = "#1D9FFF"

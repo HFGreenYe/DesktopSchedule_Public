@@ -3034,7 +3034,7 @@ class WeekWindow(FramelessMainWindow):
             StyleManager.mix_colors(
                 AppConfig.COLOR_GRADIENT_END,
                 "#ffffff",
-                0.40,
+                0.70,
             )
         )
 

@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QApplication, QPushButton, QCalendarWidget, QGridLayout,
                              QListWidget, QListWidgetItem, QScroller,
                              QFrame, QScrollArea, QSizePolicy, QTableView, QToolButton,
-                             QStyle, QStyleOptionButton)
+                             QStyle, QStyleOptionButton, QStyledItemDelegate)
 from PyQt6.QtCore import Qt, QDate, QTime, pyqtSignal, QPropertyAnimation, QEasingCurve, QRect, QRectF, QPoint, pyqtProperty, QSize, QEvent, QTimer
 from PyQt6.QtGui import QColor, QPainter, QPainterPath, QBrush, QPen, QIcon, QPalette, QPixmap, QTextCharFormat
 from PyQt6.QtSvg import QSvgRenderer
@@ -20,6 +20,27 @@ def _embedded_calendar_style_values(style_name):
     if style_name == "white_65":
         return 0.65, "#ffffff"
     return 0.80, AppConfig.COLOR_GRADIENT_START
+
+
+class WeekdayHeaderDelegate(QStyledItemDelegate):
+    def __init__(self, base_delegate, background, vertical_offset, parent=None):
+        super().__init__(parent)
+        self._base_delegate = base_delegate
+        self._background = QColor(background)
+        self._vertical_offset = int(vertical_offset)
+
+    def paint(self, painter, option, index):
+        if index.row() == 0:
+            painter.save()
+            painter.fillRect(
+                option.rect.translated(0, self._vertical_offset),
+                self._background,
+            )
+            painter.restore()
+        self._base_delegate.paint(painter, option, index)
+
+    def sizeHint(self, option, index):
+        return self._base_delegate.sizeHint(option, index)
 
 
 class ThemePerforationSeparator(QWidget):
@@ -203,6 +224,11 @@ class TimePickerView(QWidget):
         weekend_format.setForeground(QColor("#ff0000"))
         self.calendar.setWeekdayTextFormat(Qt.DayOfWeek.Saturday, weekend_format)
         self.calendar.setWeekdayTextFormat(Qt.DayOfWeek.Sunday, weekend_format)
+        weekday_header_color = QColor(StyleManager.mix_colors(
+            AppConfig.COLOR_GRADIENT_START,
+            "#ffffff",
+            0.40,
+        ))
         self.calendar.setStyleSheet(f"""
             QCalendarWidget {{
                 background-color: transparent;
@@ -245,7 +271,8 @@ class TimePickerView(QWidget):
                 color: white; background: transparent; border: none;
             }}
             QCalendarWidget QHeaderView::section {{
-                background-color: transparent; color: {self._calendar_foreground_color};
+                background-color: transparent;
+                color: {self._calendar_foreground_color};
                 border: none; padding: 4px; font-weight: bold;
             }}
             QCalendarWidget QMenu {{
@@ -253,6 +280,19 @@ class TimePickerView(QWidget):
                 border: 1px solid rgba(255,255,255,0.15);
             }}
         """)
+        if self.__class__ is TimePickerView:
+            calendar_view = self.calendar.findChild(
+                QTableView,
+                "qt_calendar_calendarview",
+            )
+            if calendar_view is not None:
+                self._weekday_header_delegate = WeekdayHeaderDelegate(
+                    calendar_view.itemDelegate(),
+                    weekday_header_color,
+                    -3,
+                    calendar_view,
+                )
+                calendar_view.setItemDelegate(self._weekday_header_delegate)
         self.calendar.setAutoFillBackground(False)
 
         self.calendar_background = QFrame()
