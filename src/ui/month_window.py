@@ -1,7 +1,7 @@
 # src/ui/month_window.py
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                              QPushButton, QFrame, QToolButton, QLineEdit, 
-                             QCalendarWidget, QApplication, QTableView, 
+                             QCalendarWidget, QApplication, QTableView, QHeaderView,
                              QStyledItemDelegate, QStyle, QStyleOptionViewItem,
                              QGridLayout, QTextEdit, QComboBox, QListView,
                              QStyleOptionComboBox, QStylePainter, QMessageBox,
@@ -60,6 +60,14 @@ class CenteredComboBox(QComboBox):
         painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, current_text)
 
 
+def _align_compact_close_button(view):
+    button = getattr(view, "btn_close", None)
+    if button is None:
+        return
+    button.move(max(0, view.width() - button.width()), 0)
+    button.raise_()
+
+
 class MonthListPickerView(ListPickerView):
     """月界面左栏专用的紧凑清单选择器。"""
 
@@ -81,7 +89,7 @@ class MonthListPickerView(ListPickerView):
         except TypeError:
             pass
         self.btn_close.clicked.connect(self.back_requested.emit)
-        self.btn_close.raise_()
+        _align_compact_close_button(self)
 
         self.content_layout.setContentsMargins(0, 4, 0, 4)
         self.content_layout.setSpacing(6)
@@ -146,6 +154,10 @@ class MonthListPickerView(ListPickerView):
             "color: white; font-size: 12px; font-weight: bold; "
             "font-family: 'Microsoft YaHei';"
         )
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        _align_compact_close_button(self)
 
     def load_data(self, current_selected_id=None, list_type=None):
         super().load_data(current_selected_id, list_type)
@@ -240,30 +252,22 @@ class MonthTimePickerView(TimePickerView):
         self.btn_close.show()
         self.btn_close.setIconSize(QSize(12, 12))
         self.btn_close.setFixedSize(24, 24)
-        self.btn_close.raise_()
+        _align_compact_close_button(self)
 
-        self.content_layout.setContentsMargins(0, 4, 0, 4)
+        self.content_layout.setContentsMargins(0, 4, 0, 10)
         self.content_layout.setSpacing(6)
 
         self.btn_date.setFixedSize(136, 28)
-        self.btn_date.setIcon(self._get_colored_icon("assets/icons/calendar.svg", "#FFFFFF"))
+        self.btn_date.setIcon(self._get_colored_icon(
+            "assets/icons/calendar.svg",
+            AppConfig.COLOR_GRADIENT_START,
+        ))
         self.btn_date.setIconSize(QSize(14, 14))
-        self.btn_date.setStyleSheet("""
-            QPushButton {
-                background-color: rgba(255, 255, 255, 0.18);
-                border: 1px solid rgba(255, 255, 255, 0.2);
-                border-radius: 6px;
-                color: white;
-                font-size: 11px;
-                font-weight: bold;
-                font-family: 'Microsoft YaHei';
-                text-align: left;
-                padding-left: 8px;
-            }
-            QPushButton:hover { background-color: rgba(255, 255, 255, 0.28); }
-        """)
+        self._apply_date_button_style(
+            expanded=not self.calendar_background.isHidden()
+        )
 
-        self.calendar.setFixedSize(136, 122)
+        self.calendar.setFixedSize(134, 121)
         self.calendar.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.calendar.setLocale(
             QLocale(QLocale.Language.Chinese, QLocale.Country.China)
@@ -272,19 +276,61 @@ class MonthTimePickerView(TimePickerView):
         self.calendar.setHorizontalHeaderFormat(
             QCalendarWidget.HorizontalHeaderFormat.SingleLetterDayNames
         )
-        self.calendar.setStyleSheet(StyleManager.get_calendar_style() + """
-            QCalendarWidget QToolButton {
+        self.calendar.setStyleSheet(StyleManager.get_calendar_style() + f"""
+            QCalendarWidget,
+            QCalendarWidget QWidget,
+            QCalendarWidget QAbstractItemView:enabled,
+            QCalendarWidget QWidget#qt_calendar_navigationbar {{
+                background-color: transparent;
+                alternate-background-color: transparent;
+            }}
+            QCalendarWidget QToolButton {{
+                color: {AppConfig.COLOR_GRADIENT_START};
+                background-color: transparent;
                 font-size: 8px;
                 icon-size: 10px;
                 min-width: 14px;
                 min-height: 16px;
-            }
-            QCalendarWidget QAbstractItemView:enabled { font-size: 8px; }
-            QCalendarWidget QTableHeaderView::section {
+            }}
+            QCalendarWidget QAbstractItemView:enabled {{ font-size: 8px; }}
+            QCalendarWidget QTableHeaderView::section {{
+                background-color: transparent;
                 font-size: 8px;
                 padding: 0px;
+            }}
+        """)
+        self.calendar_background.setFixedSize(136, 122)
+        self.calendar_background.setStyleSheet("""
+            QFrame#CalendarBackground {
+                background-color: rgba(255, 255, 255, 0.80);
+                border-top: none;
+                border-left: 1px solid rgba(255, 255, 255, 0.5);
+                border-right: 1px solid rgba(255, 255, 255, 0.5);
+                border-bottom: 1px solid rgba(255, 255, 255, 0.5);
+                border-bottom-left-radius: 6px;
+                border-bottom-right-radius: 6px;
             }
         """)
+        calendar_layout = self.calendar_background.layout()
+        calendar_layout.setContentsMargins(1, 0, 1, 1)
+        calendar_layout.setAlignment(
+            self.calendar,
+            Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter,
+        )
+        calendar_view = self.calendar.findChild(
+            QTableView,
+            "qt_calendar_calendarview",
+        )
+        if calendar_view is not None:
+            horizontal_header = calendar_view.horizontalHeader()
+            horizontal_header.setMinimumSectionSize(1)
+            horizontal_header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+            calendar_view.setHorizontalScrollBarPolicy(
+                Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+            )
+            calendar_view.setVerticalScrollBarPolicy(
+                Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+            )
         for object_name in ("qt_calendar_prevmonth", "qt_calendar_nextmonth"):
             button = self.calendar.findChild(QToolButton, object_name)
             if button is not None:
@@ -297,10 +343,13 @@ class MonthTimePickerView(TimePickerView):
                     Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
                 )
                 label.setStyleSheet("color: white; font-size: 10px; font-weight: bold;")
-            elif label.text() in {"开始时间", "完成时间"}:
-                label.setStyleSheet(
-                    "color: rgba(255,255,255,0.7); font-size: 9px; margin-bottom: 2px;"
-                )
+        time_label_style = (
+            "color: rgba(255,255,255,0.7); font-size: 9px; "
+            "font-weight: bold; margin-bottom: 2px;"
+        )
+        self.lbl_start.setStyleSheet(time_label_style)
+        self.lbl_end.setStyleSheet(time_label_style)
+        self.lbl_end_date.setStyleSheet(time_label_style)
 
         self.time_picker_container.setFixedWidth(136)
         self.time_picker_container.setStyleSheet("""
@@ -426,6 +475,39 @@ class MonthTimePickerView(TimePickerView):
             self.content_layout.insertWidget(switch_item_index, row_widget)
         self.chk_enable_start = compact_switch
 
+    def _apply_date_button_style(self, expanded):
+        bottom_radius = 0 if expanded else 6
+        bottom_border = (
+            "none"
+            if expanded
+            else "1px solid rgba(255, 255, 255, 0.5)"
+        )
+        self.btn_date.setStyleSheet(f"""
+            QPushButton {{
+                background-color: rgba(255, 255, 255, 0.80);
+                border-top: 1px solid rgba(255, 255, 255, 0.5);
+                border-left: 1px solid rgba(255, 255, 255, 0.5);
+                border-right: 1px solid rgba(255, 255, 255, 0.5);
+                border-bottom: {bottom_border};
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
+                border-bottom-left-radius: {bottom_radius}px;
+                border-bottom-right-radius: {bottom_radius}px;
+                color: {AppConfig.COLOR_GRADIENT_START};
+                font-size: 11px;
+                font-weight: bold;
+                font-family: 'Microsoft YaHei';
+                text-align: center;
+                padding-left: 0px;
+            }}
+            QPushButton:hover {{
+                background-color: rgba(255, 255, 255, 0.88);
+            }}
+        """)
+
+    def _update_date_label(self):
+        self.btn_date.setText(self.current_date.toString("yyyy年MM月dd日"))
+
     def _compact_scroller(self, scroller):
         scroller.item_height = 20
         scroller.setFixedSize(26, 60)
@@ -434,17 +516,24 @@ class MonthTimePickerView(TimePickerView):
             QListWidget::item {
                 height: 20px;
                 color: rgba(255, 255, 255, 0.4);
-                font-size: 9px;
+                font-size: 8px;
                 font-family: 'Microsoft YaHei';
                 border: none;
             }
             QListWidget::item:selected {
                 background: transparent;
                 color: #FFFFFF;
-                font-size: 11px;
+                font-size: 9px;
                 font-weight: bold;
             }
         """)
+
+    def _update_end_date_label(self):
+        super()._update_end_date_label()
+        self.lbl_end_date.setStyleSheet(
+            "color: rgba(255,255,255,0.7); font-size: 9px; "
+            "font-weight: bold; margin-bottom: 2px;"
+        )
 
     def set_title(self, text="设置时间"):
         compact_text = "修改时间" if text.startswith("修改") else "设置时间"
@@ -453,6 +542,10 @@ class MonthTimePickerView(TimePickerView):
             "color: white; font-size: 12px; font-weight: bold; "
             "font-family: 'Microsoft YaHei';"
         )
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        _align_compact_close_button(self)
 
 
 class MonthAlarmPickerView(AlarmPickerView):
@@ -471,7 +564,7 @@ class MonthAlarmPickerView(AlarmPickerView):
         self.btn_close.show()
         self.btn_close.setIconSize(QSize(12, 12))
         self.btn_close.setFixedSize(24, 24)
-        self.btn_close.raise_()
+        _align_compact_close_button(self)
 
         self.content.setContentsMargins(0, 4, 0, 4)
         self.content.setSpacing(6)
@@ -690,6 +783,10 @@ class MonthAlarmPickerView(AlarmPickerView):
             "color: white; font-size: 12px; font-weight: bold; "
             "font-family: 'Microsoft YaHei';"
         )
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        _align_compact_close_button(self)
 
 
 class CalendarCellDelegate(QStyledItemDelegate):
@@ -1232,7 +1329,8 @@ class MonthWindow(FramelessMainWindow):
     def __init__(self):
         super().__init__()
         # 1. 窗口总尺寸缩小到 80%
-        self.setFixedSize(720, 480) 
+        self.setFixedSize(720, 480)
+        self.setResizeEnabled(False)
         window_flags = Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window
         if get_primary_pin_preference():
             window_flags |= Qt.WindowType.WindowStaysOnTopHint
@@ -1356,7 +1454,8 @@ class MonthWindow(FramelessMainWindow):
 
         # --- 左侧面板 ---
         left_panel = QWidget()
-        left_panel.setFixedWidth(144) 
+        left_panel.setFixedWidth(144)
+        self.left_panel = left_panel
         left_vbox = QVBoxLayout(left_panel)
         left_vbox.setContentsMargins(0, 0, 8, 0)
         left_vbox.setSpacing(0)
@@ -2161,6 +2260,27 @@ class MonthWindow(FramelessMainWindow):
         x = max(available.left(), min(x, max_x))
         y = max(available.top(), min(y, max_y))
         return QPoint(x, y)
+
+    def wheelEvent(self, event):
+        page_time = getattr(self, "page_time", None)
+        left_panel = getattr(self, "left_panel", None)
+        if page_time is not None and left_panel is not None and page_time.isVisible():
+            position = event.position().toPoint()
+            panel_right = left_panel.mapTo(self, QPoint(left_panel.width(), 0)).x()
+            if position.x() <= panel_right:
+                scroll_bar = page_time.scroll_area.verticalScrollBar()
+                pixel_delta = event.pixelDelta().y()
+                if pixel_delta:
+                    next_value = scroll_bar.value() - pixel_delta
+                else:
+                    steps = event.angleDelta().y() / 120
+                    next_value = scroll_bar.value() - round(
+                        steps * scroll_bar.singleStep()
+                    )
+                scroll_bar.setValue(next_value)
+                event.accept()
+                return
+        super().wheelEvent(event)
 
     def eventFilter(self, obj, event):
         if obj == getattr(self, "calendar_viewport", None):

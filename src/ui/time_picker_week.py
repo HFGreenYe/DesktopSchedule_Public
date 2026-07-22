@@ -1,12 +1,13 @@
 # src/ui/time_picker_week.py
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-                             QCalendarWidget, QGridLayout, QFrame, QPushButton, QToolButton)
-from PyQt6.QtCore import Qt, QDate, QTime, pyqtSignal, QSize, QPoint, QEvent
-from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor
+                             QCalendarWidget, QGridLayout, QFrame, QPushButton,
+                             QToolButton)
+from PyQt6.QtCore import Qt, QDate, QTime, pyqtSignal, QSize, QPoint, QEvent, QTimer
+from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QTextCharFormat
 from PyQt6.QtSvg import QSvgRenderer
 from datetime import datetime, timedelta
 from ..config import AppConfig
-from ..utils.styles import StyleManager
+from .calendar_pop import HighlightCalendarWidget
 from .components import IOSSwitch, NumberScroller
 
 class TimePickerViewWeek(QWidget):
@@ -20,6 +21,7 @@ class TimePickerViewWeek(QWidget):
         self._end_day_offset = 0
         self._prev_end_hour = None
         self._init_ui()
+        self._update_time_group_layout(False)
         self._connect_signals()
 
         # 初始赋值
@@ -29,16 +31,22 @@ class TimePickerViewWeek(QWidget):
         self._prev_end_hour = int(self.scroll_end_hour.get_value())
         self._update_end_date_label()
 
-    def _get_colored_icon(self, icon_path, color_hex):
-        renderer = QSvgRenderer(icon_path)
-        pixmap = QPixmap(64, 64)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pixmap)
-        renderer.render(painter)
-        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-        painter.fillRect(pixmap.rect(), QColor(color_hex))
-        painter.end()
-        return QIcon(pixmap)
+    def _get_colored_icon(self, icon_path, color_hex, disabled_color="#b8b8b8"):
+        def render_pixmap(color):
+            renderer = QSvgRenderer(icon_path)
+            pixmap = QPixmap(64, 64)
+            pixmap.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(pixmap)
+            renderer.render(painter)
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+            painter.fillRect(pixmap.rect(), QColor(color))
+            painter.end()
+            return pixmap
+
+        icon = QIcon()
+        icon.addPixmap(render_pixmap(color_hex), QIcon.Mode.Normal, QIcon.State.Off)
+        icon.addPixmap(render_pixmap(disabled_color), QIcon.Mode.Disabled, QIcon.State.Off)
+        return icon
 
     def _init_ui(self):
         main_layout = QHBoxLayout(self)
@@ -56,19 +64,97 @@ class TimePickerViewWeek(QWidget):
         header_row.addStretch()
         left_vbox.addLayout(header_row)
 
-        self.calendar = QCalendarWidget()
+        self.calendar = HighlightCalendarWidget(
+            self,
+            export_theme=False,
+            schedule_markers=False,
+            dark_mode=True,
+        )
         self.calendar.setGridVisible(False)
         self.calendar.setNavigationBarVisible(True)
-        self.calendar.setStyleSheet(StyleManager.get_calendar_style())
+        self.calendar.setVerticalHeaderFormat(
+            QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader
+        )
+        self.calendar.setStyleSheet(f"""
+            QCalendarWidget,
+            QCalendarWidget QWidget {{
+                background-color: transparent;
+                alternate-background-color: transparent;
+                border: none;
+                color: white;
+            }}
+            QCalendarWidget QWidget#qt_calendar_navigationbar {{
+                background-color: transparent;
+                border: none;
+            }}
+            QCalendarWidget QAbstractItemView:enabled {{
+                background-color: transparent;
+                alternate-background-color: transparent;
+                selection-background-color: {AppConfig.COLOR_GRADIENT_START};
+                selection-color: white;
+                border: none;
+                outline: 0;
+            }}
+            QCalendarWidget QHeaderView::section {{
+                background-color: transparent;
+                color: white;
+                border: none;
+                padding: 4px;
+                font-weight: bold;
+            }}
+            QCalendarWidget QToolButton {{
+                color: white;
+                background-color: transparent;
+                border: none;
+                border-radius: 4px;
+                padding: 4px;
+                font-weight: bold;
+                icon-size: 20px;
+            }}
+            QCalendarWidget QToolButton:disabled {{
+                color: #b8b8b8;
+            }}
+            QCalendarWidget QToolButton:hover {{
+                background-color: rgba(255, 255, 255, 0.10);
+            }}
+            QCalendarWidget QToolButton::menu-indicator {{
+                image: none;
+            }}
+            QCalendarWidget QSpinBox,
+            QCalendarWidget QSpinBox QLineEdit {{
+                color: white;
+                background-color: transparent;
+                border: none;
+                font-weight: bold;
+            }}
+            QCalendarWidget QMenu {{
+                background-color: rgba(35, 35, 35, 0.96);
+                color: white;
+                border: 1px solid rgba(255, 255, 255, 0.20);
+            }}
+        """)
+        self.calendar.setAutoFillBackground(False)
         # 限制最小日期为今天，解决无法退回上个月和之前日子的限制 
         self.calendar.setMinimumDate(QDate.currentDate())
+
+        weekday_format = QTextCharFormat()
+        weekday_format.setForeground(QColor("#ffffff"))
+        for weekday in (
+            Qt.DayOfWeek.Monday,
+            Qt.DayOfWeek.Tuesday,
+            Qt.DayOfWeek.Wednesday,
+            Qt.DayOfWeek.Thursday,
+            Qt.DayOfWeek.Friday,
+        ):
+            self.calendar.setWeekdayTextFormat(weekday, weekday_format)
+
+        weekend_format = QTextCharFormat()
+        weekend_format.setForeground(QColor("#ff0000"))
+        self.calendar.setWeekdayTextFormat(Qt.DayOfWeek.Saturday, weekend_format)
+        self.calendar.setWeekdayTextFormat(Qt.DayOfWeek.Sunday, weekend_format)
         
         # 替换日历切换图标
-        arrow_color = StyleManager.mix_colors(
-            AppConfig.COLOR_GRADIENT_START,
-            "#ffffff",
-            primary_ratio=0.98,
-        )
+        arrow_color = "#ffffff"
         prev_btn = self.calendar.findChild(QToolButton, "qt_calendar_prevmonth")
         if prev_btn:
             prev_btn.setIcon(self._get_colored_icon("assets/icons/cal_left.svg", arrow_color))
@@ -107,11 +193,23 @@ class TimePickerViewWeek(QWidget):
         # 时间滚轮容器
         self.time_picker_container = QFrame()
         self.time_picker_container.setObjectName("TimeContainer")
-        self.time_picker_container.setStyleSheet("QFrame#TimeContainer { background-color: rgba(255, 255, 255, 0.1); border-radius: 12px; }")
+        self.time_picker_container.setStyleSheet(
+            "QFrame#TimeContainer { background-color: transparent; border: none; }"
+        )
         
         h_time_layout = QHBoxLayout(self.time_picker_container)
-        self.start_group, self.scroll_start_hour, self.scroll_start_min = self._create_scroller_pair("开始时间")
-        self.end_group, self.scroll_end_hour, self.scroll_end_min = self._create_scroller_pair("完成时间", with_date_label=True)
+        (
+            self.start_group,
+            self.lbl_start,
+            self.scroll_start_hour,
+            self.scroll_start_min,
+        ) = self._create_scroller_pair("开始时间")
+        (
+            self.end_group,
+            self.lbl_end,
+            self.scroll_end_hour,
+            self.scroll_end_min,
+        ) = self._create_scroller_pair("完成时间", with_date_label=True)
         
         h_time_layout.addWidget(self.start_group)
         h_time_layout.addWidget(self.end_group)
@@ -163,6 +261,13 @@ class TimePickerViewWeek(QWidget):
         label_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl = QLabel(label)
         lbl.setStyleSheet("color: rgba(255,255,255,0.7); font-size: 11px;")
+        label_row.addStretch()
+
+        if with_date_label:
+            self.end_date_balance = QWidget()
+            self.end_date_balance.setFixedWidth(0)
+            label_row.addWidget(self.end_date_balance)
+
         label_row.addWidget(lbl)
 
         if with_date_label:
@@ -178,21 +283,98 @@ class TimePickerViewWeek(QWidget):
         lay.addLayout(label_row)
 
         h = QHBoxLayout()
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(0)
         sh = NumberScroller([f"{i:02d}" for i in range(24)])
         sm = NumberScroller([f"{i:02d}" for i in range(60)])
+        single_line_style = """
+            QListWidget { background: transparent; outline: none; }
+            QListWidget::item {
+                height: 30px;
+                color: rgba(255, 255, 255, 0.4);
+                font-size: 14px;
+                font-family: 'Microsoft YaHei';
+                border: none;
+            }
+            QListWidget::item:selected {
+                background: transparent;
+                color: #FFFFFF;
+                font-size: 16px;
+                font-weight: bold;
+            }
+        """
+        for scroller in (sh, sm):
+            scroller._week_multi_line_style = scroller.styleSheet()
+            scroller._week_single_line_style = single_line_style
 
-        # 修正冒号居中逻辑
         lbl_colon = QLabel(":")
-        lbl_colon.setFixedWidth(10)
+        lbl_colon.setFixedSize(10, 30)
         lbl_colon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_colon.setStyleSheet("color: white; font-size: 20px; font-weight: bold; padding-bottom: 5px;")
+        lbl_colon.setStyleSheet(
+            "color: white; font-size: 16px; font-weight: bold; padding: 0px;"
+        )
+        grp._time_colon = lbl_colon
 
+        h.addStretch()
         h.addWidget(sh)
         h.addWidget(lbl_colon)
         h.addWidget(sm)
+        h.addStretch()
 
         lay.addLayout(h)
-        return grp, sh, sm
+        return grp, lbl, sh, sm
+
+    def _update_time_group_labels(self, start_enabled):
+        self.lbl_start.setText("开始" if start_enabled else "开始时间")
+        self.lbl_end.setText("完成" if start_enabled else "完成时间")
+
+    def _sync_end_date_balance(self):
+        if not hasattr(self, "end_date_balance"):
+            return
+        balance_width = (
+            self.lbl_end_date.sizeHint().width()
+            if not self.lbl_end_date.isHidden()
+            else 0
+        )
+        self.end_date_balance.setFixedWidth(balance_width)
+
+    def _update_time_group_layout(self, start_enabled):
+        self._update_time_group_labels(start_enabled)
+        self.lbl_end_date.setVisible(start_enabled)
+        if not start_enabled and hasattr(self, "end_date_balance"):
+            self.end_date_balance.setFixedWidth(0)
+        elif start_enabled:
+            self._sync_end_date_balance()
+
+        for group, hour_scroller, minute_scroller in (
+            (self.start_group, self.scroll_start_hour, self.scroll_start_min),
+            (self.end_group, self.scroll_end_hour, self.scroll_end_min),
+        ):
+            colon = group._time_colon
+            if start_enabled:
+                colon.setFixedSize(10, 30)
+                colon.setStyleSheet(
+                    "color: white; font-size: 16px; font-weight: bold; padding: 0px;"
+                )
+            else:
+                colon.setFixedSize(10, 90)
+                colon.setStyleSheet(
+                    "color: white; font-size: 20px; font-weight: bold; "
+                    "padding-bottom: 5px;"
+                )
+
+            for scroller in (hour_scroller, minute_scroller):
+                current_value = scroller.get_value()
+                if start_enabled:
+                    scroller.setFixedSize(42, 30)
+                    scroller.setStyleSheet(scroller._week_single_line_style)
+                else:
+                    scroller.setFixedSize(50, 90)
+                    scroller.setStyleSheet(scroller._week_multi_line_style)
+                QTimer.singleShot(
+                    0,
+                    lambda target=scroller, value=current_value: target.set_value(value),
+                )
 
     def set_title(self, text):
         self.lbl_title.setText(text)
@@ -226,6 +408,7 @@ class TimePickerViewWeek(QWidget):
             self.chk_enable_start.setChecked(False)
             self.start_group.hide()
             self.duration_grid.hide()
+        self._update_time_group_layout(bool(start_dt))
 
     def _connect_signals(self):
         self.calendar.clicked.connect(self._on_date_selected)
@@ -244,6 +427,7 @@ class TimePickerViewWeek(QWidget):
     def _on_switch_toggled(self, checked):
         self.start_group.setVisible(checked)
         self.duration_grid.setVisible(checked)
+        self._update_time_group_layout(checked)
 
     def _on_quick_set(self, btn):
         mins = btn.property("minutes")
@@ -301,6 +485,7 @@ class TimePickerViewWeek(QWidget):
             self.lbl_end_date.setStyleSheet(
                 "color: rgba(255,255,255,0.85); font-size: 11px; font-weight: bold;"
             )
+        self._sync_end_date_balance()
 
     def _show_end_date_calendar(self):
         from .calendar_pop import CalendarPop

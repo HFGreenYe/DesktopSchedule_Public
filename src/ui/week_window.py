@@ -2699,6 +2699,9 @@ class WeekWindow(FramelessMainWindow):
         self.page_time = TimePickerViewWeek()
         self.page_alarm = AlarmPickerViewWeek()
         self.page_list = ListPickerView()
+        self.page_list.set_card_snap_scrolling(True)
+        self.page_list.header_container.setFixedHeight(38)
+        self.page_list.header_container.layout().setContentsMargins(30, 0, 30, 0)
         self.page_list.btn_suspend.hide()
         self.page_list.btn_close.hide()
         self.page_list.btn_ok.setStyleSheet(self.page_list.btn_cancel.styleSheet())
@@ -3259,8 +3262,17 @@ class WeekWindow(FramelessMainWindow):
     def go_to_list_picker(self, current_category_id):
         self.list_picker_mode = 'add'
         self.page_list.set_title("选择清单")
+        self.page_list.lbl_title.setStyleSheet(
+            "color: white; font-size: 18px; font-weight: bold; "
+            "font-family: 'Microsoft YaHei';"
+        )
+        self.page_list.scroll_area.verticalScrollBar().setValue(0)
         self.page_list.load_data(current_category_id)
         self.body_stack.setCurrentWidget(self.page_list)
+        QTimer.singleShot(
+            0,
+            lambda: self.page_list.scroll_area.verticalScrollBar().setValue(0),
+        )
 
     def go_to_list_picker_for_edit(self, schedule_data):
         """周界面的清单修改路由"""
@@ -3270,8 +3282,13 @@ class WeekWindow(FramelessMainWindow):
         display_title = schedule_data.title if len(schedule_data.title) <= 8 else schedule_data.title[:7] + "..."
         self.page_list.set_title(f"修改【{display_title}】清单")
         
+        self.page_list.scroll_area.verticalScrollBar().setValue(0)
         self.page_list.load_data(schedule_data.category_id)
         self.body_stack.setCurrentWidget(self.page_list)
+        QTimer.singleShot(
+            0,
+            lambda: self.page_list.scroll_area.verticalScrollBar().setValue(0),
+        )
         self._set_edit_mode_bg(True)
 
     def back_from_list_picker(self):
